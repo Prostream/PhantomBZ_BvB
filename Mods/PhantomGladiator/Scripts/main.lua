@@ -453,6 +453,42 @@ local function DescribeCollision(pawn)
     return string.format("胶囊=%s 模型=%s", comp(cap), comp(mesh))
 end
 
+-- 把玩家"能被怪物攻击扫到"的通道反应复制到怪物身上（只补不减）。
+-- 只处理游戏自定义通道 14-31；引擎内置通道（Pawn、相机、物理等）不动。
+-- 碰撞对照实测：玩家模型对 16/17/18/24/31 有反应，怪物模型全部忽略。
+local function CopyHurtChannels(pawn)
+    if not Config.CopyPlayerHurtChannels then return "未启用" end
+    local player = GetPlayerPawn()
+    if not player then return "找不到玩家" end
+    local function valid(c)
+        if c == nil then return false end
+        local ok, v = pcall(function() return c:IsValid() end)
+        return ok and v
+    end
+    local changed = {}
+    local function sync(src, dst, label)
+        if not valid(src) or not valid(dst) then return end
+        for ch = 14, 31 do
+            local okS, rs = pcall(function() return src:GetCollisionResponseToChannel(ch) end)
+            local okD, rd = pcall(function() return dst:GetCollisionResponseToChannel(ch) end)
+            if okS and okD and type(rs) == "number" and type(rd) == "number" and rs > rd then
+                pcall(function() dst:SetCollisionResponseToChannel(ch, rs) end)
+                local okR, rr = pcall(function() return dst:GetCollisionResponseToChannel(ch) end)
+                table.insert(changed, string.format("%s%d:%d→%s", label, ch, rd,
+                    okR and tostring(rr) or "?"))
+            end
+        end
+    end
+    local pm, pcap, mm, mcap = nil, nil, nil, nil
+    pcall(function() pm = player.Mesh end)
+    pcall(function() pcap = player.CapsuleComponent end)
+    pcall(function() mm = pawn.Mesh end)
+    pcall(function() mcap = pawn.CapsuleComponent end)
+    sync(pm, mm, "模型")
+    sync(pcap, mcap, "胶囊")
+    return #changed > 0 and table.concat(changed, " ") or "无需改动"
+end
+
 -- 用游戏官方的刷怪函数生成（刷怪点用的那套），失败返回 nil 和原因
 local function SpawnViaAILib(cls, t, world)
     local lib = GetAILib()
@@ -862,6 +898,7 @@ local function GlobalInfight()
         for i, pawn in ipairs(npcs) do
             teamIdx[i] = i % Config.TeamCount
             ApplyTeamTracked(pawn, Config.TeamIdBase + teamIdx[i])
+            CopyHurtChannels(pawn)
         end
         -- 不同队的每一对都用原生阵营接口设为敌对
         local pairCount, pairsOk = 0, 0
@@ -904,6 +941,8 @@ local function DuelNearest()
             ListSuspectGEs(npcs[1]), ListSuspectGEs(npcs[2])))
         log(string.format("  决斗双方碰撞: [%s] vs [%s]",
             DescribeCollision(npcs[1]), DescribeCollision(npcs[2])))
+        log("  受击通道(第一方): " .. CopyHurtChannels(npcs[1]))
+        log("  受击通道(第二方): " .. CopyHurtChannels(npcs[2]))
         ApplyTeamTracked(npcs[1], Config.TeamIdBase)
         ApplyTeamTracked(npcs[2], Config.TeamIdBase + 1)
         if Config.SwitchFactionTo ~= "" then
@@ -1078,6 +1117,7 @@ local function SummonSelected()
             -- 擂台模式：召唤物交替分蓝/红队，并与上一只互种仇恨，落地即开打
             EnsureAttitudeHooks()
             FinishEntrance(actor)
+            log("  受击通道: " .. CopyHurtChannels(actor))
             if playerNeutral then NeutralizeAgainstPlayer(actor, player) end
             summonCount = summonCount + 1
             local teamId = Config.TeamIdBase + (summonCount % 2)
@@ -1391,19 +1431,44 @@ local function DumpCollisionMatrix()
         end
         local lines = {}
         local function emit(s) table.insert(lines, s) end
+        -- K2_GetComponentsByClass 在本作返回空数组（实测），改为遍历几类碰撞相关组件，
+        -- 按拥有者筛选；武器等挂件是独立 Actor，拥有者链再往上查一层
+        local allComps = {}
+        for _, cn in ipairs({ "ShapeComponent", "SkeletalMeshComponent", "StaticMeshComponent" }) do
+            local ok, list = pcall(FindAllOf, cn)
+            if ok and list then
+                for _, c in ipairs(list) do table.insert(allComps, c) end
+            end
+        end
+        local function ownedBy(c, actorAddr)
+            local ok, hit = pcall(function()
+                local o = c:GetOwner()
+                if not o or not o:IsValid() then return false end
+                if o:GetAddress() == actorAddr then return true end
+                local o2 = o:GetOwner()
+                return o2 ~= nil and o2:IsValid() and o2:GetAddress() == actorAddr
+            end)
+            return ok and hit
+        end
         local function dumpActor(actor, label)
             emit("######## " .. label .. " " .. actor:GetFullName())
-            local comps = nil
-            local ok = pcall(function() comps = actor:K2_GetComponentsByClass(primClass) end)
-            if not ok or not comps then
-                emit("  (取组件失败)")
-                return
+            local actorAddr = actor:GetAddress()
+            local comps = {}
+            for _, c in ipairs(allComps) do
+                if ownedBy(c, actorAddr) then table.insert(comps, c) end
             end
+            emit(string.format("  （找到 %d 个碰撞相关组件，全局扫描 %d 个）", #comps, #allComps))
             for i = 1, #comps do
                 pcall(function()
                     local c = comps[i]
                     if not c:IsValid() then return end
                     local name = c:GetFullName():match("([%w_]+)$") or "?"
+                    pcall(function()
+                        local o = c:GetOwner()
+                        if o:GetAddress() ~= actor:GetAddress() then
+                            name = (o:GetFullName():match("([%w_]+)$") or "?") .. "." .. name
+                        end
+                    end)
                     local objType, enabled, prof = "?", "?", "?"
                     pcall(function() objType = tostring(c:GetCollisionObjectType()) end)
                     pcall(function() enabled = tostring(c:GetCollisionEnabled()) end)

@@ -3,28 +3,31 @@
 让《影之刃零》(Phantom Blade Zero) 的 NPC 互相为敌：全场混战、点名决斗、慢动作观战、自由镜头。
 A UE4SS Lua mod for Phantom Blade Zero that turns NPCs against each other — battle royale, 1v1 duels, slow-mo spectating and free camera.
 
-> **状态 / Status: v0.2 — 已在正式版实测可用 (2026-10-29, Steam build 26266538)**
-> 扫描、全场互殴、决斗、慢动作、自由镜头均已在游戏内验证。阵营写入命中标准
-> `GenericTeamId` 属性（S-GAME 未改动 UE 阵营接口）。Verified working in-game on release day.
+> **状态 / Status: 开发中 (v0.12, 2026-10-30, Steam build 26266538)**
+> 召唤、敌对、观战功能可用：怪物能被设为敌对、真实互相出招。**怪物之间的攻击还不能造成伤害**
+> （命中层未打通），可用"裁判模式"结算胜负作为替代。进展与已排除的方向见
+> [docs/HANDOFF.md](docs/HANDOFF.md)。
+> Work in progress: monsters engage each other, but monster-on-monster hits don't deal damage yet.
 
 ## 功能 / Features
 
 | 按键 | 功能 |
 | --- | --- |
-| `F1` | 扫描场上 NPC，在 UE4SS 控制台列出类名与距离 |
-| `F2` | **全场互殴**：把所有 NPC 随机分成 N 个阵营互相开打 |
-| `F3` | **决斗模式**：最近两个 NPC 捉对厮杀，裁判判伤直至分出胜负、败者死亡 |
-| `F4` | 重置所有阵营 + 清空仇恨 |
-| `F5` | 慢动作档位循环（1x → 0.5x → 0.2x → 0.05x，对所有世界实例生效） |
-| `F6` | 自由镜头开/关（智能判断当前状态） |
-| `F7` | 强制退出自由镜头（F6 失灵时的保险丝） |
+| `F1` | 扫描场上 NPC，登记进召唤图鉴 |
+| `F2` | **全场互殴**：附近 NPC 分两队，跨队设为敌对 |
+| `F3` | **决斗模式**：最近两个 NPC 捉对厮杀，并显示战况 |
+| `F4` | 重置阵营与所有关系覆盖 |
+| `F5` | 慢动作档位循环（1x → 0.5x → 0.2x → 0.05x） |
+| `F6` / `F7` | 自由镜头开关 / 强制退出 |
+| `F8` | 玩家中立化开关（怪物不再理你） |
+| `F9` / `Shift+F9` | 在面前召唤怪物 / 切换要召唤的怪 |
+| `Shift+F1/F2/F3` | 诊断：AI 结构 / 阵营与目标 / 碰撞通道 |
 
-**决斗闭环已实测跑通**（2026-10-29 深夜）：召唤 → AI 真实互殴（原生仇恨列表 +
-ForceIntoCombat + 续命锁敌）→ 裁判随机判伤 → 败者执行原生死亡（`Kill(Damaged)`）→
-胜者存活。已知视觉瑕疵：本作关闭了 NPC 间碰撞，怪物互殴无体积碰撞和受击表现，
-伤害由裁判结算（逆向细节见 [docs/REVERSE_ENGINEERING.md](docs/REVERSE_ENGINEERING.md)）。
+敌对关系走游戏原生的阵营组件（`UFactionComponent`），召唤走游戏官方刷怪函数。
+怪物之间的伤害目前可用"裁判模式"代为结算（`config.lua` 中 `JudgeDamagePerTick`）：
+能分出胜负，但没有原生的受击和死亡表现。
 
-规划中（见 [docs/DESIGN.md](docs/DESIGN.md)）：受击表现补偿（蒙太奇）、竞技场赛制与押注（V3）、怪物组队打 BOSS + 养蛊（V4）。
+规划中（见 [docs/DESIGN.md](docs/DESIGN.md)）：怪物间原生伤害、修改器面板、全量分类图鉴、竞技场赛制与押注、怪物组队打 BOSS。
 
 ## 安装 / Install
 

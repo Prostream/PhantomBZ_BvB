@@ -55,6 +55,11 @@ Config.Keybinds = {
 -- 玩家中立化写入的阵营 ID（FGenericTeamId::NoTeam = 255）
 Config.NeutralTeamId = 255
 
+-- 让怪物能被怪物的刀扫到：把玩家模型/胶囊在游戏自定义通道（14-31）上的反应
+-- 复制到参战怪物身上（只补不减）。实测：怪物攻击扫的通道只有玩家模型会响应，
+-- 怪物模型全部忽略，所以怪打怪刀会直接穿过去
+Config.CopyPlayerHurtChannels = true
+
 -- 召唤蓝方 / 决斗第一方改到这个原生阵营（实测：怪物默认都是 Faction.Enemy，
 -- 玩家是 Faction.Player）。改成另一阵营后，游戏所有按阵营判断敌我的系统都会
 -- 把双方当敌人，而不只是我们覆盖的那一处关系。留空 "" 则不改阵营
