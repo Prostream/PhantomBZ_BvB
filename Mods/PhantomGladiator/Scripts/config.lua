@@ -62,6 +62,10 @@ Config.SummonHeightOffset = 50
 -- 种仇恨的点火伤害（互相打一下，触发 AI 的受击感知）
 Config.SeedDamage = 1.0
 
+-- 裁判判伤：决斗监视每轮给双方结算的伤害（0 = 关闭，纯观察）
+-- 怪物的攻击命中判定不认非玩家目标（实测互殴不掉血），先由裁判代为结算
+Config.JudgeDamagePerTick = 15
+
 -- 慢动作档位（循环切换）
 Config.TimeDilationSteps = { 1.0, 0.5, 0.2, 0.05 }
 

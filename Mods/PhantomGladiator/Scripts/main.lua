@@ -235,7 +235,12 @@ end
 local function AddHatred(attacker, victim)
     local hm = GetHatredComp(attacker)
     if not hm then return false, "无仇恨组件" end
-    -- 1) 正门：官方 Add（可能被 CheckActorCanBeHatred 的标签检查拒绝）
+    -- 0) 开门：受害者的"可被恨"开关掰成 true（门禁疑似读这个）
+    pcall(function()
+        local vh = GetHatredComp(victim)
+        if vh then vh.CanBeHatredNow = true end
+    end)
+    -- 1) 正门：官方 Add（正门进去的条目不会被当非法清理）
     pcall(function() hm:AddActorToHatredList(victim, false) end)
     if HatredListContains(hm, victim) then return true, "官方Add" end
     -- 2) 后门：直接把对方写进 HatredList 数组
@@ -245,6 +250,122 @@ local function AddHatred(attacker, victim)
     end)
     if HatredListContains(hm, victim) then return true, "数组直写" end
     return false, "两条路都被拒"
+end
+
+-- ---------- 战况监视 + 锁敌续命 ----------
+
+local function GetHP(pawn)
+    local hp = nil
+    pcall(function()
+        local ok, sets = pcall(FindAllOf, "BasicAttributeSet")
+        if not ok or not sets then return end
+        local pawnAddr = pawn:GetAddress()
+        local ascAddr = nil
+        pcall(function()
+            local asc = pawn.AbilitySystemComponent
+            if asc and asc:IsValid() then ascAddr = asc:GetAddress() end
+        end)
+        for _, s in ipairs(sets) do
+            local okO, outer = pcall(function() return s:GetOuter() end)
+            if okO and outer and outer:IsValid() then
+                local oa = outer:GetAddress()
+                if oa == pawnAddr or oa == ascAddr then
+                    hp = s.Health.CurrentValue
+                    return
+                end
+            end
+        end
+    end)
+    return hp
+end
+
+local watchGen = 0  -- 新配对会使旧监视循环自然退出
+
+-- 裁判判伤实验：怪物互殴的刀互相"穿模"（命中判定不认非玩家目标），
+-- 所以轮流试两种判伤手段，观察哪种能移动 HP / 触发受击与死亡：
+--   A: UE 通用 ApplyDamage（走引擎伤害事件）
+--   B: 直接写 Health 属性（绕开一切管线）
+local function JudgeDamage(victim, attacker, amount, method)
+    if method == "A" then
+        local gps = GetGameplayStatics()
+        if not gps then return false end
+        local dmgType = StaticFindObject("/Script/Engine.DamageType")
+        return pcall(function()
+            gps:ApplyDamage(victim, amount, attacker.Controller, attacker, dmgType)
+        end)
+    else
+        return pcall(function()
+            local ok, sets = pcall(FindAllOf, "BasicAttributeSet")
+            if not ok or not sets then error("no sets") end
+            local vAddr = victim:GetAddress()
+            local ascAddr = nil
+            pcall(function()
+                local asc = victim.AbilitySystemComponent
+                if asc and asc:IsValid() then ascAddr = asc:GetAddress() end
+            end)
+            for _, s in ipairs(sets) do
+                local okO, outer = pcall(function() return s:GetOuter() end)
+                if okO and outer and outer:IsValid() then
+                    local oa = outer:GetAddress()
+                    if oa == vAddr or oa == ascAddr then
+                        s.Health.CurrentValue = s.Health.CurrentValue - amount
+                        return
+                    end
+                end
+            end
+            error("attr set not found")
+        end)
+    end
+end
+
+local function StartDuelWatch(a, b)
+    watchGen = watchGen + 1
+    local myGen = watchGen
+    local ticks = 0
+    LoopAsync(2500, function()
+        if myGen ~= watchGen then return true end
+        ticks = ticks + 1
+        local stop = ticks >= 240  -- 最长 10 分钟，或分出胜负为止
+        ExecuteInGameThread(function()
+            local okA = pcall(function() return a:IsValid() end) and a:IsValid()
+            local okB = pcall(function() return b:IsValid() end) and b:IsValid()
+            if not okA or not okB then
+                log(string.format("🏆 决斗结束：%s 存活",
+                    okA and "蓝方" or (okB and "红方" or "无人")))
+                watchGen = watchGen + 1
+                return
+            end
+            local hpA, hpB = GetHP(a), GetHP(b)
+            local deadA = hpA and hpA <= 0
+            local deadB = hpB and hpB <= 0
+            if deadA or deadB then
+                -- 归零者由裁判执行游戏原生死亡流程（Kill(Damaged)）
+                if deadA then pcall(function() a:Kill(1) end) end
+                if deadB then pcall(function() b:Kill(1) end) end
+                local verdict = (deadA and deadB) and "同归于尽"
+                    or (deadA and "红方获胜" or "蓝方获胜")
+                log(string.format("🏆 决斗结束：%s（蓝 HP=%s 红 HP=%s），已执行死亡",
+                    verdict, tostring(hpA), tostring(hpB)))
+                watchGen = watchGen + 1
+                return
+            end
+            -- 判伤：属性直写（实测唯一有效），伤害随机浮动让比赛有真胜负
+            if Config.JudgeDamagePerTick and Config.JudgeDamagePerTick > 0 then
+                local base = Config.JudgeDamagePerTick
+                JudgeDamage(a, b, base * (0.5 + math.random()), "B")
+                JudgeDamage(b, a, base * (0.5 + math.random()), "B")
+            end
+            log(string.format("战况[%d]: 蓝 HP=%s | 红 HP=%s",
+                ticks, tostring(hpA), tostring(hpB)))
+            -- 续命：重新下达锁敌
+            AddHatred(a, b)
+            AddHatred(b, a)
+            local sgA, sgB = GetAIComp(a), GetAIComp(b)
+            if sgA then pcall(function() sgA:ForceIntoCombat(b) end) end
+            if sgB then pcall(function() sgB:ForceIntoCombat(a) end) end
+        end)
+        return stop
+    end)
 end
 
 local function ForceAttack(attacker, victim)
@@ -389,9 +510,10 @@ local function DuelNearest()
         local f1 = ForceAttack(npcs[1], npcs[2])
         local f2 = ForceAttack(npcs[2], npcs[1])
         SeedHatred(npcs[1], npcs[2])
-        log(string.format("决斗开始: %s VS %s（强制锁敌 %s/%s）",
+        log(string.format("决斗开始: %s VS %s（强制锁敌 %s/%s，战况监视已启动）",
             npcs[1]:GetFullName(), npcs[2]:GetFullName(),
             f1 and "OK" or "失败", f2 and "OK" or "失败"))
+        StartDuelWatch(npcs[1], npcs[2])
     end)
 end
 
@@ -533,7 +655,8 @@ local function SummonSelected()
                 local fA = ForceAttack(actor, lastSummoned)
                 local fB = ForceAttack(lastSummoned, actor)
                 SeedHatred(actor, lastSummoned)
-                fightNote = (fA and fB) and "，已强制互相锁敌"
+                StartDuelWatch(actor, lastSummoned)
+                fightNote = (fA and fB) and "，已强制互相锁敌（战况监视启动）"
                     or "，强制锁敌部分失败（可再按决斗键补）"
             end
             lastSummoned = actor

@@ -13,13 +13,18 @@ A UE4SS Lua mod for Phantom Blade Zero that turns NPCs against each other — ba
 | --- | --- |
 | `F1` | 扫描场上 NPC，在 UE4SS 控制台列出类名与距离 |
 | `F2` | **全场互殴**：把所有 NPC 随机分成 N 个阵营互相开打 |
-| `F3` | **决斗模式**：离你最近的两个 NPC 捉对厮杀 |
+| `F3` | **决斗模式**：最近两个 NPC 捉对厮杀，裁判判伤直至分出胜负、败者死亡 |
 | `F4` | 重置所有阵营 + 清空仇恨 |
 | `F5` | 慢动作档位循环（1x → 0.5x → 0.2x → 0.05x，对所有世界实例生效） |
 | `F6` | 自由镜头开/关（智能判断当前状态） |
 | `F7` | 强制退出自由镜头（F6 失灵时的保险丝） |
 
-规划中（见 [docs/DESIGN.md](docs/DESIGN.md)）：仇恨矩阵（V2，骨架已在 `hatred.lua`）、竞技场赛制与押注（V3）、怪物组队打 BOSS + 养蛊（V4）。
+**决斗闭环已实测跑通**（2026-10-29 深夜）：召唤 → AI 真实互殴（原生仇恨列表 +
+ForceIntoCombat + 续命锁敌）→ 裁判随机判伤 → 败者执行原生死亡（`Kill(Damaged)`）→
+胜者存活。已知视觉瑕疵：本作关闭了 NPC 间碰撞，怪物互殴无体积碰撞和受击表现，
+伤害由裁判结算（逆向细节见 [docs/REVERSE_ENGINEERING.md](docs/REVERSE_ENGINEERING.md)）。
+
+规划中（见 [docs/DESIGN.md](docs/DESIGN.md)）：受击表现补偿（蒙太奇）、竞技场赛制与押注（V3）、怪物组队打 BOSS + 养蛊（V4）。
 
 ## 安装 / Install
 
