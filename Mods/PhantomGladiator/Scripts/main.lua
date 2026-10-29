@@ -13,22 +13,34 @@ local function log(msg) print(string.format("%s %s\n", MOD, tostring(msg))) end
 
 -- ---------- 基础工具 ----------
 
+-- 真正的玩家控制器：持有 UPlayer、且不是调试相机
+local function GetRealPlayerController()
+    local ok, list = pcall(FindAllOf, "PlayerController")
+    if not ok or not list then return nil end
+    for _, pc in ipairs(list) do
+        local okP, good = pcall(function()
+            if not pc:IsValid() then return false end
+            if pc:GetClass():GetFullName():find("DebugCameraController") then
+                return false
+            end
+            return pc.Player ~= nil and pc.Player:IsValid()
+        end)
+        if okP and good then return pc end
+    end
+    return nil
+end
+
 local function GetPlayerPawn()
+    local pc = GetRealPlayerController()
+    if pc then
+        local ok, p = pcall(function() return pc.Pawn end)
+        if ok and p and p:IsValid() then return p end
+    end
     local ok, pawn = pcall(function()
-        local pc = UEHelpers.GetPlayerController()
-        return pc and pc:IsValid() and pc.Pawn or nil
+        local upc = UEHelpers.GetPlayerController()
+        return upc and upc:IsValid() and upc.Pawn or nil
     end)
     if ok and pawn and pawn:IsValid() then return pawn end
-    -- 兜底：遍历 PlayerController 找第一个有 Pawn 的
-    local ok2, found = pcall(FindAllOf, "PlayerController")
-    if ok2 and found then
-        for _, pc in ipairs(found) do
-            local okP, p = pcall(function()
-                return pc:IsValid() and pc.Pawn or nil
-            end)
-            if okP and p and p:IsValid() then return p end
-        end
-    end
     return nil
 end
 
@@ -313,11 +325,17 @@ local function SummonSelected()
             log("召唤失败：BeginDeferredActorSpawnFromClass 未返回实例")
             return
         end
-        local okFin = pcall(function() gps:FinishSpawningActor(actor, t) end)
+        -- 5.4+ 多了 TransformScaleMethod 参数，反射调用可能必填：两种签名都试
+        local okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t, 1) end)
+        if not okFin then
+            okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t) end)
+        end
         if okFin then
             log(string.format("已在面前召唤: %s", entry.name))
         else
-            log("召唤失败：FinishSpawningActor 报错")
+            -- 清理半成品，别留一只不会动的"雕像"在场上
+            pcall(function() actor:K2_DestroyActor() end)
+            log("召唤失败（半成品已清理）：FinishSpawningActor: " .. tostring(errFin))
         end
     end)
 end
@@ -366,31 +384,53 @@ local function ExitFreeCam(dcc)
     cm:DisableDebugCamera()
 end
 
+-- 找"当前真正掌权"的调试相机：每次进出都会生成新实例，旧的会残留，
+-- 只有持有 UPlayer 的那个才是激活中的
+local function FindActiveDebugCam()
+    local ok, list = pcall(FindAllOf, "DebugCameraController")
+    if not ok or not list then return nil end
+    for _, dcc in ipairs(list) do
+        local okP, active = pcall(function()
+            return dcc:IsValid() and dcc.Player and dcc.Player:IsValid()
+        end)
+        if okP and active then return dcc end
+    end
+    return nil
+end
+
 local function ToggleFreeCam()
     ExecuteInGameThread(function()
-        local dcc = FindFirstOf("DebugCameraController")
-        local active = dcc and dcc:IsValid() and pcall(function()
-            return dcc.Player and dcc.Player:IsValid()
-        end) and dcc.Player and dcc.Player:IsValid()
-        if active then
+        local dcc = FindActiveDebugCam()
+        if dcc then
             local ok, err = pcall(ExitFreeCam, dcc)
             log(ok and "自由镜头：已退出" or ("退出失败: " .. tostring(err)))
             return
         end
-        local ok = pcall(function()
-            local cheat = FindFirstOf("CheatManager")
-            if not cheat or not cheat:IsValid() then error("no CheatManager") end
-            cheat:ToggleDebugCamera()
+        -- 必须用"真玩家控制器自己"的 CheatManager：FindFirstOf 会抓到
+        -- 我们之前在报废调试相机上构造的孤儿实例，指令会发给死对象
+        local ok, err = pcall(function()
+            local pc = GetRealPlayerController()
+            if not pc then error("real PlayerController not found") end
+            local cm = pc.CheatManager
+            if not cm or not cm:IsValid() then
+                local cmClass = StaticFindObject("/Script/Engine.CheatManager")
+                cm = StaticConstructObject(cmClass, pc)
+                if not cm or not cm:IsValid() then
+                    error("construct CheatManager failed")
+                end
+                pc.CheatManager = cm
+            end
+            cm:ToggleDebugCamera()
         end)
         log(ok and "自由镜头：已进入（再按一次退出）"
-               or "自由镜头进入失败（CheatManager 不可用）")
+               or ("自由镜头进入失败: " .. tostring(err)))
     end)
 end
 
 local function ForceExitFreeCam()
     ExecuteInGameThread(function()
-        local dcc = FindFirstOf("DebugCameraController")
-        if not dcc or not dcc:IsValid() then
+        local dcc = FindActiveDebugCam()
+        if not dcc then
             log("没有激活的 DebugCameraController，无需退出")
             return
         end
