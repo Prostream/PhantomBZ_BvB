@@ -66,6 +66,10 @@ Config.SeedDamage = 1.0
 -- 怪物的攻击命中判定不认非玩家目标（实测互殴不掉血），先由裁判代为结算
 Config.JudgeDamagePerTick = 15
 
+-- Astra 实验：血量降到该阈值就直接执行 Kill（不等归零——
+-- 先写 0 可能让 Kill 内部的判死前置检查提前返回，导致时灵时不灵）
+Config.KillThreshold = 25
+
 -- 慢动作档位（循环切换）
 Config.TimeDilationSteps = { 1.0, 0.5, 0.2, 0.05 }
 

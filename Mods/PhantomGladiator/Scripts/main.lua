@@ -379,6 +379,8 @@ local function StartDuelWatch(a, b)
     watchGen = watchGen + 1
     local myGen = watchGen
     local ticks = 0
+    local lastForceTick = -10
+    local forceCount = 0
     LoopAsync(2500, function()
         if myGen ~= watchGen then return true end
         ticks = ticks + 1
@@ -393,18 +395,47 @@ local function StartDuelWatch(a, b)
                 return
             end
             local hpA, hpB = GetHP(a), GetHP(b)
-            local deadA = hpA and hpA <= 0
-            local deadB = hpB and hpB <= 0
-            if deadA or deadB then
-                -- 归零者由裁判执行游戏原生死亡流程（Kill(Damaged)）
-                local kA, kB = nil, nil
-                if deadA then kA = pcall(function() a:Kill(1) end) end
-                if deadB then kB = pcall(function() b:Kill(1) end) end
-                log(string.format("执行死亡调用: 蓝=%s 红=%s",
-                    tostring(kA), tostring(kB)))
-                local verdict = (deadA and deadB) and "同归于尽"
-                    or (deadA and "红方获胜" or "蓝方获胜")
-                log(string.format("🏆 决斗结束：%s（蓝 HP=%s 红 HP=%s），已执行死亡",
+            -- Astra 实验：血未归零、降到阈值就执行 Kill（避免先写 0 触发
+            -- 判死前置检查提前返回）
+            local KT = Config.KillThreshold or 25
+            local lowA = hpA and hpA <= KT
+            local lowB = hpB and hpB <= KT
+            if lowA or lowB then
+                -- 编导式死亡：Kill() 是瞬间清场（实测无动画），所以先播
+                -- 败者自己的死亡蒙太奇，演完再清场——观感=被打死倒下
+                local function stageDeath(victim)
+                    local played = false
+                    pcall(function()
+                        local species = victim:GetClass():GetFullName()
+                            :match("BP_Monster_([A-Za-z]+)")
+                        local ok, montages = pcall(FindAllOf, "AnimMontage")
+                        if ok and montages then
+                            for _, m in ipairs(montages) do
+                                local okN, n = pcall(function() return m:GetFullName() end)
+                                if okN and n and (not species or n:find(species))
+                                    and (n:find("[Dd]ie") or n:find("[Dd]eath")
+                                         or n:find("[Dd]ead")) then
+                                    victim:PlayAnimMontage(m, 1.0, FName(""))
+                                    played = true
+                                    log("死亡演出: " .. n)
+                                    break
+                                end
+                            end
+                        end
+                    end)
+                    ExecuteWithDelay(played and 2800 or 200, function()
+                        ExecuteInGameThread(function()
+                            pcall(function()
+                                if victim:IsValid() then victim:Kill(1) end
+                            end)
+                        end)
+                    end)
+                end
+                if lowA then stageDeath(a) end
+                if lowB then stageDeath(b) end
+                local verdict = (lowA and lowB) and "同归于尽"
+                    or (lowA and "红方获胜" or "蓝方获胜")
+                log(string.format("🏆 决斗结束：%s（蓝 HP=%s 红 HP=%s）",
                     verdict, tostring(hpA), tostring(hpB)))
                 watchGen = watchGen + 1
                 return
@@ -421,12 +452,6 @@ local function StartDuelWatch(a, b)
                     PlayHitReact(roll < 0.175 and a or b)
                 end
             end
-            -- 每 4 轮（10 秒）补一次作战指令：防脱战，又不至于掐死起手
-            if ticks % 4 == 0 then
-                local sgA2, sgB2 = GetAIComp(a), GetAIComp(b)
-                if sgA2 then pcall(function() sgA2:ForceIntoCombat(b) end) end
-                if sgB2 then pcall(function() sgB2:ForceIntoCombat(a) end) end
-            end
             -- 读当前 AI 状态（诊断"站桩"用）
             local function stateOf(p)
                 local s = "?"
@@ -438,10 +463,29 @@ local function StartDuelWatch(a, b)
             end
             log(string.format("战况[%d]: 蓝 HP=%s(%s) | 红 HP=%s(%s)",
                 ticks, tostring(hpA), stateOf(a), tostring(hpB), stateOf(b)))
-            -- 续命只维持仇恨列表，不再反复 ForceIntoCombat——
-            -- 每 2.5s 重置状态机会把攻击动作掐死在起手，变成站桩（实测教训）
-            AddHatred(a, b)
-            AddHatred(b, a)
+            -- Astra 方案：脱战检测式恢复——只有仇恨列表真的丢了对方才
+            -- 修复 + 单次补发作战指令（≥10 秒冷却、全场最多 3 次），
+            -- 其余时间完全不打扰 AI
+            local hmA, hmB = GetHatredComp(a), GetHatredComp(b)
+            local lostA = hmA and not HatredListContains(hmA, b)
+            local lostB = hmB and not HatredListContains(hmB, a)
+            if lostA or lostB then
+                AddHatred(a, b)
+                AddHatred(b, a)
+                if (ticks - lastForceTick) >= 4 and forceCount < 3 then
+                    lastForceTick = ticks
+                    forceCount = forceCount + 1
+                    local sgA2, sgB2 = GetAIComp(a), GetAIComp(b)
+                    if lostA and sgA2 then
+                        pcall(function() sgA2:ForceIntoCombat(b) end)
+                    end
+                    if lostB and sgB2 then
+                        pcall(function() sgB2:ForceIntoCombat(a) end)
+                    end
+                    log(string.format("脱战恢复 #%d（蓝丢失=%s 红丢失=%s）",
+                        forceCount, tostring(lostA), tostring(lostB)))
+                end
+            end
         end)
         return stop
     end)
