@@ -1,0 +1,18 @@
+# 游戏资源与解包产物 — 绝不入库
+*.pak
+*.ucas
+*.utoc
+*.uasset
+*.uexp
+Dumps/
+Output/
+FModel/
+
+# UE4SS 运行产物
+UE4SS.log
+*.log
+
+# 系统杂项
+Thumbs.db
+desktop.ini
+.vs/
