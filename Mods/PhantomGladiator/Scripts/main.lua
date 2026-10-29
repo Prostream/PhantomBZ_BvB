@@ -73,6 +73,9 @@ end
 -- ---------- 阵营快照（F4 恢复原状的依据） ----------
 
 local originalTeams = {}   -- addr -> 原始阵营 ID
+local teamOf = {}          -- addr(pawn/controller) -> 我们指派的阵营
+local playerNeutral = false
+local playerPawnAddr = nil
 
 local function ApplyTeamTracked(pawn, teamId)
     local addr = pawn:GetAddress()
@@ -80,7 +83,91 @@ local function ApplyTeamTracked(pawn, teamId)
         local orig = Teams.ReadTeam(pawn)
         if orig ~= nil then originalTeams[addr] = orig end
     end
+    teamOf[addr] = teamId
+    local ok, ctrl = pcall(function() return pawn.Controller end)
+    if ok and ctrl ~= nil then
+        pcall(function()
+            if ctrl:IsValid() then teamOf[ctrl:GetAddress()] = teamId end
+        end)
+    end
     return Teams.ApplyTeam(pawn, teamId)
+end
+
+-- ---------- 态度 hook：最终裁决"谁恨谁" ----------
+-- 本作的敌我判定走 SGameAI 的 BlueprintGetTeamAttitudeTowards（解剖发现），
+-- hook 它的返回值：被我们分过队的怪按队伍敌我，玩家中立时对玩家返回中立。
+-- ETeamAttitude: 0=Friendly 1=Neutral 2=Hostile
+
+local attitudeHooksInstalled = false
+local attitudeCalls = 0
+
+local function lookupTeam(actor)
+    if actor == nil then return nil end
+    local okV, valid = pcall(function() return actor:IsValid() end)
+    if not okV or not valid then return nil end
+    local t = teamOf[actor:GetAddress()]
+    if t then return t end
+    local ok, p = pcall(function() return actor.Pawn end)
+    if ok and p ~= nil then
+        local okA, a = pcall(function()
+            return p:IsValid() and teamOf[p:GetAddress()] or nil
+        end)
+        if okA and a then return a end
+    end
+    local ok2, c = pcall(function() return actor.Controller end)
+    if ok2 and c ~= nil then
+        local okA, a = pcall(function()
+            return c:IsValid() and teamOf[c:GetAddress()] or nil
+        end)
+        if okA and a then return a end
+    end
+    return nil
+end
+
+local function isPlayerActor(actor)
+    if not playerPawnAddr or actor == nil then return false end
+    local ok, hit = pcall(function()
+        if not actor:IsValid() then return false end
+        if actor:GetAddress() == playerPawnAddr then return true end
+        local p = actor.Pawn
+        return p ~= nil and p:IsValid() and p:GetAddress() == playerPawnAddr
+    end)
+    return ok and hit
+end
+
+local function EnsureAttitudeHooks()
+    if attitudeHooksInstalled then return end
+    local okAny = false
+    for _, path in ipairs(Config.AttitudeHookPaths) do
+        local ok, err = pcall(function()
+            RegisterHook(path, function() end, function(Context, Other, Ret)
+                attitudeCalls = attitudeCalls + 1
+                if attitudeCalls == 1 or attitudeCalls % 200 == 0 then
+                    log(string.format("态度函数被调用第 %d 次", attitudeCalls))
+                end
+                pcall(function()
+                    local selfCtrl = Context:get()
+                    local other = Other:get()
+                    if playerNeutral and (isPlayerActor(other) or isPlayerActor(selfCtrl)) then
+                        Ret:set(1) -- Neutral
+                        return
+                    end
+                    local tSelf = lookupTeam(selfCtrl)
+                    local tOther = lookupTeam(other)
+                    if tSelf and tOther then
+                        Ret:set(tSelf == tOther and 0 or 2) -- Friendly / Hostile
+                    end
+                end)
+            end)
+        end)
+        if ok then
+            okAny = true
+            log("态度 hook 挂载成功: " .. path:match("([%w_]+)$"))
+        else
+            log("态度 hook 失败: " .. tostring(err))
+        end
+    end
+    attitudeHooksInstalled = okAny
 end
 
 -- ---------- 召唤图鉴（F1 扫描时登记；后续版本接 AssetRegistry 全量目录） ----------
@@ -88,6 +175,8 @@ end
 local catalog = {}         -- { {name=短类名, class=UClass}, ... }
 local catalogIndex = 0
 local catalogSeen = {}
+local summonCount = 0      -- 擂台模式：交替分队计数
+local lastSummoned = nil   -- 上一只召唤物（与新召唤互种仇恨）
 
 local function RegisterInCatalog(pawn)
     local ok = pcall(function()
@@ -101,6 +190,92 @@ local function RegisterInCatalog(pawn)
         if catalogIndex == 0 then catalogIndex = 1 end
     end)
     return ok
+end
+
+-- ---------- 强制锁敌：走 SGameAI 自家的作战指令（2026-10-29 解剖成果） ----------
+-- SGameAIComponent:ForceIntoCombat(Target) = "进入战斗，目标是他"；
+-- 另把目标写进 AI 的黑板目标键（PBZ_TargetingHandler_AI 从那里读目标）做双保险。
+
+local function GetAIComp(pawn)
+    local ok, sg = pcall(function()
+        local ctrl = pawn.Controller
+        if not ctrl or not ctrl:IsValid() then return nil end
+        local c = ctrl.SGameAIComponent
+        return (c ~= nil and c:IsValid()) and c or nil
+    end)
+    if ok then return sg end
+    return nil
+end
+
+-- 本作的原生仇恨组件（挂在每个 NPC/玩家身上，感知与索敌都以它为准）
+local function GetHatredComp(pawn)
+    local ok, h = pcall(function() return pawn.BP_PBZHatredManagerComponent end)
+    if ok and h ~= nil then
+        local okV, v = pcall(function() return h:IsValid() end)
+        if okV and v then return h end
+    end
+    return nil
+end
+
+local function HatredListContains(hm, actor)
+    local found = false
+    pcall(function()
+        local hl = hm.HatredList
+        local addr = actor:GetAddress()
+        for i = 1, #hl do
+            local okE, hit = pcall(function()
+                return hl[i]:IsValid() and hl[i]:GetAddress() == addr
+            end)
+            if okE and hit then found = true return end
+        end
+    end)
+    return found
+end
+
+local function AddHatred(attacker, victim)
+    local hm = GetHatredComp(attacker)
+    if not hm then return false, "无仇恨组件" end
+    -- 1) 正门：官方 Add（可能被 CheckActorCanBeHatred 的标签检查拒绝）
+    pcall(function() hm:AddActorToHatredList(victim, false) end)
+    if HatredListContains(hm, victim) then return true, "官方Add" end
+    -- 2) 后门：直接把对方写进 HatredList 数组
+    pcall(function()
+        local hl = hm.HatredList
+        hl[#hl + 1] = victim
+    end)
+    if HatredListContains(hm, victim) then return true, "数组直写" end
+    return false, "两条路都被拒"
+end
+
+local function ForceAttack(attacker, victim)
+    local okHate, how = AddHatred(attacker, victim)
+    log(string.format("  拉仇恨 %s → %s", okHate and ("成功(" .. how .. ")") or ("失败: " .. tostring(how)),
+        ""))
+    local sg = GetAIComp(attacker)
+    if not sg then return okHate end
+    local okForce = pcall(function() sg:ForceIntoCombat(victim) end)
+    okForce = okForce or okHate
+    -- 黑板目标键直写（键名从 AI 的 TargetingHandler 实例上现读）
+    pcall(function()
+        local bb = sg.BlackboardComponent
+        if not bb or not bb:IsValid() then return end
+        local okH, handlers = pcall(FindAllOf, "PBZ_TargetingHandler_AI_C")
+        if not okH or not handlers then return end
+        for _, h in ipairs(handlers) do
+            local okM, match = pcall(function()
+                return h:IsValid() and h.Blackboard ~= nil and h.Blackboard:IsValid()
+                    and h.Blackboard:GetAddress() == bb:GetAddress()
+            end)
+            if okM and match then
+                local okK, keyName = pcall(function() return h["Target Key"] end)
+                if okK and keyName then
+                    bb:SetValueAsObject(keyName, victim)
+                end
+                break
+            end
+        end
+    end)
+    return okForce
 end
 
 -- ---------- 种仇恨：互相打 1 点伤害，触发 AI 的受击感知 ----------
@@ -148,6 +323,7 @@ local function ScanNPCs()
         local npcs = CollectNPCs()
         local player = GetPlayerPawn()
         local pLoc = player and GetLocation(player)
+        local ctrlSeen = {}
         log(string.format("扫描到 %d 个候选 NPC:", #npcs))
         for i, pawn in ipairs(npcs) do
             RegisterInCatalog(pawn)
@@ -168,6 +344,7 @@ end
 
 local function GlobalInfight()
     ExecuteInGameThread(function()
+        EnsureAttitudeHooks()
         local npcs = CollectNPCs()
         local okCount, strategyUsed = 0, nil
         for i, pawn in ipairs(npcs) do
@@ -189,6 +366,7 @@ end
 
 local function DuelNearest()
     ExecuteInGameThread(function()
+        EnsureAttitudeHooks()
         local player = GetPlayerPawn()
         local pLoc = player and GetLocation(player)
         if not pLoc then
@@ -206,16 +384,14 @@ local function DuelNearest()
             log("场上不足两个 NPC，无法决斗")
             return
         end
-        local s1 = ApplyTeamTracked(npcs[1], Config.TeamIdBase)
-        local s2 = ApplyTeamTracked(npcs[2], Config.TeamIdBase + 1)
-        if s1 and s2 then
-            local seeded = SeedHatred(npcs[1], npcs[2])
-            log(string.format("决斗开始: %s VS %s%s",
-                npcs[1]:GetFullName(), npcs[2]:GetFullName(),
-                seeded and "（已互种仇恨）" or "（种仇恨失败，靠感知自然索敌）"))
-        else
-            log("决斗阵营写入失败")
-        end
+        ApplyTeamTracked(npcs[1], Config.TeamIdBase)
+        ApplyTeamTracked(npcs[2], Config.TeamIdBase + 1)
+        local f1 = ForceAttack(npcs[1], npcs[2])
+        local f2 = ForceAttack(npcs[2], npcs[1])
+        SeedHatred(npcs[1], npcs[2])
+        log(string.format("决斗开始: %s VS %s（强制锁敌 %s/%s）",
+            npcs[1]:GetFullName(), npcs[2]:GetFullName(),
+            f1 and "OK" or "失败", f2 and "OK" or "失败"))
     end)
 end
 
@@ -231,14 +407,14 @@ local function ResetTeams()
             end
         end
         originalTeams = {}
+        teamOf = {}
         Hatred.Reset()
-        log(string.format("已把 %d 个 NPC 恢复到原始阵营", okCount))
+        log(string.format("已把 %d 个 NPC 恢复到原始阵营（态度 hook 名单已清空）", okCount))
     end)
 end
 
 -- ---------- 玩家中立化开关 ----------
 
-local playerNeutral = false
 local playerOrigTeam = nil
 
 local function TogglePlayerNeutral()
@@ -248,15 +424,24 @@ local function TogglePlayerNeutral()
             log("找不到玩家 Pawn")
             return
         end
+        EnsureAttitudeHooks()
+        playerPawnAddr = pawn:GetAddress()
         if not playerNeutral then
             playerOrigTeam = Teams.ReadTeam(pawn)
-            if Teams.ApplyTeam(pawn, Config.NeutralTeamId) then
-                playerNeutral = true
-                log(string.format("玩家已中立化（原阵营 %s → %d），怪物应当无视你；再按一次恢复",
-                    tostring(playerOrigTeam), Config.NeutralTeamId))
-            else
-                log("中立化失败：玩家阵营写不进去")
+            Teams.ApplyTeam(pawn, Config.NeutralTeamId)
+            -- 真正的隐身：把玩家从所有 NPC 的原生仇恨列表里除名
+            local cleared = 0
+            for _, npc in ipairs(CollectNPCs()) do
+                local hm = GetHatredComp(npc)
+                if hm then
+                    local okR = pcall(function()
+                        hm:RemoveActorFromHatredList(pawn)
+                    end)
+                    if okR then cleared = cleared + 1 end
+                end
             end
+            playerNeutral = true
+            log(string.format("玩家已中立化：从 %d 个怪的仇恨列表中除名；再按一次恢复", cleared))
         else
             local target = playerOrigTeam or 0
             if Teams.ApplyTeam(pawn, target) then
@@ -283,8 +468,15 @@ end
 
 local function SummonSelected()
     ExecuteInGameThread(function()
+        if #catalog == 0 then
+            -- 图鉴空了（热重载会清空）就自动扫一遍
+            for _, pawn in ipairs(CollectNPCs()) do RegisterInCatalog(pawn) end
+            if #catalog > 0 then
+                log(string.format("图鉴自动重建：%d 种", #catalog))
+            end
+        end
         if #catalog == 0 or catalogIndex == 0 then
-            log("图鉴是空的：先按 " .. Config.Keybinds.Scan .. " 扫描一次")
+            log("附近没有可登记的怪，图鉴为空")
             return
         end
         local entry = catalog[catalogIndex]
@@ -331,11 +523,286 @@ local function SummonSelected()
             okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t) end)
         end
         if okFin then
-            log(string.format("已在面前召唤: %s", entry.name))
+            -- 擂台模式：召唤物交替分蓝/红队，并与上一只互种仇恨，落地即开打
+            EnsureAttitudeHooks()
+            summonCount = summonCount + 1
+            local teamId = Config.TeamIdBase + (summonCount % 2)
+            local strategy = ApplyTeamTracked(actor, teamId)
+            local fightNote = ""
+            if lastSummoned and lastSummoned:IsValid() then
+                local fA = ForceAttack(actor, lastSummoned)
+                local fB = ForceAttack(lastSummoned, actor)
+                SeedHatred(actor, lastSummoned)
+                fightNote = (fA and fB) and "，已强制互相锁敌"
+                    or "，强制锁敌部分失败（可再按决斗键补）"
+            end
+            lastSummoned = actor
+            log(string.format("已在面前召唤: %s（%s队%s）", entry.name,
+                summonCount % 2 == 0 and "红" or "蓝", fightNote))
+            if not strategy then
+                log("（召唤物阵营写入失败，它会打玩家：按 F8 中立化自保）")
+            end
         else
             -- 清理半成品，别留一只不会动的"雕像"在场上
             pcall(function() actor:K2_DestroyActor() end)
             log("召唤失败（半成品已清理）：FinishSpawningActor: " .. tostring(errFin))
+        end
+    end)
+end
+
+-- ---------- 解剖：把最近一只怪的 AI 大脑结构写到文件（Shift+扫描键） ----------
+-- 注意：UE4SS 对象的空指针链式调用会原生崩溃，pcall 拦不住，
+-- 所以每一步都先取引用、IsValid 之后再往下走。
+
+local function safeValid(obj)
+    local ok, v = pcall(function() return obj ~= nil and obj:IsValid() end)
+    return ok and v
+end
+
+local function DumpBrain()
+    ExecuteInGameThread(function()
+        local player = GetPlayerPawn()
+        local pLoc = player and GetLocation(player)
+        local npcs = CollectNPCs()
+        if pLoc then
+            table.sort(npcs, function(a, b)
+                local la, lb = GetLocation(a), GetLocation(b)
+                if not la then return false end
+                if not lb then return true end
+                return DistSq(la, pLoc) < DistSq(lb, pLoc)
+            end)
+        end
+        local target = nil
+        for _, pawn in ipairs(npcs) do
+            local ok, ctrl = pcall(function() return pawn.Controller end)
+            if ok and safeValid(ctrl) then
+                target = { pawn = pawn, ctrl = ctrl }
+                break
+            end
+        end
+        if not target then
+            log("解剖失败：附近没有带可用控制器的怪")
+            return
+        end
+
+        local lines = {}
+        local function emit(s) table.insert(lines, s) end
+        emit("== 解剖对象: " .. target.pawn:GetFullName())
+
+        -- 把一个对象的类链（属性+函数）全部倒出来
+        local function dumpClassChain(obj, label)
+            emit("")
+            emit("######## " .. label)
+            local okCls, cls = pcall(function() return obj:GetClass() end)
+            while okCls and safeValid(cls) do
+                local okN, clsName = pcall(function() return cls:GetFullName() end)
+                emit("")
+                emit("==== " .. (okN and clsName or "?"))
+                pcall(function()
+                    cls:ForEachProperty(function(prop)
+                        pcall(function() emit("  prop " .. prop:GetFullName()) end)
+                    end)
+                end)
+                pcall(function()
+                    cls:ForEachFunction(function(fn)
+                        pcall(function() emit("  func " .. fn:GetFullName()) end)
+                    end)
+                end)
+                local nxt = nil
+                pcall(function() nxt = cls:GetSuperStruct() end)
+                cls = nxt
+                okCls = safeValid(cls)
+            end
+        end
+
+        -- 1) 控制器 + 它的 SGameAI 组件 + 感知组件 + 怪物本体
+        dumpClassChain(target.ctrl, "AIController")
+        local okSG, sg = pcall(function() return target.ctrl.SGameAIComponent end)
+        if okSG and safeValid(sg) then
+            dumpClassChain(sg, "SGameAIComponent")
+        end
+        local okPC, perc = pcall(function() return target.ctrl.PerceptionComponent end)
+        if okPC and safeValid(perc) then
+            dumpClassChain(perc, "PerceptionComponent")
+        end
+        dumpClassChain(target.pawn, "Pawn 本体")
+
+        -- 2) AI 黑板的键（"打谁"大概率藏在这里）
+        local okBB, bb = pcall(function() return target.ctrl.Blackboard end)
+        if okBB and safeValid(bb) then
+            emit("")
+            emit("==== Blackboard keys")
+            local okData, data = pcall(function() return bb.DefaultBlackboardAsset end)
+            if okData and safeValid(data) then
+                pcall(function()
+                    local keys = data.Keys
+                    for i = 1, #keys do
+                        pcall(function()
+                            local entry = keys[i]
+                            emit(string.format("  key [%d] %s", i,
+                                tostring(entry.EntryName)))
+                        end)
+                    end
+                end)
+            else
+                emit("  (DefaultBlackboardAsset 不可用)")
+            end
+        else
+            emit("")
+            emit("==== 无 Blackboard 组件")
+        end
+
+        local f, usedPath = nil, nil
+        for _, path in ipairs({
+            "ue4ss\\Mods\\PhantomGladiator\\brain_dump.txt",
+            "ue4ss/Mods/PhantomGladiator/brain_dump.txt",
+            "brain_dump.txt",
+        }) do
+            f = io.open(path, "w")
+            if f then usedPath = path break end
+        end
+        if f then
+            f:write(table.concat(lines, "\n"))
+            f:close()
+            log(string.format("解剖完成：%d 行已写入 %s（游戏 exe 目录下）", #lines, usedPath))
+        else
+            log("解剖完成但写文件失败，改打到日志（共 " .. #lines .. " 行）")
+            for _, s in ipairs(lines) do print(s .. "\n") end
+        end
+    end)
+end
+
+-- ---------- 目标系统诊断（Shift+互殴键）：读出双方的目标类型标签 ----------
+
+local function FNameToString(v)
+    local ok, s = pcall(function() return v:ToString() end)
+    if ok and s then return s end
+    return tostring(v)
+end
+
+local function ReadTargetTypes(pawn, label)
+    local ok, err = pcall(function()
+        local out = {}
+        pawn:GetTargetTypes(out)
+        local names = {}
+        for i = 1, #out do
+            local tag = out[i]
+            local okN, n = pcall(function() return FNameToString(tag.TagName) end)
+            table.insert(names, okN and n or "?")
+        end
+        log(string.format("%s 可打类型 [%d 个]: %s", label, #out,
+            table.concat(names, ", ")))
+    end)
+    if not ok then
+        log(string.format("%s 读取目标类型失败: %s", label, tostring(err)))
+    end
+end
+
+local function ReadActorTags(pawn, label)
+    local ok, err = pcall(function()
+        local asc = nil
+        pcall(function() asc = pawn.AbilitySystemComponent end)
+        if not asc or not pcall(function() return asc:IsValid() end) or not asc:IsValid() then
+            pcall(function() asc = pawn.AbilitySystem end)
+        end
+        if not asc or not asc:IsValid() then
+            log(label .. " 没有 AbilitySystemComponent")
+            return
+        end
+        local container = {}
+        asc:GetOwnedGameplayTags(container)
+        local names = {}
+        local okBreak = pcall(function()
+            local lib = StaticFindObject(
+                "/Script/GameplayTags.Default__BlueprintGameplayTagLibrary")
+            local arr = {}
+            lib:BreakGameplayTagContainer(container, arr)
+            for i = 1, #arr do
+                pcall(function()
+                    table.insert(names, FNameToString(arr[i].TagName))
+                end)
+            end
+        end)
+        if not okBreak then
+            -- 退路：直接遍历容器的 GameplayTags 数组
+            pcall(function()
+                local tags = container.GameplayTags or container
+                for i = 1, #tags do
+                    pcall(function()
+                        table.insert(names, FNameToString(tags[i].TagName))
+                    end)
+                end
+            end)
+        end
+        log(string.format("%s 身上标签 [%d]: %s", label, #names,
+            table.concat(names, ", ")))
+    end)
+    if not ok then
+        log(string.format("%s 标签读取报错: %s", label, tostring(err)))
+    end
+end
+
+local function TargetDiag()
+    ExecuteInGameThread(function()
+        local player = GetPlayerPawn()
+        if player then
+            ReadTargetTypes(player, "玩家")
+            ReadActorTags(player, "玩家")
+        end
+        local npcs = CollectNPCs()
+        if #npcs > 0 then
+            ReadTargetTypes(npcs[1], "怪物")
+            ReadActorTags(npcs[1], "怪物")
+            -- 怪物的 TargetingComponent 挂了哪些 handler
+            pcall(function()
+                local tc = npcs[1]["Targeting Component"]
+                if tc and tc:IsValid() then
+                    local hs = tc.TargetingHandlers
+                    for i = 1, #hs do
+                        pcall(function()
+                            local entry = hs[i]
+                            log(string.format("  handler[%d] tag=%s", i,
+                                FNameToString(entry.Tag.TagName)))
+                        end)
+                    end
+                end
+            end)
+            -- 它的原生仇恨列表里现在有谁
+            pcall(function()
+                local hm = GetHatredComp(npcs[1])
+                if hm then
+                    local hl = hm.HatredList
+                    log(string.format("  仇恨列表 %d 个:", #hl))
+                    for i = 1, math.min(#hl, 5) do
+                        pcall(function()
+                            log("    " .. hl[i]:GetFullName())
+                        end)
+                    end
+                else
+                    log("  （没有仇恨组件）")
+                end
+            end)
+            -- 它的感知里现在装着谁
+            pcall(function()
+                local ctrl = npcs[1].Controller
+                if ctrl and ctrl:IsValid() then
+                    local perc = ctrl.PerceptionComponent
+                    if perc and perc:IsValid() then
+                        local seen = {}
+                        perc:GetPerceivedHostileActors(seen)
+                        log(string.format("  感知到的敌对者 %d 个:", #seen))
+                        for i = 1, math.min(#seen, 5) do
+                            local okE, nameE = pcall(function()
+                                local a = seen[i]
+                                if a.GetFullName then return a:GetFullName() end
+                                if a.get then return a:get():GetFullName() end
+                                return tostring(a)
+                            end)
+                            log("    " .. (okE and nameE or "?"))
+                        end
+                    end
+                end
+            end)
         end
     end)
 end
@@ -469,6 +936,12 @@ for name, keyName in pairs(Config.Keybinds) do
 end
 if Key[Config.Keybinds.Summon] then
     RegisterKeyBind(Key[Config.Keybinds.Summon], { ModifierKey.SHIFT }, CycleSummonClass)
+end
+if Key[Config.Keybinds.Scan] then
+    RegisterKeyBind(Key[Config.Keybinds.Scan], { ModifierKey.SHIFT }, DumpBrain)
+end
+if Key[Config.Keybinds.Infight] then
+    RegisterKeyBind(Key[Config.Keybinds.Infight], { ModifierKey.SHIFT }, TargetDiag)
 end
 
 -- ---------- V2 仇恨矩阵（可选） ----------

@@ -21,7 +21,15 @@ Config.ExcludeClassKeywords = { "Player", "Hero", "Soul", "Protagonist",
 -- 1) 在 Pawn / Controller 上找这些属性名直接写值
 Config.TeamPropertyCandidates = { "GenericTeamId", "TeamId", "TeamID", "Team", "FactionId" }
 -- 2) 在 Pawn / Controller 上找这些函数名调用
-Config.TeamFunctionCandidates = { "SetGenericTeamId", "SetTeamId", "SetTeam", "SetFaction" }
+-- BlueprintSetGenericTeamId 是本作 SGameAI 框架的正门 (2026-10-29 解剖发现)
+Config.TeamFunctionCandidates = { "BlueprintSetGenericTeamId", "SetGenericTeamId",
+    "SetTeamId", "SetTeam", "SetFaction" }
+
+-- 态度 hook：这些函数决定"谁恨谁"，被我们点名的怪强制互相敌对
+Config.AttitudeHookPaths = {
+    "/PBZCombatAsset/Prototypes/AI/BP_PBZAIController.BP_PBZAIController_C:BlueprintGetTeamAttitudeTowards",
+    "/SGameAI/BP_SGameAIController.BP_SGameAIController_C:BlueprintGetTeamAttitudeTowards",
+}
 
 -- 全局互殴时把敌人分成几个阵营（2 = 捉对厮杀，更大 = 混战）
 Config.TeamCount = 2

@@ -47,37 +47,53 @@ function Teams.ReadTeam(pawn)
             local ok, value = pcall(function()
                 local prop = obj[propName]
                 if prop == nil then error("no prop") end
-                if prop.Id ~= nil then return prop.Id end
                 if type(prop) == "number" then return prop end
+                local id = prop.Id
+                if type(id) == "number" then return id end
+                -- UE4SS 对 uint8 字段可能返回代理对象，尝试取值
+                if id ~= nil then
+                    local okG, n = pcall(function() return id:get() end)
+                    if okG and type(n) == "number" then return n end
+                end
                 error("not readable")
             end)
-            if ok and value ~= nil then return value end
+            if ok and type(value) == "number" then return value end
         end
     end
     return nil
 end
 
---- 把 pawn（及其 AIController）写入指定阵营。
---- @return string|nil 成功时返回策略描述，便于在日志里确认哪条路通了
+--- 把 pawn 及其 AIController 都写入指定阵营（AI 感知判断敌我看的是
+--- Controller 的阵营接口，只改 Pawn 等于白改——2026-10-29 实测教训）。
+--- @return string|nil 成功时返回写入摘要（命中了哪些对象/途径）
 function Teams.ApplyTeam(pawn, teamId)
-    local targets = { pawn }
+    local targets = { { obj = pawn, tag = "pawn" } }
     local controller = getController(pawn)
-    if controller then table.insert(targets, controller) end
+    if controller then
+        table.insert(targets, { obj = controller, tag = "ctrl" })
+    end
 
-    for _, obj in ipairs(targets) do
-        for _, propName in ipairs(Config.TeamPropertyCandidates) do
-            if tryWriteProperty(obj, propName, teamId) then
-                return string.format("property %s on %s", propName, obj:GetFullName())
-            end
-        end
-    end
-    for _, obj in ipairs(targets) do
+    local hits = {}
+    for _, t in ipairs(targets) do
+        -- 先走函数（游戏自己的 setter 会同步内部状态），再退属性直写
+        local written = false
         for _, fnName in ipairs(Config.TeamFunctionCandidates) do
-            if tryCallFunction(obj, fnName, teamId) then
-                return string.format("function %s on %s", fnName, obj:GetFullName())
+            if tryCallFunction(t.obj, fnName, teamId) then
+                table.insert(hits, fnName .. "()@" .. t.tag)
+                written = true
+                break
+            end
+        end
+        if not written then
+            for _, propName in ipairs(Config.TeamPropertyCandidates) do
+                if tryWriteProperty(t.obj, propName, teamId) then
+                    table.insert(hits, propName .. "@" .. t.tag)
+                    break
+                end
             end
         end
     end
+    if #hits > 0 then return table.concat(hits, "+") end
     return nil
 end
 
