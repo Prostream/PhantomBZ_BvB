@@ -52,6 +52,36 @@ BP_Monster_* (Pawn)                     ← PBZCharacter_NPC ← PBZCharacter
 **里程碑观察（2026-10-29 23:26）**：仇恨直写 + ForceIntoCombat + 黑板写入三件套后，
 召唤的两只怪**互相攻击了数秒**——但 (1) 互相不掉血；(2) 几秒后目标回弹到玩家。
 
+## 三点五、原生阵营系统（2026-10-30 凌晨发现，取代第三节的多数路线）
+
+用户指出游戏里存在 NPC 互相打架的场景，说明原生战斗管线支持 NPC 打 NPC。顺此在头文件中找到：
+
+- `BP_RenewalNPC` / `BP_RenewalPlayer` 上的 `"Faction Component"`（`UFactionComponent`，属性名带空格）
+  - `SetFactionRelationOverride(OtherActor, ETeamAttitude, Both)`：对单个对手覆盖敌我关系
+  - `GetFactionRelation(OtherActor)` / `GetCurrnetFaction()` / `ClearFactionRelationOverride(OtherActor)`
+  - 阵营是 GameplayTag，关系由 `FFactionTableData` 数据表决定；`UFactionUtils.FilterTargetsByFactionRelation` 按关系筛目标
+  - `UDeflectComponent`（格挡/闪避）、`BP_DamageInstigatorActor` 等也引用阵营组件
+- 官方刷怪：`BP_SGameAIFunctionLibrary` 的 `SpawnAIDefered` + `FinishSpawnAIDefered` + `ActivateAI`
+
+实测（v0.12）：
+
+| 项目 | 结果 |
+| --- | --- |
+| 两只同种怪的原始关系 | **友好**（这是之前所有"打空气"的根源之一） |
+| `SetFactionRelationOverride(对手, 2, true)` | ✅ 生效，读回为敌对，Both 同时设好反方向 |
+| 覆盖后 | 双方 `AI.State.Combat`，真实互相攻击 |
+| 玩家中立：对每只 NPC 覆盖为 1 | ✅ 读回验证 13/13 |
+| 官方 `AddActorToHatredList` | ❌ 仍被拒（阵营改为敌对后依旧），门禁另有条件 |
+| 互相攻击后掉血 | ❌ 无伤害，画面有"透明特效"，无身体碰撞 |
+| 伏击/隐藏/免伤 GE（6 种） | 召唤物身上均**没有**（类 6/6 找到、查询 6/6 成功） |
+| 碰撞 | 胶囊与模型均为 3（查询+物理）/Custom 配置，**未被关闭** |
+| 改用官方刷怪函数召唤 | 结果相同 |
+
+推翻的旧结论：第三节"S-GAME 在引擎层关闭了 NPC 间碰撞"——碰撞是开的，身体互穿只是 Pawn 间不阻挡。
+
+当前嫌疑：命中结算层。`UDeflectComponent` 含 `PerfectDodgeResultData`，若 NPC 互击被结算为完美闪避，会表现为"透明残影 + 无伤"，与实测相符，待验证。
+最有价值的下一步：在游戏原生 NPC 互打的场景用 Shift+F2 读取双方的阵营、效果、碰撞配置做对照。
+
 ## 四、剩下的两个保险丝（下次攻坚目标）
 
 ### 保险丝 A：怪打怪不掉血（伤害过滤）

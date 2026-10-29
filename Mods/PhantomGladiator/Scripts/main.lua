@@ -11,6 +11,12 @@ local UEHelpers = require("UEHelpers")
 local MOD = "[PhantomGladiator]"
 local function log(msg) print(string.format("%s %s\n", MOD, tostring(msg))) end
 
+local function FNameToString(v)
+    local ok, s = pcall(function() return v:ToString() end)
+    if ok and s then return s end
+    return tostring(v)
+end
+
 -- ---------- 基础工具 ----------
 
 -- 真正的玩家控制器：持有 UPlayer、且不是调试相机
@@ -252,6 +258,215 @@ local function AddHatred(attacker, victim)
     return false, "两条路都被拒"
 end
 
+-- ---------- 原生阵营系统 ----------
+-- NPC 和玩家身上的 "Faction Component"（UFactionComponent）决定谁和谁是敌人，
+-- 伤害、格挡、攻击开关等系统都引用它。SetFactionRelationOverride(对手, 关系, Both)
+-- 可以针对单个对手覆盖敌我关系，Both=true 时双方同时生效。
+-- ETeamAttitude: 0=Friendly 1=Neutral 2=Hostile
+
+local ATTITUDE_NAME = { [0] = "友好", [1] = "中立", [2] = "敌对" }
+local HOSTILE, NEUTRAL = 2, 1
+
+local function GetFactionComp(pawn)
+    local ok, fc = pcall(function() return pawn["Faction Component"] end)
+    if ok and fc ~= nil then
+        local okV, v = pcall(function() return fc:IsValid() end)
+        if okV and v then return fc end
+    end
+    return nil
+end
+
+local function ReadRelation(a, b)
+    local fc = GetFactionComp(a)
+    if not fc then return nil end
+    local ok, r = pcall(function() return fc:GetFactionRelation(b) end)
+    if ok and type(r) == "number" then return r end
+    return nil
+end
+
+local function RelationName(r)
+    if r == nil then return "?" end
+    return ATTITUDE_NAME[r] or tostring(r)
+end
+
+local function ReadFactionTag(pawn)
+    local fc = GetFactionComp(pawn)
+    if not fc then return "无阵营组件" end
+    local ok, tag = pcall(function() return fc:GetCurrnetFaction() end)
+    if not ok or tag == nil then return "?" end
+    local okN, n = pcall(function() return FNameToString(tag.TagName) end)
+    return okN and n or "?"
+end
+
+local factionOverrides = {}  -- 怪物之间的覆盖记录 { {a=, b=}, ... }，供重置键清除
+
+-- 把 a 与 b 的关系覆盖为 relation（Both=true 一次设两边）。
+-- 返回 是否调用成功, 覆盖前关系, 覆盖后关系
+local function SetFactionRelation(a, b, relation, noTrack)
+    local fc = GetFactionComp(a)
+    if not fc then return false, nil, nil end
+    local before = ReadRelation(a, b)
+    local ok = pcall(function() fc:SetFactionRelationOverride(b, relation, true) end)
+    local after = ReadRelation(a, b)
+    if ok and not noTrack then table.insert(factionOverrides, { a = a, b = b }) end
+    return ok, before, after
+end
+
+-- ---------- 召唤物的"登场状态"：伏击/隐藏/免伤效果 ----------
+-- 召唤物实测互相攻击但无敌、带半透明特效，且官方加仇恨被拒。怀疑是游戏刷怪时
+-- 挂上的伏击/隐藏类效果（HiddenTagsCanNotBeHatred = 隐藏中不可被仇恨）没被解除：
+-- 正常刷怪会走 ActivateAI，我们是直接造出来的。
+-- 闪避无敌帧、格挡保护属于正常战斗机制，只诊断不移除。
+
+local GE_TO_STRIP = { "GE_IgnoreAllDamage_C", "GE_AmbushTags_C", "GE_HiddenTags_C",
+    "GE_HiddenTagsCanNotBeHatred_C" }
+local GE_TO_REPORT = { "GE_IgnoreAllDamage_C", "GE_AmbushTags_C", "GE_HiddenTags_C",
+    "GE_HiddenTagsCanNotBeHatred_C", "GE_HiddenTags_DodgeInvunlerable_C",
+    "GE_ReadyToDeflectProtect_C" }
+
+local function GetASC(pawn)
+    local ok, asc = pcall(function() return pawn.AbilitySystemComponent end)
+    if ok and asc ~= nil then
+        local okV, v = pcall(function() return asc:IsValid() end)
+        if okV and v then return asc end
+    end
+    return nil
+end
+
+local geClassCache = {}
+local function FindGEClass(name)
+    if geClassCache[name] then return geClassCache[name] end
+    local ok, cls = pcall(FindObject, "BlueprintGeneratedClass", name)
+    if ok and cls ~= nil then
+        local okV, v = pcall(function() return cls:IsValid() end)
+        if okV and v then
+            geClassCache[name] = cls
+            return cls
+        end
+    end
+    return nil
+end
+
+local function ListSuspectGEs(pawn)
+    local asc = GetASC(pawn)
+    if not asc then return "无ASC" end
+    local found, resolved, queried = {}, 0, 0
+    for _, name in ipairs(GE_TO_REPORT) do
+        local cls = FindGEClass(name)
+        if cls then
+            resolved = resolved + 1
+            local ok, n = pcall(function() return asc:GetGameplayEffectCount(cls, nil, true) end)
+            if ok and type(n) == "number" then
+                queried = queried + 1
+                if n > 0 then
+                    table.insert(found, string.format("%s×%d", name:gsub("_C$", ""), n))
+                end
+            end
+        end
+    end
+    local body = #found > 0 and table.concat(found, ", ") or "无"
+    return string.format("%s｜类找到%d/%d 查询成功%d", body, resolved, #GE_TO_REPORT, queried)
+end
+
+local function StripSpawnStateGEs(pawn)
+    local asc = GetASC(pawn)
+    if not asc then return end
+    for _, name in ipairs(GE_TO_STRIP) do
+        local cls = FindGEClass(name)
+        if cls then
+            pcall(function() asc:RemoveActiveGameplayEffectBySourceEffect(cls, nil, -1) end)
+        end
+    end
+end
+
+local aiLib = nil
+local function GetAILib()
+    if aiLib then
+        local okV, v = pcall(function() return aiLib:IsValid() end)
+        if okV and v then return aiLib end
+    end
+    for _, path in ipairs({
+        "/SGameAI/BP_SGameAIFunctionLibrary.Default__BP_SGameAIFunctionLibrary_C",
+        "/SGameAI/Utils/BP_SGameAIFunctionLibrary.Default__BP_SGameAIFunctionLibrary_C",
+    }) do
+        local ok, obj = pcall(StaticFindObject, path)
+        if ok and obj ~= nil and pcall(function() return obj:IsValid() end) and obj:IsValid() then
+            aiLib = obj
+            return obj
+        end
+    end
+    local ok, obj = pcall(FindObject, "BP_SGameAIFunctionLibrary_C",
+        "Default__BP_SGameAIFunctionLibrary_C")
+    if ok and obj ~= nil and pcall(function() return obj:IsValid() end) and obj:IsValid() then
+        aiLib = obj
+        return obj
+    end
+    return nil
+end
+
+-- 碰撞诊断：胶囊体和模型的碰撞是否开启、用的什么碰撞配置
+-- ECollisionEnabled: 0=关 1=仅查询 2=仅物理 3=查询+物理
+local function DescribeCollision(pawn)
+    local function comp(c)
+        if c == nil then return "无" end
+        local okV, v = pcall(function() return c:IsValid() end)
+        if not okV or not v then return "无" end
+        local en, prof = "?", "?"
+        pcall(function() en = tostring(c:GetCollisionEnabled()) end)
+        pcall(function() prof = FNameToString(c:GetCollisionProfileName()) end)
+        return en .. "/" .. prof
+    end
+    local cap, mesh = nil, nil
+    pcall(function() cap = pawn.CapsuleComponent end)
+    pcall(function() mesh = pawn.Mesh end)
+    return string.format("胶囊=%s 模型=%s", comp(cap), comp(mesh))
+end
+
+-- 用游戏官方的刷怪函数生成（刷怪点用的那套），失败返回 nil 和原因
+local function SpawnViaAILib(cls, t, world)
+    local lib = GetAILib()
+    if not lib then return nil, "找不到函数库" end
+    local pawn = nil
+    local ok, err = pcall(function() pawn = lib:SpawnAIDefered(cls, t, nil, world) end)
+    if not ok then return nil, "SpawnAIDefered 报错: " .. tostring(err) end
+    local okV = pawn ~= nil and pcall(function() return pawn:IsValid() end) and pawn:IsValid()
+    if not okV then return nil, "SpawnAIDefered 未返回实例" end
+    local ok2, err2 = pcall(function() lib:FinishSpawnAIDefered(pawn, t, world) end)
+    if not ok2 then
+        pcall(function() pawn:K2_DestroyActor() end)
+        return nil, "FinishSpawnAIDefered 报错: " .. tostring(err2)
+    end
+    return pawn, nil
+end
+
+-- 让召唤物走完正常的登场流程：ActivateAI + 移除伏击/隐藏/免伤效果
+local function FinishEntrance(pawn)
+    local before = ListSuspectGEs(pawn)
+    local activated = false
+    local lib = GetAILib()
+    if lib then
+        activated = pcall(function() lib:ActivateAI(pawn, UEHelpers.GetWorld()) end)
+    end
+    StripSpawnStateGEs(pawn)
+    local after = ListSuspectGEs(pawn)
+    log(string.format("  登场处理: ActivateAI=%s | 可疑效果 前[%s] 后[%s] | %s",
+        lib and tostring(activated) or "找不到函数库", before, after, DescribeCollision(pawn)))
+end
+
+local function ClearAllFactionOverrides()
+    local n = 0
+    for _, pair in ipairs(factionOverrides) do
+        pcall(function()
+            local fa, fb = GetFactionComp(pair.a), GetFactionComp(pair.b)
+            if fa and pair.b:IsValid() then fa:ClearFactionRelationOverride(pair.b) end
+            if fb and pair.a:IsValid() then fb:ClearFactionRelationOverride(pair.a) end
+            n = n + 1
+        end)
+    end
+    factionOverrides = {}
+    return n
+end
+
 -- ---------- 战况监视 + 锁敌续命 ----------
 
 local function GetHP(pawn)
@@ -395,11 +610,24 @@ local function StartDuelWatch(a, b)
                 return
             end
             local hpA, hpB = GetHP(a), GetHP(b)
-            -- Astra 实验：血未归零、降到阈值就执行 Kill（避免先写 0 触发
-            -- 判死前置检查提前返回）
+            local judging = Config.JudgeDamagePerTick and Config.JudgeDamagePerTick > 0
+            if not judging then
+                -- 不判伤：只观察原生战斗，血打空就是游戏自己判的死
+                local deadA = hpA and hpA <= 0
+                local deadB = hpB and hpB <= 0
+                if deadA or deadB then
+                    local verdict = (deadA and deadB) and "同归于尽"
+                        or (deadA and "红方获胜" or "蓝方获胜")
+                    log(string.format("🏆 决斗结束（原生伤害）：%s（蓝 HP=%s 红 HP=%s）",
+                        verdict, tostring(hpA), tostring(hpB)))
+                    watchGen = watchGen + 1
+                    return
+                end
+            end
+            -- 判伤模式：血降到阈值就执行 Kill
             local KT = Config.KillThreshold or 25
-            local lowA = hpA and hpA <= KT
-            local lowB = hpB and hpB <= KT
+            local lowA = judging and hpA and hpA <= KT
+            local lowB = judging and hpB and hpB <= KT
             if lowA or lowB then
                 -- 编导式死亡：Kill() 是瞬间清场（实测无动画），所以先播
                 -- 败者自己的死亡蒙太奇，演完再清场——观感=被打死倒下
@@ -461,8 +689,9 @@ local function StartDuelWatch(a, b)
                 end)
                 return s
             end
-            log(string.format("战况[%d]: 蓝 HP=%s(%s) | 红 HP=%s(%s)",
-                ticks, tostring(hpA), stateOf(a), tostring(hpB), stateOf(b)))
+            log(string.format("战况[%d]: 蓝 HP=%s(%s) | 红 HP=%s(%s) | 关系 蓝→红=%s 红→蓝=%s",
+                ticks, tostring(hpA), stateOf(a), tostring(hpB), stateOf(b),
+                RelationName(ReadRelation(a, b)), RelationName(ReadRelation(b, a))))
             -- Astra 方案：脱战检测式恢复——只有仇恨列表真的丢了对方才
             -- 修复 + 单次补发作战指令（≥10 秒冷却、全场最多 3 次），
             -- 其余时间完全不打扰 AI
@@ -470,6 +699,10 @@ local function StartDuelWatch(a, b)
             local lostA = hmA and not HatredListContains(hmA, b)
             local lostB = hmB and not HatredListContains(hmB, a)
             if lostA or lostB then
+                -- 阵营覆盖可能被游戏重置，先补阵营再补仇恨
+                if ReadRelation(a, b) ~= HOSTILE then
+                    SetFactionRelation(a, b, HOSTILE, true)
+                end
                 AddHatred(a, b)
                 AddHatred(b, a)
                 if (ticks - lastForceTick) >= 4 and forceCount < 3 then
@@ -492,9 +725,12 @@ local function StartDuelWatch(a, b)
 end
 
 local function ForceAttack(attacker, victim)
+    -- 先走阵营正门：关系覆盖为敌对后，官方 AddActorToHatredList 的门禁应当放行
+    local okF, before, after = SetFactionRelation(attacker, victim, HOSTILE)
     local okHate, how = AddHatred(attacker, victim)
-    log(string.format("  拉仇恨 %s → %s", okHate and ("成功(" .. how .. ")") or ("失败: " .. tostring(how)),
-        ""))
+    log(string.format("  阵营关系 %s→%s（覆盖%s） | 拉仇恨 %s",
+        RelationName(before), RelationName(after), okF and "成功" or "失败",
+        okHate and ("成功(" .. how .. ")") or ("失败: " .. tostring(how))))
     local sg = GetAIComp(attacker)
     if not sg then return okHate end
     local okForce = pcall(function() sg:ForceIntoCombat(victim) end)
@@ -590,21 +826,26 @@ local function GlobalInfight()
     ExecuteInGameThread(function()
         EnsureAttitudeHooks()
         local npcs = CollectNPCs()
-        local okCount, strategyUsed = 0, nil
+        local okCount = 0
+        local teamIdx = {}
         for i, pawn in ipairs(npcs) do
-            local teamId = Config.TeamIdBase + (i % Config.TeamCount)
-            local strategy = ApplyTeamTracked(pawn, teamId)
-            if strategy then
-                okCount = okCount + 1
-                strategyUsed = strategyUsed or strategy
+            teamIdx[i] = i % Config.TeamCount
+            ApplyTeamTracked(pawn, Config.TeamIdBase + teamIdx[i])
+        end
+        -- 不同队的每一对都用原生阵营接口设为敌对
+        local pairCount, pairsOk = 0, 0
+        for i = 1, #npcs do
+            for j = i + 1, #npcs do
+                if teamIdx[i] ~= teamIdx[j] then
+                    pairCount = pairCount + 1
+                    local ok, _, after = SetFactionRelation(npcs[i], npcs[j], HOSTILE)
+                    if ok and after == HOSTILE then pairsOk = pairsOk + 1 end
+                end
             end
         end
-        if okCount > 0 then
-            log(string.format("全场互殴！%d/%d 个 NPC 已分成 %d 个阵营（策略: %s）",
-                okCount, #npcs, Config.TeamCount, strategyUsed))
-        else
-            log("阵营写入全部失败（适配问题，见 README）")
-        end
+        okCount = #npcs
+        log(string.format("全场互殴！%d 个 NPC 分成 %d 队，敌对关系 %d/%d 对生效",
+            okCount, Config.TeamCount, pairsOk, pairCount))
     end)
 end
 
@@ -628,6 +869,10 @@ local function DuelNearest()
             log("场上不足两个 NPC，无法决斗")
             return
         end
+        log(string.format("  决斗双方可疑效果: [%s] vs [%s]",
+            ListSuspectGEs(npcs[1]), ListSuspectGEs(npcs[2])))
+        log(string.format("  决斗双方碰撞: [%s] vs [%s]",
+            DescribeCollision(npcs[1]), DescribeCollision(npcs[2])))
         ApplyTeamTracked(npcs[1], Config.TeamIdBase)
         ApplyTeamTracked(npcs[2], Config.TeamIdBase + 1)
         local f1 = ForceAttack(npcs[1], npcs[2])
@@ -654,13 +899,27 @@ local function ResetTeams()
         originalTeams = {}
         teamOf = {}
         Hatred.Reset()
-        log(string.format("已把 %d 个 NPC 恢复到原始阵营（态度 hook 名单已清空）", okCount))
+        local cleared = ClearAllFactionOverrides()
+        log(string.format("已把 %d 个 NPC 恢复到原始阵营，清除 %d 组阵营关系覆盖",
+            okCount, cleared))
     end)
 end
 
 -- ---------- 玩家中立化开关 ----------
 
 local playerOrigTeam = nil
+local neutralNPCs = {}  -- 已对玩家覆盖为中立的 NPC
+
+-- 让一只 NPC 对玩家中立：原生阵营覆盖 + 从它的仇恨列表里除名
+local function NeutralizeAgainstPlayer(npc, player)
+    local ok, _, after = SetFactionRelation(npc, player, NEUTRAL, true)
+    pcall(function()
+        local hm = GetHatredComp(npc)
+        if hm then hm:RemoveActorFromHatredList(player) end
+    end)
+    if ok then table.insert(neutralNPCs, npc) end
+    return ok and after == NEUTRAL
+end
 
 local function TogglePlayerNeutral()
     ExecuteInGameThread(function()
@@ -674,27 +933,31 @@ local function TogglePlayerNeutral()
         if not playerNeutral then
             playerOrigTeam = Teams.ReadTeam(pawn)
             Teams.ApplyTeam(pawn, Config.NeutralTeamId)
-            -- 真正的隐身：把玩家从所有 NPC 的原生仇恨列表里除名
-            local cleared = 0
-            for _, npc in ipairs(CollectNPCs()) do
-                local hm = GetHatredComp(npc)
-                if hm then
-                    local okR = pcall(function()
-                        hm:RemoveActorFromHatredList(pawn)
-                    end)
-                    if okR then cleared = cleared + 1 end
-                end
+            local npcs = CollectNPCs()
+            local okN = 0
+            for _, npc in ipairs(npcs) do
+                if NeutralizeAgainstPlayer(npc, pawn) then okN = okN + 1 end
             end
             playerNeutral = true
-            log(string.format("玩家已中立化：从 %d 个怪的仇恨列表中除名；再按一次恢复", cleared))
+            log(string.format("玩家已中立化：%d/%d 个怪对你的阵营关系已覆盖为中立；再按一次恢复",
+                okN, #npcs))
         else
-            local target = playerOrigTeam or 0
-            if Teams.ApplyTeam(pawn, target) then
-                playerNeutral = false
-                log(string.format("玩家阵营已恢复为 %d", target))
-            else
-                log("恢复失败")
+            local cleared = 0
+            for _, npc in ipairs(neutralNPCs) do
+                pcall(function()
+                    if npc:IsValid() then
+                        local fc = GetFactionComp(npc)
+                        if fc then
+                            fc:ClearFactionRelationOverride(pawn)
+                            cleared = cleared + 1
+                        end
+                    end
+                end)
             end
+            neutralNPCs = {}
+            Teams.ApplyTeam(pawn, playerOrigTeam or 0)
+            playerNeutral = false
+            log(string.format("玩家中立已解除（清除 %d 只怪的中立覆盖）", cleared))
         end
     end)
 end
@@ -748,31 +1011,40 @@ local function SummonSelected()
             log("召唤失败：GameplayStatics/World 不可用")
             return
         end
-        local actor = nil
-        -- UE5 不同小版本参数个数不同，两种签名都试
-        local ok = pcall(function()
-            actor = gps:BeginDeferredActorSpawnFromClass(world, entry.class, t, 1, nil, 1)
-        end)
-        if not ok or not actor or not actor:IsValid() then
-            ok = pcall(function()
-                actor = gps:BeginDeferredActorSpawnFromClass(world, entry.class, t, 1, nil)
+        -- 优先走游戏官方刷怪函数；失败再退回引擎通用生成
+        local actor, why = SpawnViaAILib(entry.class, t, world)
+        local okFin, errFin = actor ~= nil, nil
+        if actor then
+            log("  召唤途径: 官方刷怪函数")
+        else
+            log("  召唤途径: 引擎通用生成（官方刷怪失败: " .. tostring(why) .. "）")
+            -- UE5 不同小版本参数个数不同，两种签名都试
+            local ok = pcall(function()
+                actor = gps:BeginDeferredActorSpawnFromClass(world, entry.class, t, 1, nil, 1)
             end)
-        end
-        if not ok or not actor or not actor:IsValid() then
-            log("召唤失败：BeginDeferredActorSpawnFromClass 未返回实例")
-            return
-        end
-        -- 5.4+ 多了 TransformScaleMethod 参数，反射调用可能必填：两种签名都试
-        local okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t, 1) end)
-        if not okFin then
-            okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t) end)
+            if not ok or not actor or not actor:IsValid() then
+                ok = pcall(function()
+                    actor = gps:BeginDeferredActorSpawnFromClass(world, entry.class, t, 1, nil)
+                end)
+            end
+            if not ok or not actor or not actor:IsValid() then
+                log("召唤失败：BeginDeferredActorSpawnFromClass 未返回实例")
+                return
+            end
+            -- 5.4+ 多了 TransformScaleMethod 参数，反射调用可能必填：两种签名都试
+            okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t, 1) end)
+            if not okFin then
+                okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t) end)
+            end
         end
         if okFin then
             -- 擂台模式：召唤物交替分蓝/红队，并与上一只互种仇恨，落地即开打
             EnsureAttitudeHooks()
+            FinishEntrance(actor)
+            if playerNeutral then NeutralizeAgainstPlayer(actor, player) end
             summonCount = summonCount + 1
             local teamId = Config.TeamIdBase + (summonCount % 2)
-            local strategy = ApplyTeamTracked(actor, teamId)
+            ApplyTeamTracked(actor, teamId)
             local fightNote = ""
             if lastSummoned and lastSummoned:IsValid() then
                 local fA = ForceAttack(actor, lastSummoned)
@@ -785,9 +1057,6 @@ local function SummonSelected()
             lastSummoned = actor
             log(string.format("已在面前召唤: %s（%s队%s）", entry.name,
                 summonCount % 2 == 0 and "红" or "蓝", fightNote))
-            if not strategy then
-                log("（召唤物阵营写入失败，它会打玩家：按 F8 中立化自保）")
-            end
         else
             -- 清理半成品，别留一只不会动的"雕像"在场上
             pcall(function() actor:K2_DestroyActor() end)
@@ -920,12 +1189,6 @@ end
 
 -- ---------- 目标系统诊断（Shift+互殴键）：读出双方的目标类型标签 ----------
 
-local function FNameToString(v)
-    local ok, s = pcall(function() return v:ToString() end)
-    if ok and s then return s end
-    return tostring(v)
-end
-
 local function ReadTargetTypes(pawn, label)
     local ok, err = pcall(function()
         local out = {}
@@ -996,6 +1259,24 @@ local function TargetDiag()
             ReadActorTags(player, "玩家")
         end
         local npcs = CollectNPCs()
+        if player then
+            log("玩家 阵营: " .. ReadFactionTag(player))
+        end
+        -- 附近每只 NPC 的阵营标签和它对玩家的关系（在原生 NPC 互打的场景按这个键，
+        -- 能直接看到双方用的阵营）
+        for i = 1, math.min(#npcs, 8) do
+            local rel = player and RelationName(ReadRelation(npcs[i], player)) or "?"
+            local okN, n = pcall(function()
+                return npcs[i]:GetClass():GetFullName():match("([%w_]+)$")
+            end)
+            log(string.format("  NPC[%d] %s 阵营=%s 对玩家=%s 可疑效果=[%s] %s", i,
+                okN and n or "?", ReadFactionTag(npcs[i]), rel, ListSuspectGEs(npcs[i]),
+                DescribeCollision(npcs[i])))
+        end
+        if #npcs >= 2 then
+            log(string.format("  NPC[1]→NPC[2] 关系=%s",
+                RelationName(ReadRelation(npcs[1], npcs[2]))))
+        end
         if #npcs > 0 then
             ReadTargetTypes(npcs[1], "怪物")
             ReadActorTags(npcs[1], "怪物")
