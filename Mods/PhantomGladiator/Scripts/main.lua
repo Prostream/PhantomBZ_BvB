@@ -21,6 +21,16 @@ local function GetPlayerPawn()
         return pc and pc:IsValid() and pc.Pawn or nil
     end)
     if ok and pawn and pawn:IsValid() then return pawn end
+    -- 兜底：UEHelpers 拿不到时，遍历 PlayerController 找第一个有 Pawn 的
+    local ok2, found = pcall(FindAllOf, "PlayerController")
+    if ok2 and found then
+        for _, pc in ipairs(found) do
+            local okP, p = pcall(function()
+                return pc:IsValid() and pc.Pawn or nil
+            end)
+            if okP and p and p:IsValid() then return p end
+        end
+    end
     return nil
 end
 
@@ -161,14 +171,20 @@ end
 local dilationIndex = 1
 local function CycleSlowMo()
     ExecuteInGameThread(function()
-        local ok = pcall(function()
-            local ws = FindFirstOf("WorldSettings")
-            if not ws or not ws:IsValid() then error("no WorldSettings") end
-            dilationIndex = dilationIndex % #Config.TimeDilationSteps + 1
-            ws.TimeDilation = Config.TimeDilationSteps[dilationIndex]
-        end)
-        if ok then
-            log(string.format("时间流速: %.2fx", Config.TimeDilationSteps[dilationIndex]))
+        -- 游戏可能同时存在多个世界实例（主世界/菜单/流送），对全部生效
+        dilationIndex = dilationIndex % #Config.TimeDilationSteps + 1
+        local target = Config.TimeDilationSteps[dilationIndex]
+        local count = 0
+        local ok, list = pcall(FindAllOf, "WorldSettings")
+        if ok and list then
+            for _, ws in ipairs(list) do
+                if pcall(function() ws.TimeDilation = target end) then
+                    count = count + 1
+                end
+            end
+        end
+        if count > 0 then
+            log(string.format("时间流速: %.2fx（%d 个世界）", target, count))
         else
             log("设置 TimeDilation 失败")
         end
@@ -177,23 +193,65 @@ end
 
 -- ---------- F6: 自由镜头（调试相机） ----------
 
+-- 退出自由镜头。Shipping 版的 DebugCameraController 没有自己的 CheatManager
+-- （被编译剔除），而原生退出流程恰恰依赖它：现场构造一个再调 DisableDebugCamera，
+-- 引擎就会走正规的控制权交还。实测有效 (2026-10-29)。
+local function ExitFreeCam(dcc)
+    local cm = dcc.CheatManager
+    if not cm or not cm:IsValid() then
+        local cmClass = StaticFindObject("/Script/Engine.CheatManager")
+        if not cmClass or not cmClass:IsValid() then
+            error("CheatManager class not found")
+        end
+        cm = StaticConstructObject(cmClass, dcc)
+        if not cm or not cm:IsValid() then
+            error("construct CheatManager failed")
+        end
+        dcc.CheatManager = cm
+    end
+    cm:DisableDebugCamera()
+end
+
 local function ToggleFreeCam()
     ExecuteInGameThread(function()
-        local ok, err = pcall(function()
-            local kismet = UEHelpers.GetKismetSystemLibrary()
-            local world = UEHelpers.GetWorld()
-            local pc = UEHelpers.GetPlayerController()
-            kismet:ExecuteConsoleCommand(world, "ToggleDebugCamera", pc)
-        end)
-        if ok then
-            log("切换自由镜头（若无反应说明 Shipping 版剔除了 DebugCamera，请改用 UE4SS 自带 FreeCam: 见 README）")
-        else
-            log("自由镜头失败: " .. tostring(err))
+        -- 智能开关：调试相机激活中 → 退出；否则 → 进入
+        local dcc = FindFirstOf("DebugCameraController")
+        if dcc and dcc:IsValid() and pcall(function()
+            return dcc.Player and dcc.Player:IsValid()
+        end) and dcc.Player and dcc.Player:IsValid() then
+            local ok, err = pcall(ExitFreeCam, dcc)
+            log(ok and "自由镜头：已退出" or ("退出失败: " .. tostring(err)))
+            return
         end
+        local ok = pcall(function()
+            local cheat = FindFirstOf("CheatManager")
+            if not cheat or not cheat:IsValid() then error("no CheatManager") end
+            cheat:ToggleDebugCamera()
+        end)
+        log(ok and "自由镜头：已进入（WASD 移动，再按 F6 退出）"
+               or "自由镜头进入失败（CheatManager 不可用）")
     end)
 end
 
 -- ---------- 按键注册 ----------
+
+-- F7: 强制退出自由镜头。只退不进：对所有 CheatManager 调 DisableDebugCamera，
+-- 无论当前哪个控制器掌权都能回到玩家视角
+local function ForceExitFreeCam()
+    ExecuteInGameThread(function()
+        local dcc = FindFirstOf("DebugCameraController")
+        if not dcc or not dcc:IsValid() then
+            log("没有激活的 DebugCameraController，无需退出")
+            return
+        end
+        local ok, err = pcall(ExitFreeCam, dcc)
+        if ok then
+            log("强制退出自由镜头：控制权已交还")
+        else
+            log("强制退出失败: " .. tostring(err) .. "（只能重启游戏了）")
+        end
+    end)
+end
 
 RegisterKeyBind(Key.F1, ScanNPCs)
 RegisterKeyBind(Key.F2, GlobalInfight)
@@ -201,6 +259,7 @@ RegisterKeyBind(Key.F3, DuelNearest)
 RegisterKeyBind(Key.F4, ResetTeams)
 RegisterKeyBind(Key.F5, CycleSlowMo)
 RegisterKeyBind(Key.F6, ToggleFreeCam)
+RegisterKeyBind(Key.F7, ForceExitFreeCam)
 
 -- ---------- V2 仇恨矩阵（可选） ----------
 

@@ -13,7 +13,9 @@ local Config = {}
 Config.EnemyClasses = { "Character" }
 
 -- 类名里含有这些关键词的 Pawn 视为玩家/友方，永不参与斗蛐蛐
-Config.ExcludeClassKeywords = { "Player", "Hero", "Soul", "Protagonist" }
+Config.ExcludeClassKeywords = { "Player", "Hero", "Soul", "Protagonist",
+    -- 影之刃零: 主角"魂"的 Blueprint 类 (实测 2026-10-29)
+    "Renewal_Hun" }
 
 -- 阵营写入策略（按顺序尝试，成功即停）：
 -- 1) 在 Pawn / Controller 上找这些属性名直接写值
