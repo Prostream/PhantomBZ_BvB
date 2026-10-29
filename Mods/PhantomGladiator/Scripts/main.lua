@@ -298,6 +298,37 @@ local function ReadFactionTag(pawn)
     return okN and n or "?"
 end
 
+local originalFaction = {}  -- addr -> { pawn=, tag= } 改阵营前的原阵营，供重置键改回
+
+-- 把 pawn 的阵营改成 tagName（原生 SetFaction），读回验证
+local function SetFactionTag(pawn, tagName)
+    local fc = GetFactionComp(pawn)
+    if not fc then return false end
+    local addr = pawn:GetAddress()
+    if not originalFaction[addr] then
+        originalFaction[addr] = { pawn = pawn, tag = ReadFactionTag(pawn) }
+    end
+    pcall(function() fc:SetFaction({ TagName = FName(tagName) }) end)
+    return ReadFactionTag(pawn) == tagName
+end
+
+local function RestoreFactionTags()
+    local n = 0
+    for _, rec in pairs(originalFaction) do
+        pcall(function()
+            if rec.pawn:IsValid() and rec.tag and rec.tag:find("^Faction%.") then
+                local fc = GetFactionComp(rec.pawn)
+                if fc then
+                    fc:SetFaction({ TagName = FName(rec.tag) })
+                    n = n + 1
+                end
+            end
+        end)
+    end
+    originalFaction = {}
+    return n
+end
+
 local factionOverrides = {}  -- 怪物之间的覆盖记录 { {a=, b=}, ... }，供重置键清除
 
 -- 把 a 与 b 的关系覆盖为 relation（Both=true 一次设两边）。
@@ -875,6 +906,11 @@ local function DuelNearest()
             DescribeCollision(npcs[1]), DescribeCollision(npcs[2])))
         ApplyTeamTracked(npcs[1], Config.TeamIdBase)
         ApplyTeamTracked(npcs[2], Config.TeamIdBase + 1)
+        if Config.SwitchFactionTo ~= "" then
+            local okT = SetFactionTag(npcs[1], Config.SwitchFactionTo)
+            log(string.format("  决斗第一方阵营 → %s：%s", Config.SwitchFactionTo,
+                okT and "成功" or "失败"))
+        end
         local f1 = ForceAttack(npcs[1], npcs[2])
         local f2 = ForceAttack(npcs[2], npcs[1])
         SeedHatred(npcs[1], npcs[2])
@@ -900,8 +936,9 @@ local function ResetTeams()
         teamOf = {}
         Hatred.Reset()
         local cleared = ClearAllFactionOverrides()
-        log(string.format("已把 %d 个 NPC 恢复到原始阵营，清除 %d 组阵营关系覆盖",
-            okCount, cleared))
+        local restored = RestoreFactionTags()
+        log(string.format("已把 %d 个 NPC 恢复到原始阵营，清除 %d 组阵营关系覆盖，改回 %d 个阵营标签",
+            okCount, cleared, restored))
     end)
 end
 
@@ -1045,6 +1082,12 @@ local function SummonSelected()
             summonCount = summonCount + 1
             local teamId = Config.TeamIdBase + (summonCount % 2)
             ApplyTeamTracked(actor, teamId)
+            -- 蓝方（单数）改到另一个原生阵营，让双方按游戏阵营表天然敌对
+            if summonCount % 2 == 1 and Config.SwitchFactionTo ~= "" then
+                local okT = SetFactionTag(actor, Config.SwitchFactionTo)
+                log(string.format("  蓝方阵营 → %s：%s（现为 %s）", Config.SwitchFactionTo,
+                    okT and "成功" or "失败", ReadFactionTag(actor)))
+            end
             local fightNote = ""
             if lastSummoned and lastSummoned:IsValid() then
                 local fA = ForceAttack(actor, lastSummoned)
@@ -1334,6 +1377,72 @@ local function TargetDiag()
     end)
 end
 
+-- ---------- 碰撞通道对照（Shift+决斗键）：玩家 vs 最近的怪 ----------
+-- 每个碰撞组件输出：对象类型、碰撞开关、对 32 个通道的反应（0 忽略 1 重叠 2 阻挡）。
+-- 怪物攻击检测线如果只扫"玩家受击框"那类通道，而怪物身上没有对应反应的组件，
+-- 怪打怪就会打空——对照这张表能直接看出来。
+
+local function DumpCollisionMatrix()
+    ExecuteInGameThread(function()
+        local primClass = StaticFindObject("/Script/Engine.PrimitiveComponent")
+        if not primClass or not primClass:IsValid() then
+            log("碰撞对照失败：找不到 PrimitiveComponent 类")
+            return
+        end
+        local lines = {}
+        local function emit(s) table.insert(lines, s) end
+        local function dumpActor(actor, label)
+            emit("######## " .. label .. " " .. actor:GetFullName())
+            local comps = nil
+            local ok = pcall(function() comps = actor:K2_GetComponentsByClass(primClass) end)
+            if not ok or not comps then
+                emit("  (取组件失败)")
+                return
+            end
+            for i = 1, #comps do
+                pcall(function()
+                    local c = comps[i]
+                    if not c:IsValid() then return end
+                    local name = c:GetFullName():match("([%w_]+)$") or "?"
+                    local objType, enabled, prof = "?", "?", "?"
+                    pcall(function() objType = tostring(c:GetCollisionObjectType()) end)
+                    pcall(function() enabled = tostring(c:GetCollisionEnabled()) end)
+                    pcall(function() prof = FNameToString(c:GetCollisionProfileName()) end)
+                    local resp = {}
+                    for ch = 0, 31 do
+                        local r = "?"
+                        pcall(function() r = tostring(c:GetCollisionResponseToChannel(ch)) end)
+                        table.insert(resp, r)
+                    end
+                    emit(string.format("  %-40s 类型=%s 开关=%s 配置=%s", name, objType, enabled, prof))
+                    emit("    通道0-31: " .. table.concat(resp, ""))
+                end)
+            end
+        end
+        local player = GetPlayerPawn()
+        if player then dumpActor(player, "玩家") end
+        local pLoc = player and GetLocation(player)
+        local npcs = CollectNPCs()
+        if pLoc then
+            table.sort(npcs, function(a, b)
+                local la, lb = GetLocation(a), GetLocation(b)
+                if not la then return false end
+                if not lb then return true end
+                return DistSq(la, pLoc) < DistSq(lb, pLoc)
+            end)
+        end
+        if npcs[1] then dumpActor(npcs[1], "怪物") end
+        local f = io.open("collision_matrix.txt", "w")
+        if f then
+            f:write(table.concat(lines, "\n"))
+            f:close()
+            log(string.format("碰撞对照完成：%d 行已写入 collision_matrix.txt", #lines))
+        else
+            log("碰撞对照写文件失败")
+        end
+    end)
+end
+
 -- ---------- 慢动作 ----------
 
 local dilationIndex = 1
@@ -1469,6 +1578,9 @@ if Key[Config.Keybinds.Scan] then
 end
 if Key[Config.Keybinds.Infight] then
     RegisterKeyBind(Key[Config.Keybinds.Infight], { ModifierKey.SHIFT }, TargetDiag)
+end
+if Key[Config.Keybinds.Duel] then
+    RegisterKeyBind(Key[Config.Keybinds.Duel], { ModifierKey.SHIFT }, DumpCollisionMatrix)
 end
 
 -- ---------- V2 仇恨矩阵（可选） ----------

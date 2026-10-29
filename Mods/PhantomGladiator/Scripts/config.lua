@@ -55,6 +55,11 @@ Config.Keybinds = {
 -- 玩家中立化写入的阵营 ID（FGenericTeamId::NoTeam = 255）
 Config.NeutralTeamId = 255
 
+-- 召唤蓝方 / 决斗第一方改到这个原生阵营（实测：怪物默认都是 Faction.Enemy，
+-- 玩家是 Faction.Player）。改成另一阵营后，游戏所有按阵营判断敌我的系统都会
+-- 把双方当敌人，而不只是我们覆盖的那一处关系。留空 "" 则不改阵营
+Config.SwitchFactionTo = "Faction.Player"
+
 -- 召唤位置：玩家前方多少厘米、抬高多少厘米
 Config.SummonDistance = 400
 Config.SummonHeightOffset = 50
