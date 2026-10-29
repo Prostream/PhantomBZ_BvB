@@ -30,7 +30,31 @@ Config.TeamIdBase = 50
 -- 重置时写回的阵营 ID。TODO(解包后): 用 Live View 看敌人原始值后修改
 Config.DefaultTeamId = 1
 
--- 慢动作档位（F5 循环切换）
+-- 按键映射（改这里换键位；键名见 UE4SS 的 Key 枚举，如 "F1"、"NUM_ONE"、"K"）
+-- Summon 键加 Shift = 切换要召唤的怪
+Config.Keybinds = {
+    Scan = "F1",          -- 扫描场上 NPC（同时登记进召唤图鉴）
+    Infight = "F2",       -- 全场互殴
+    Duel = "F3",          -- 决斗：最近两个 NPC 互杀（自动种仇恨）
+    Reset = "F4",         -- 恢复所有被改过的阵营
+    SlowMo = "F5",        -- 慢动作档位
+    FreeCam = "F6",       -- 自由镜头开/关
+    ForceExitCam = "F7",  -- 强制退出自由镜头
+    PlayerNeutral = "F8", -- 玩家中立化开关（怪物无视你）
+    Summon = "F9",        -- 在面前召唤选中的怪
+}
+
+-- 玩家中立化写入的阵营 ID（FGenericTeamId::NoTeam = 255）
+Config.NeutralTeamId = 255
+
+-- 召唤位置：玩家前方多少厘米、抬高多少厘米
+Config.SummonDistance = 400
+Config.SummonHeightOffset = 50
+
+-- 种仇恨的点火伤害（互相打一下，触发 AI 的受击感知）
+Config.SeedDamage = 1.0
+
+-- 慢动作档位（循环切换）
 Config.TimeDilationSteps = { 1.0, 0.5, 0.2, 0.05 }
 
 -- V2 仇恨矩阵（实验性，默认关）。

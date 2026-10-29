@@ -1,7 +1,7 @@
 -- ============================================================
 -- PhantomGladiator — 《影之刃零》斗蛐蛐 Mod (UE4SS Lua)
--- 让 NPC 互相为敌、观战、慢动作、自由镜头。
--- 状态: v0.1 脚手架 — 通用策略链已就绪，游戏特定类名见 config.lua
+-- 让 NPC 互相为敌、召唤单位、观战、慢动作、自由镜头。
+-- 按键见 config.lua 的 Keybinds 表，可自行改键。
 -- ============================================================
 local Config = require("config")
 local Teams = require("teams")
@@ -11,8 +11,6 @@ local UEHelpers = require("UEHelpers")
 local MOD = "[PhantomGladiator]"
 local function log(msg) print(string.format("%s %s\n", MOD, tostring(msg))) end
 
-log("loading... 按 F1 扫描 / F2 全场互殴 / F3 决斗 / F4 重置 / F5 慢动作 / F6 自由镜头")
-
 -- ---------- 基础工具 ----------
 
 local function GetPlayerPawn()
@@ -21,7 +19,7 @@ local function GetPlayerPawn()
         return pc and pc:IsValid() and pc.Pawn or nil
     end)
     if ok and pawn and pawn:IsValid() then return pawn end
-    -- 兜底：UEHelpers 拿不到时，遍历 PlayerController 找第一个有 Pawn 的
+    -- 兜底：遍历 PlayerController 找第一个有 Pawn 的
     local ok2, found = pcall(FindAllOf, "PlayerController")
     if ok2 and found then
         for _, pc in ipairs(found) do
@@ -54,7 +52,64 @@ local function IsExcluded(pawn)
     return false
 end
 
---- 扫描场上所有候选 NPC（排除玩家与友方关键词）
+local function GetGameplayStatics()
+    local gps = StaticFindObject("/Script/Engine.Default__GameplayStatics")
+    if gps and gps:IsValid() then return gps end
+    return nil
+end
+
+-- ---------- 阵营快照（F4 恢复原状的依据） ----------
+
+local originalTeams = {}   -- addr -> 原始阵营 ID
+
+local function ApplyTeamTracked(pawn, teamId)
+    local addr = pawn:GetAddress()
+    if originalTeams[addr] == nil then
+        local orig = Teams.ReadTeam(pawn)
+        if orig ~= nil then originalTeams[addr] = orig end
+    end
+    return Teams.ApplyTeam(pawn, teamId)
+end
+
+-- ---------- 召唤图鉴（F1 扫描时登记；后续版本接 AssetRegistry 全量目录） ----------
+
+local catalog = {}         -- { {name=短类名, class=UClass}, ... }
+local catalogIndex = 0
+local catalogSeen = {}
+
+local function RegisterInCatalog(pawn)
+    local ok = pcall(function()
+        local cls = pawn:GetClass()
+        if not cls or not cls:IsValid() then return end
+        local full = cls:GetFullName()
+        if catalogSeen[full] then return end
+        catalogSeen[full] = true
+        local short = full:match("([%w_]+)%s*$") or full
+        table.insert(catalog, { name = short, class = cls })
+        if catalogIndex == 0 then catalogIndex = 1 end
+    end)
+    return ok
+end
+
+-- ---------- 种仇恨：互相打 1 点伤害，触发 AI 的受击感知 ----------
+
+local function SeedHatred(a, b)
+    local gps = GetGameplayStatics()
+    if not gps then return false end
+    local dmgType = StaticFindObject("/Script/Engine.DamageType")
+    local function hit(victim, attacker)
+        return pcall(function()
+            local instigator = attacker.Controller
+            gps:ApplyDamage(victim, Config.SeedDamage, instigator, attacker, dmgType)
+        end)
+    end
+    local ok1 = hit(b, a)
+    local ok2 = hit(a, b)
+    return ok1 and ok2
+end
+
+-- ---------- 扫描 ----------
+
 local function CollectNPCs()
     local player = GetPlayerPawn()
     local playerAddr = player and player:GetAddress() or nil
@@ -76,8 +131,6 @@ local function CollectNPCs()
     return result
 end
 
--- ---------- F1: 扫描并列出 NPC ----------
-
 local function ScanNPCs()
     ExecuteInGameThread(function()
         local npcs = CollectNPCs()
@@ -85,18 +138,21 @@ local function ScanNPCs()
         local pLoc = player and GetLocation(player)
         log(string.format("扫描到 %d 个候选 NPC:", #npcs))
         for i, pawn in ipairs(npcs) do
+            RegisterInCatalog(pawn)
             local dist = -1
             local loc = GetLocation(pawn)
             if loc and pLoc then dist = math.sqrt(DistSq(loc, pLoc)) / 100 end
             log(string.format("  [%d] %s  距离 %.1fm", i, pawn:GetFullName(), dist))
         end
+        log(string.format("召唤图鉴共 %d 种（Shift+%s 切换 / %s 召唤）",
+            #catalog, Config.Keybinds.Summon, Config.Keybinds.Summon))
         if #npcs == 0 then
-            log("没扫到 NPC。请调整 config.EnemyClasses（用 UE4SS Live View 看真实类名）")
+            log("没扫到 NPC。请调整 config.EnemyClasses")
         end
     end)
 end
 
--- ---------- F2: 全场互殴 ----------
+-- ---------- 全场互殴 / 决斗 / 恢复 ----------
 
 local function GlobalInfight()
     ExecuteInGameThread(function()
@@ -104,7 +160,7 @@ local function GlobalInfight()
         local okCount, strategyUsed = 0, nil
         for i, pawn in ipairs(npcs) do
             local teamId = Config.TeamIdBase + (i % Config.TeamCount)
-            local strategy = Teams.ApplyTeam(pawn, teamId)
+            local strategy = ApplyTeamTracked(pawn, teamId)
             if strategy then
                 okCount = okCount + 1
                 strategyUsed = strategyUsed or strategy
@@ -114,14 +170,10 @@ local function GlobalInfight()
             log(string.format("全场互殴！%d/%d 个 NPC 已分成 %d 个阵营（策略: %s）",
                 okCount, #npcs, Config.TeamCount, strategyUsed))
         else
-            log("阵营写入全部失败 — 本作不走标准阵营接口。")
-            log("下一步: 用 UE4SS Live View 观察敌人索敌时变化的属性，把名字填进 config.lua，")
-            log("或在 Dump 里找目标选择函数，改用 hook 方案（见 README 适配指南）。")
+            log("阵营写入全部失败（适配问题，见 README）")
         end
     end)
 end
-
--- ---------- F3: 决斗模式（离玩家最近的两个 NPC 互殴） ----------
 
 local function DuelNearest()
     ExecuteInGameThread(function()
@@ -142,36 +194,139 @@ local function DuelNearest()
             log("场上不足两个 NPC，无法决斗")
             return
         end
-        local s1 = Teams.ApplyTeam(npcs[1], Config.TeamIdBase)
-        local s2 = Teams.ApplyTeam(npcs[2], Config.TeamIdBase + 1)
+        local s1 = ApplyTeamTracked(npcs[1], Config.TeamIdBase)
+        local s2 = ApplyTeamTracked(npcs[2], Config.TeamIdBase + 1)
         if s1 and s2 then
-            log(string.format("决斗开始: %s  VS  %s", npcs[1]:GetFullName(), npcs[2]:GetFullName()))
+            local seeded = SeedHatred(npcs[1], npcs[2])
+            log(string.format("决斗开始: %s VS %s%s",
+                npcs[1]:GetFullName(), npcs[2]:GetFullName(),
+                seeded and "（已互种仇恨）" or "（种仇恨失败，靠感知自然索敌）"))
         else
-            log("决斗阵营写入失败（同 F2 的适配问题）")
+            log("决斗阵营写入失败")
         end
     end)
 end
-
--- ---------- F4: 重置阵营 ----------
 
 local function ResetTeams()
     ExecuteInGameThread(function()
         local npcs = CollectNPCs()
         local okCount = 0
         for _, pawn in ipairs(npcs) do
-            if Teams.ApplyTeam(pawn, Config.DefaultTeamId) then okCount = okCount + 1 end
+            local addr = pawn:GetAddress()
+            local orig = originalTeams[addr]
+            if orig ~= nil then
+                if Teams.ApplyTeam(pawn, orig) then okCount = okCount + 1 end
+            end
         end
+        originalTeams = {}
         Hatred.Reset()
-        log(string.format("已重置 %d 个 NPC 的阵营为 %d", okCount, Config.DefaultTeamId))
+        log(string.format("已把 %d 个 NPC 恢复到原始阵营", okCount))
     end)
 end
 
--- ---------- F5: 慢动作档位循环 ----------
+-- ---------- 玩家中立化开关 ----------
+
+local playerNeutral = false
+local playerOrigTeam = nil
+
+local function TogglePlayerNeutral()
+    ExecuteInGameThread(function()
+        local pawn = GetPlayerPawn()
+        if not pawn then
+            log("找不到玩家 Pawn")
+            return
+        end
+        if not playerNeutral then
+            playerOrigTeam = Teams.ReadTeam(pawn)
+            if Teams.ApplyTeam(pawn, Config.NeutralTeamId) then
+                playerNeutral = true
+                log(string.format("玩家已中立化（原阵营 %s → %d），怪物应当无视你；再按一次恢复",
+                    tostring(playerOrigTeam), Config.NeutralTeamId))
+            else
+                log("中立化失败：玩家阵营写不进去")
+            end
+        else
+            local target = playerOrigTeam or 0
+            if Teams.ApplyTeam(pawn, target) then
+                playerNeutral = false
+                log(string.format("玩家阵营已恢复为 %d", target))
+            else
+                log("恢复失败")
+            end
+        end
+    end)
+end
+
+-- ---------- 召唤 ----------
+
+local function CycleSummonClass()
+    if #catalog == 0 then
+        log("图鉴是空的：先按 " .. Config.Keybinds.Scan .. " 扫描一次")
+        return
+    end
+    catalogIndex = catalogIndex % #catalog + 1
+    log(string.format("已选中 [%d/%d] %s", catalogIndex, #catalog,
+        catalog[catalogIndex].name))
+end
+
+local function SummonSelected()
+    ExecuteInGameThread(function()
+        if #catalog == 0 or catalogIndex == 0 then
+            log("图鉴是空的：先按 " .. Config.Keybinds.Scan .. " 扫描一次")
+            return
+        end
+        local entry = catalog[catalogIndex]
+        local player = GetPlayerPawn()
+        local loc = player and GetLocation(player)
+        if not loc then
+            log("找不到玩家位置")
+            return
+        end
+        local okF, fwd = pcall(function() return player:GetActorForwardVector() end)
+        if not okF or not fwd then fwd = { X = 1, Y = 0, Z = 0 } end
+        local t = {
+            Rotation = { X = 0, Y = 0, Z = 0, W = 1 },
+            Translation = {
+                X = loc.X + fwd.X * Config.SummonDistance,
+                Y = loc.Y + fwd.Y * Config.SummonDistance,
+                Z = loc.Z + Config.SummonHeightOffset,
+            },
+            Scale3D = { X = 1, Y = 1, Z = 1 },
+        }
+        local gps = GetGameplayStatics()
+        local world = UEHelpers.GetWorld()
+        if not gps or not world or not world:IsValid() then
+            log("召唤失败：GameplayStatics/World 不可用")
+            return
+        end
+        local actor = nil
+        -- UE5 不同小版本参数个数不同，两种签名都试
+        local ok = pcall(function()
+            actor = gps:BeginDeferredActorSpawnFromClass(world, entry.class, t, 1, nil, 1)
+        end)
+        if not ok or not actor or not actor:IsValid() then
+            ok = pcall(function()
+                actor = gps:BeginDeferredActorSpawnFromClass(world, entry.class, t, 1, nil)
+            end)
+        end
+        if not ok or not actor or not actor:IsValid() then
+            log("召唤失败：BeginDeferredActorSpawnFromClass 未返回实例")
+            return
+        end
+        local okFin = pcall(function() gps:FinishSpawningActor(actor, t) end)
+        if okFin then
+            log(string.format("已在面前召唤: %s", entry.name))
+        else
+            log("召唤失败：FinishSpawningActor 报错")
+        end
+    end)
+end
+
+-- ---------- 慢动作 ----------
 
 local dilationIndex = 1
 local function CycleSlowMo()
     ExecuteInGameThread(function()
-        -- 游戏可能同时存在多个世界实例（主世界/菜单/流送），对全部生效
         dilationIndex = dilationIndex % #Config.TimeDilationSteps + 1
         local target = Config.TimeDilationSteps[dilationIndex]
         local count = 0
@@ -191,11 +346,10 @@ local function CycleSlowMo()
     end)
 end
 
--- ---------- F6: 自由镜头（调试相机） ----------
+-- ---------- 自由镜头 ----------
 
--- 退出自由镜头。Shipping 版的 DebugCameraController 没有自己的 CheatManager
--- （被编译剔除），而原生退出流程恰恰依赖它：现场构造一个再调 DisableDebugCamera，
--- 引擎就会走正规的控制权交还。实测有效 (2026-10-29)。
+-- Shipping 版的 DebugCameraController 没有自己的 CheatManager（被编译剔除），
+-- 而原生退出流程恰恰依赖它：现场构造一个再调 DisableDebugCamera。实测有效。
 local function ExitFreeCam(dcc)
     local cm = dcc.CheatManager
     if not cm or not cm:IsValid() then
@@ -214,11 +368,11 @@ end
 
 local function ToggleFreeCam()
     ExecuteInGameThread(function()
-        -- 智能开关：调试相机激活中 → 退出；否则 → 进入
         local dcc = FindFirstOf("DebugCameraController")
-        if dcc and dcc:IsValid() and pcall(function()
+        local active = dcc and dcc:IsValid() and pcall(function()
             return dcc.Player and dcc.Player:IsValid()
-        end) and dcc.Player and dcc.Player:IsValid() then
+        end) and dcc.Player and dcc.Player:IsValid()
+        if active then
             local ok, err = pcall(ExitFreeCam, dcc)
             log(ok and "自由镜头：已退出" or ("退出失败: " .. tostring(err)))
             return
@@ -228,15 +382,11 @@ local function ToggleFreeCam()
             if not cheat or not cheat:IsValid() then error("no CheatManager") end
             cheat:ToggleDebugCamera()
         end)
-        log(ok and "自由镜头：已进入（WASD 移动，再按 F6 退出）"
+        log(ok and "自由镜头：已进入（再按一次退出）"
                or "自由镜头进入失败（CheatManager 不可用）")
     end)
 end
 
--- ---------- 按键注册 ----------
-
--- F7: 强制退出自由镜头。只退不进：对所有 CheatManager 调 DisableDebugCamera，
--- 无论当前哪个控制器掌权都能回到玩家视角
 local function ForceExitFreeCam()
     ExecuteInGameThread(function()
         local dcc = FindFirstOf("DebugCameraController")
@@ -253,13 +403,33 @@ local function ForceExitFreeCam()
     end)
 end
 
-RegisterKeyBind(Key.F1, ScanNPCs)
-RegisterKeyBind(Key.F2, GlobalInfight)
-RegisterKeyBind(Key.F3, DuelNearest)
-RegisterKeyBind(Key.F4, ResetTeams)
-RegisterKeyBind(Key.F5, CycleSlowMo)
-RegisterKeyBind(Key.F6, ToggleFreeCam)
-RegisterKeyBind(Key.F7, ForceExitFreeCam)
+-- ---------- 按键注册（映射见 config.lua 的 Keybinds） ----------
+
+local actions = {
+    Scan = ScanNPCs,
+    Infight = GlobalInfight,
+    Duel = DuelNearest,
+    Reset = ResetTeams,
+    SlowMo = CycleSlowMo,
+    FreeCam = ToggleFreeCam,
+    ForceExitCam = ForceExitFreeCam,
+    PlayerNeutral = TogglePlayerNeutral,
+    Summon = SummonSelected,
+}
+
+local bound = {}
+for name, keyName in pairs(Config.Keybinds) do
+    local key = Key[keyName]
+    if key and actions[name] then
+        RegisterKeyBind(key, actions[name])
+        table.insert(bound, string.format("%s=%s", keyName, name))
+    else
+        log(string.format("按键配置无效: %s = %s", name, tostring(keyName)))
+    end
+end
+if Key[Config.Keybinds.Summon] then
+    RegisterKeyBind(Key[Config.Keybinds.Summon], { ModifierKey.SHIFT }, CycleSummonClass)
+end
 
 -- ---------- V2 仇恨矩阵（可选） ----------
 
@@ -267,4 +437,5 @@ if Config.EnableHatred then
     Hatred.TryInstallHook(log)
 end
 
-log("loaded ✓")
+log("loaded ✓ 按键: " .. table.concat(bound, " / ")
+    .. " / Shift+" .. Config.Keybinds.Summon .. "=换怪")

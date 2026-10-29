@@ -37,6 +37,26 @@ local function getController(pawn)
     return nil
 end
 
+--- 读出 pawn 当前的阵营 ID（用于快照/恢复），读不到返回 nil
+function Teams.ReadTeam(pawn)
+    local targets = { pawn }
+    local controller = getController(pawn)
+    if controller then table.insert(targets, controller) end
+    for _, obj in ipairs(targets) do
+        for _, propName in ipairs(Config.TeamPropertyCandidates) do
+            local ok, value = pcall(function()
+                local prop = obj[propName]
+                if prop == nil then error("no prop") end
+                if prop.Id ~= nil then return prop.Id end
+                if type(prop) == "number" then return prop end
+                error("not readable")
+            end)
+            if ok and value ~= nil then return value end
+        end
+    end
+    return nil
+end
+
 --- 把 pawn（及其 AIController）写入指定阵营。
 --- @return string|nil 成功时返回策略描述，便于在日志里确认哪条路通了
 function Teams.ApplyTeam(pawn, teamId)
