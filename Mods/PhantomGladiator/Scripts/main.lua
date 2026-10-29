@@ -281,6 +281,63 @@ end
 
 local watchGen = 0  -- 新配对会使旧监视循环自然退出
 
+-- 受击反馈：裁判扣血时让受害者播放自己的受击蒙太奇（它身上现成的资产）
+local hitMontageCache = {}  -- pawnAddr -> montage or false(找过没有)
+
+local function PlayHitReact(victim)
+    pcall(function()
+        local addr = victim:GetAddress()
+        local cached = hitMontageCache[addr]
+        if cached == false then return end
+        if not cached then
+            cached = false
+            local ok, montages = pcall(FindAllOf, "AnimMontage")
+            if ok and montages then
+                -- 轻受击优先；排除倒地/死亡/击飞/重击类（不然会反复表演躺下）
+                -- 受害者的种族关键词（BP_Monster_FemaleThug_Dart_C → FemaleThug），
+                -- 蒙太奇必须来自它自己的动画目录，否则骨架不匹配播不出来
+                local species = nil
+                pcall(function()
+                    species = victim:GetClass():GetFullName()
+                        :match("BP_Monster_([A-Za-z]+)")
+                end)
+                local best, bestScore = nil, -1
+                for _, m in ipairs(montages) do
+                    local okN, n = pcall(function() return m:GetFullName() end)
+                    if okN and n and (n:find("[Hh]it") or n:find("[Hh]urt"))
+                        and (not species or n:find(species)) then
+                        if not n:find("[Dd]own") and not n:find("[Dd]ie")
+                            and not n:find("[Dd]ead") and not n:find("[Kk]nock")
+                            and not n:find("[Ll]ie") and not n:find("[Ff]all")
+                            and not n:find("[Aa]ir") and not n:find("[Hh]eavy")
+                            and not n:find("[Ee]xecut") then
+                            local score = 0
+                            if n:find("[Ll]ight") then score = score + 2 end
+                            if n:find("[Ss]mall") then score = score + 2 end
+                            if n:find("[Ff]ront") then score = score + 1 end
+                            if score > bestScore then
+                                best, bestScore = m, score
+                            end
+                        end
+                    end
+                end
+                cached = best or false
+                if best then
+                    pcall(function()
+                        log("受击动画选用: " .. best:GetFullName())
+                    end)
+                else
+                    log("没找到合适的轻受击蒙太奇（本区已加载的全是倒地类）")
+                end
+            end
+            hitMontageCache[addr] = cached
+        end
+        if cached and cached ~= false and cached:IsValid() then
+            victim:PlayAnimMontage(cached, 1.0, FName(""))
+        end
+    end)
+end
+
 -- 裁判判伤实验：怪物互殴的刀互相"穿模"（命中判定不认非玩家目标），
 -- 所以轮流试两种判伤手段，观察哪种能移动 HP / 触发受击与死亡：
 --   A: UE 通用 ApplyDamage（走引擎伤害事件）
@@ -340,8 +397,11 @@ local function StartDuelWatch(a, b)
             local deadB = hpB and hpB <= 0
             if deadA or deadB then
                 -- 归零者由裁判执行游戏原生死亡流程（Kill(Damaged)）
-                if deadA then pcall(function() a:Kill(1) end) end
-                if deadB then pcall(function() b:Kill(1) end) end
+                local kA, kB = nil, nil
+                if deadA then kA = pcall(function() a:Kill(1) end) end
+                if deadB then kB = pcall(function() b:Kill(1) end) end
+                log(string.format("执行死亡调用: 蓝=%s 红=%s",
+                    tostring(kA), tostring(kB)))
                 local verdict = (deadA and deadB) and "同归于尽"
                     or (deadA and "红方获胜" or "蓝方获胜")
                 log(string.format("🏆 决斗结束：%s（蓝 HP=%s 红 HP=%s），已执行死亡",
@@ -354,15 +414,34 @@ local function StartDuelWatch(a, b)
                 local base = Config.JudgeDamagePerTick
                 JudgeDamage(a, b, base * (0.5 + math.random()), "B")
                 JudgeDamage(b, a, base * (0.5 + math.random()), "B")
+                -- 受击动画低频随机播放：每次都播会把 AI 的出招不停打断，
+                -- 变成全程抽搐（实测教训）。只偶尔给一侧一个踉跄
+                local roll = math.random()
+                if roll < 0.35 then
+                    PlayHitReact(roll < 0.175 and a or b)
+                end
             end
-            log(string.format("战况[%d]: 蓝 HP=%s | 红 HP=%s",
-                ticks, tostring(hpA), tostring(hpB)))
-            -- 续命：重新下达锁敌
+            -- 每 4 轮（10 秒）补一次作战指令：防脱战，又不至于掐死起手
+            if ticks % 4 == 0 then
+                local sgA2, sgB2 = GetAIComp(a), GetAIComp(b)
+                if sgA2 then pcall(function() sgA2:ForceIntoCombat(b) end) end
+                if sgB2 then pcall(function() sgB2:ForceIntoCombat(a) end) end
+            end
+            -- 读当前 AI 状态（诊断"站桩"用）
+            local function stateOf(p)
+                local s = "?"
+                pcall(function()
+                    local sg = GetAIComp(p)
+                    if sg then s = FNameToString(sg.CurrentStateTag.TagName) end
+                end)
+                return s
+            end
+            log(string.format("战况[%d]: 蓝 HP=%s(%s) | 红 HP=%s(%s)",
+                ticks, tostring(hpA), stateOf(a), tostring(hpB), stateOf(b)))
+            -- 续命只维持仇恨列表，不再反复 ForceIntoCombat——
+            -- 每 2.5s 重置状态机会把攻击动作掐死在起手，变成站桩（实测教训）
             AddHatred(a, b)
             AddHatred(b, a)
-            local sgA, sgB = GetAIComp(a), GetAIComp(b)
-            if sgA then pcall(function() sgA:ForceIntoCombat(b) end) end
-            if sgB then pcall(function() sgB:ForceIntoCombat(a) end) end
         end)
         return stop
     end)
