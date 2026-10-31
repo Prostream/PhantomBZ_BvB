@@ -1,58 +1,52 @@
 {
-  "version": "0.30.0",
-  "date": "2026-10-31T14:00:00+08:00",
-  "size": 20587938,
-  "sha256": "00440e7e487430567941107c2dd89f0d77d7e37efaa2a86592689e6c3e124b7b",
+  "version": "0.34.0",
+  "date": "2026-10-31T15:54:13+08:00",
+  "size": 20610663,
+  "sha256": "a38d8863d4837925656d44d047e3a6022fb952fdb165547a58f15bf3f8e103f8",
   "notes": {
     "zh": [
-      "第一个公开版本：双击即用的桌面助手，自动找到游戏并一键安装组件",
-      "图鉴选怪、蓝红对战、暂不配队练 BOSS、数值统一、自由观战",
-      "8 个功能键全部可自定义（默认不绑定），支持单位召唤键",
-      "六种语言，浅色 / 深色主题，检查更新带国内线路和校验"
+      "召唤难度：不改游戏难度和存档，按入阵者 / 破局者 / 逆天者 / 六十六天召唤，数值和 AI 的难度判断都按所选难度",
+      "单位召唤键记住各自的阵营和数量，在对战页切换阵营就能把这个键改到对应队伍",
+      "界面说明和六种语言随新功能更新；更新后请在助手里按提示更新游戏内模组"
     ],
     "en": [
-      "First public release: a desktop app that finds the game and installs everything in one click",
-      "Codex unit picker, Blue vs Red fights, no-team boss practice, equal stats, free camera",
-      "All 8 function keys rebindable (none bound by default), per-unit summon keys",
-      "Six languages, light and dark themes, update checks with mirrors and verification"
+      "Summon difficulty: new units play at Wayfarer, Pathbreaker, Hellwalker or Sixty-Six Days, stats and AI difficulty checks included, without changing the game's difficulty or your save",
+      "Unit summon keys remember their own team and amount; switch the team in the Arena to move a key to that side",
+      "Interface and all six languages updated; after updating, follow the prompt in the app to update the in-game mod"
     ],
     "ja": [
-      "初の公開版：ゲームを自動で見つけ、必要なものをワンクリックで導入するデスクトップアプリ",
-      "図鑑から選んで青・赤チームで対戦、チームなしでボス練習、ステータス統一、自由視点",
-      "8 つの機能キーをすべて変更可能（初期は未設定）、ユニット召喚キー",
-      "6 言語、ライト / ダークテーマ、ミラーと検証付きのアップデート確認"
+      "召喚難易度：ゲームの難易度やセーブを変えずに、Wayfarer / Pathbreaker / Hellwalker / Sixty-Six Days で召喚。ステータスとAIの難易度判定が選んだ難易度に従います",
+      "ユニット召喚キーがそれぞれのチームと数を記憶。バトル画面でチームを切り替えると、そのキーの召喚先も変わります",
+      "画面と6言語を新機能に合わせて更新。更新後はアプリの案内に従ってゲーム内Modも更新してください"
     ],
     "fr": [
-      "Première version publique : une application qui trouve le jeu et installe tout en un clic",
-      "Choix des unités du codex, combats Bleus contre Rouges, boss hors équipe, stats égalisées, caméra libre",
-      "Les 8 touches de fonction sont configurables (aucune par défaut), touches d'invocation par unité",
-      "Six langues, thèmes clair et sombre, mises à jour avec miroirs et vérification"
+      "Difficulté d'invocation : les nouvelles unités jouent en Wayfarer, Pathbreaker, Hellwalker ou Sixty-Six Days, stats et vérifications de difficulté de l'IA comprises, sans changer la difficulté du jeu ni votre sauvegarde",
+      "Les touches d'invocation retiennent l'équipe et le nombre de chaque unité ; changez l'équipe dans l'Arène pour déplacer la touche",
+      "Interface et six langues mises à jour ; après la mise à jour, suivez l'invite de l'application pour mettre à jour le mod en jeu"
     ],
     "de": [
-      "Erste öffentliche Version: eine App, die das Spiel findet und alles mit einem Klick installiert",
-      "Einheiten aus dem Kodex, Blau gegen Rot, Bosse ohne Team üben, gleiche Werte, freie Kamera",
-      "Alle 8 Funktionstasten frei belegbar (standardmäßig keine), Beschwörungstasten pro Einheit",
-      "Sechs Sprachen, helles und dunkles Design, Updates mit Spiegeln und Prüfsumme"
+      "Beschwörungsschwierigkeit: neue Einheiten spielen auf Wayfarer, Pathbreaker, Hellwalker oder Sixty-Six Days, inklusive Werten und KI-Schwierigkeitsprüfungen, ohne die Spielschwierigkeit oder deinen Spielstand zu ändern",
+      "Beschwörungstasten merken sich Team und Anzahl jeder Einheit; wechsle das Team in der Arena, um die Taste umzustellen",
+      "Oberfläche und alle sechs Sprachen aktualisiert; nach dem Update dem Hinweis in der App folgen, um den Mod im Spiel zu aktualisieren"
     ],
     "es": [
-      "Primera versión pública: una aplicación que encuentra el juego e instala todo con un clic",
-      "Unidades del códice, combates Azul contra Rojo, jefes sin equipo, estadísticas iguales, cámara libre",
-      "Las 8 teclas de función se pueden asignar (ninguna por defecto), teclas de invocación por unidad",
-      "Seis idiomas, temas claro y oscuro, actualizaciones con espejos y verificación"
+      "Dificultad de invocación: las nuevas unidades juegan en Wayfarer, Pathbreaker, Hellwalker o Sixty-Six Days, con estadísticas y comprobaciones de dificultad de la IA, sin cambiar la dificultad del juego ni tu partida guardada",
+      "Las teclas de invocación recuerdan el equipo y la cantidad de cada unidad; cambia el equipo en la Arena para mover la tecla",
+      "Interfaz y seis idiomas actualizados; tras actualizar, sigue el aviso de la aplicación para actualizar el mod del juego"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.30.0/PhantomGladiator-0.30.0-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.34.0/PhantomGladiator-0.34.0-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.30.0/PhantomGladiator-0.30.0-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.34.0/PhantomGladiator-0.34.0-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.30.0/PhantomGladiator-0.30.0-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.34.0/PhantomGladiator-0.34.0-win64.zip"
     }
   ]
 }
