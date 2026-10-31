@@ -57,9 +57,10 @@ local function harness(saved,withSpectator,withCodex)
         cycleTeam=function() return record("cycle_team") end,
         start=function() return record("start") end,
         stop=function() return record("stop") end,
+        clearCompanions=function() return record("dismiss_companions") end,
         status=function()
             record("arena_status")
-            return {blue_count=1,red_count=2,neutral_count=0,total=3,current_unit="unit",current_team="blue",current_count=1,state="ready"}
+            return {blue_count=1,red_count=2,neutral_count=0,total=3,current_unit="unit",current_team="blue",current_count=1,state="ready",companion_count=2,companion_owned=3}
         end,
     }
     local exporter={
@@ -348,6 +349,14 @@ test("stat matching toggle uses native settings and status; missing module fails
     assert(h.reported.stat_match_baseline_unit=='A' and h.reported.stat_match_health==100 and h.reported.stat_match_count==2)
     local missing=harness();missing.runtime:start();missing.inbox={action='toggle_stat_match'};missing:tick()
     assert(not missing.result.ok and missing.reported.stat_match_supported==false)
+end)
+test("companions are dismissed on their own and reported apart from the arena",function()
+    local h=harness()
+    h.runtime=h.new({companions={status=function()return {follow=2,friendly=2,failures=1,message='m'}end}});h.runtime:start()
+    h.inbox={action='dismiss_companions'};h:tick()
+    assert(count(h,'dismiss_companions')==1 and count(h,'stop')==0,'dismissing does not stop the arena')
+    assert(h.reported.companion_count==2 and h.reported.companion_owned_records==3 and h.reported.companion_supported)
+    assert(h.reported.companion_follow==2 and h.reported.companion_failures==1)
 end)
 test("spawn difficulty takes its token from the key_spawn column and reports the game difficulty",function()
     local h=harness();local level='FOLLOW'

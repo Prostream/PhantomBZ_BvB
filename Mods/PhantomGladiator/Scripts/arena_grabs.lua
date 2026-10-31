@@ -119,21 +119,33 @@ function Grabs.new(options)
         if not self.recovering then self.signature=nil;self.observed={};self.pairs={} end
         return pending==0 and saved
     end
-    local function scope(members)
+    -- Blue and Red count only while their fight runs with both sides alive; companions whenever they
+    -- are out, so their grabs work on the map's own enemies too.
+    local function scope(members,battleActive)
         local families,owners,signature={}, {}, {};local blue,red=false,false
+        local arena,companions={},{}
         for _,unit in ipairs(members)do
             local root=family(unit.class_path)
-            if root and unit.team~='neutral' and U.valid(unit.actor) then
+            local team=unit.team
+            if root and (team=='blue' or team=='red' or team=='companion') and U.valid(unit.actor) then
                 local ok,hp=pcall(options.hp,unit.actor)
                 local key=U.key(unit.actor)
                 if ok and type(hp)=='number' and hp>0 and key then
-                    families[root]=true;owners[key]=unit.actor;signature[#signature+1]=key..':'..root
-                    blue=blue or unit.team=='blue';red=red or unit.team=='red'
+                    local entry={actor=unit.actor,key=key,root=root}
+                    if team=='companion' then companions[#companions+1]=entry
+                    else arena[#arena+1]=entry;blue=blue or team=='blue';red=red or team=='red' end
                 end
             end
         end
+        local function add(list)
+            for _,entry in ipairs(list)do
+                families[entry.root]=true;owners[entry.key]=entry.actor;signature[#signature+1]=entry.key..':'..entry.root
+            end
+        end
+        if battleActive and blue and red then add(arena) end
+        add(companions)
         table.sort(signature)
-        return families,owners,table.concat(signature,'|'),blue and red
+        return families,owners,table.concat(signature,'|'),next(families)~=nil
     end
     local function scan(families)
         self.scans=self.scans+1
@@ -216,8 +228,8 @@ function Grabs.new(options)
     end
     function self:sync(members,battleActive,force)
         if self.recovering then if not self:restore() then return false end end
-        local families,owners,signature,opponents=scope(members)
-        if not battleActive or not opponents then
+        local families,owners,signature,active=scope(members,battleActive)
+        if not active then
             if next(self.records) then return self:restore() end
             return true
         end
@@ -225,7 +237,9 @@ function Grabs.new(options)
             if not self:restore() then return false end
         end
         self.ticks=self.ticks+1
-        if force or signature~=self.signature or self.ticks%10==0 then
+        -- The rescan walks every loaded object (FindAllOf): every 5 s in a fight, every 30 s when only
+        -- companions are out, since they keep the scope alive for as long as they follow the player.
+        if force or signature~=self.signature or self.ticks%(battleActive and 10 or 60)==0 then
             self.signature=signature
             scan(families)
         end

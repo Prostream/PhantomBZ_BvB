@@ -94,7 +94,7 @@ local teamCycle=fixture()
 assert(teamCycle.arena:spawn('/Catalog/BP_Test.BP_Test_C','blue',1).ok)
 assert(teamCycle.arena:select('/Catalog/BP_Test.BP_Test_C','blue',3).ok)
 local beforeTeamCycle=#teamCycle.trace
-for revision,wanted in ipairs({'red','neutral','blue'})do
+for revision,wanted in ipairs({'red','neutral','companion','blue'})do
     local changed=teamCycle.arena:cycleTeam()
     local status=teamCycle.arena:status()
     assert(changed.ok and changed.spawned_count==0 and status.current_team==wanted and status.team_revision==revision)
@@ -441,4 +441,21 @@ local neutralActor = f.actors[1]
 for _, event in ipairs(f.trace) do
     if type(event) == "table" and event[1] == "attack" then assert(event[2] ~= neutralActor and event[3] ~= neutralActor) end
 end
+-- Companions follow the player: activation is told their team, they are counted apart,
+-- a stop keeps them, and only their own clear removes them.
+local c=fixture()
+local activatedTeams={}
+c.options.activate=function(actor,path,team) activatedTeams[#activatedTeams+1]=team;return true end
+assert(c.arena:spawn('/Catalog/BP_Test.BP_Test_C','companion',2).ok)
+assert(c.arena:spawn('/Catalog/BP_Test.BP_Test_C','blue',1).ok)
+assert(activatedTeams[1]=='companion' and activatedTeams[2]=='companion' and activatedTeams[3]=='blue')
+local cs=c.arena:status()
+assert(cs.companion_count==2 and cs.companion_owned==2 and cs.blue_count==1 and cs.neutral_count==0 and cs.total==1)
+local near=c.transforms[1].Translation
+assert(math.abs(near.X)<=200 and math.abs(near.Y)==300,'companions appear beside the player')
+local stopped=c.arena:stop()
+assert(stopped.ok and stopped.remaining_count==0 and c.arena:status().state=='idle','stop finishes without waiting for companions')
+assert(c.actors[1].alive and c.actors[2].alive and not c.actors[3].alive and c.arena:status().companion_count==2)
+local dismissed=c.arena:clearCompanions()
+assert(dismissed.ok and dismissed.destroyed_count==2 and not c.actors[1].alive and c.arena:status().companion_owned==0)
 print("arena_controller: PASS (spawn policy, loading gate, pending-cleanup gate, combat preflight, warning ownership, spacing, teams, caps, partial failures, cleanup retries, deferred destruction, unknown readbacks)")

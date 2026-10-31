@@ -5,7 +5,7 @@ Bridge.__index = Bridge
 local MAX_INBOX, MAX_JOURNAL, MAX_MESSAGE = 2048, 2097152, 512
 local ACTIONS = { spawn = true, start = true, stop = true, refresh_catalog = true,
     configure_keys = true,configure_unit_key=true, select_unit = true, toggle_spectator = true,clear_neutral=true,toggle_stat_match=true,
-    toggle_camera=true,exit_camera=true,cycle_team=true,set_spawn_difficulty=true }
+    toggle_camera=true,exit_camera=true,cycle_team=true,set_spawn_difficulty=true,dismiss_companions=true }
 local ACK_STATUS = { ok = true, error = true, uncertain = true }
 
 local function clean(value, limit)
@@ -64,7 +64,7 @@ local function parseInbox(content)
     if (fields[2] == "spawn" or fields[2] == "select_unit" or fields[2]=='configure_unit_key') and fields[3] == "" then
         return nil, "invalid payload: unit_id is required", id
     end
-    if fields[4] ~= "blue" and fields[4] ~= "red" and fields[4] ~= "neutral" then
+    if fields[4] ~= "blue" and fields[4] ~= "red" and fields[4] ~= "neutral" and fields[4] ~= "companion" then
         return nil, "invalid payload: team", id
     end
     if not fields[5]:match("^[1-8]$") then return nil, "invalid payload: count must be 1..8", id end

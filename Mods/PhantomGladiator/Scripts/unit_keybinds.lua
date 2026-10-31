@@ -4,7 +4,7 @@
 local Keys={}
 local KeyRouter=require('key_router')
 local RESERVED={[121]=true,[192]=true,[91]=true,[92]=true}
-local TEAMS={blue=true,red=true,neutral=true}
+local TEAMS={blue=true,red=true,neutral=true,companion=true}
 local function integer(v,min,max)return type(v)=='number' and v==v and v%1==0 and v>=min and v<=max end
 local function teamOK(t)return t==nil or TEAMS[t]==true end
 local function countOK(c)return c==nil or integer(c,1,8) end

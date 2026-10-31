@@ -9,11 +9,17 @@
 -- nil keeps the game's answer. The player, map enemies and the world keep the game's difficulty.
 -- Verified in game (v0.33.1): a value returned from the GetDifficulty *pre* callback becomes the result;
 -- the post callback runs too but never sees a usable context, so it stays empty. Nothing is written.
+-- Every map NPC asks too, so the hooks are hot: they exist only while a leveled unit does (installed
+-- right before such a unit finishes spawning, removed 10 s after the last one leaves), and attribution
+-- is a lookup in a per-tick index of the units' and their controllers' addresses (v0.35.3; the
+-- earlier outer-chain walk with engine validity calls made the game stutter).
 local U=require('ue_observe')
 local AI={}
 local LIBRARY='/Script/ProjectPBZ.PBZBlueprintFunctionLibrary'
 local DEFAULT='/Script/ProjectPBZ.Default__PBZBlueprintFunctionLibrary'
-local FUNCTIONS={'GetDifficulty','GetDiffcultMode'}
+-- GetDiffcultMode was only ever asked with the World as context (v0.32.1–v0.35 logs), never by a unit.
+local FUNCTIONS={'GetDifficulty'}
+local UNHOOK_SECONDS=10
 local VALUES={Handicapped=0,Easy=1,Normal=2,Hard=3,Nightmare=4} -- EDifficultMode
 -- Blueprint checks: the hook's single callback runs after the function; `subject` picks the argument
 -- that names the AI being checked.
@@ -51,50 +57,57 @@ function AI.new(options)
     local self={state='idle',alive=true,overrides=0,verified=0,failed=0,message='还没有按所选难度召唤的单位',
         calls={},answers={}}
     local hooks,cache,logged,lines,counts,checked,installed,samples={},{},{},0,{},{},{},{}
-    local summarizedAt,summarizedCount
+    local index={}
+    local summarizedAt,summarizedCount,emptySince,checksAt
     local function say(m)log('[AIDifficulty] '..m)end
+    -- The message is built only the first time a signature is seen.
     local function note(signature,message)
         counts[signature]=(counts[signature] or 0)+1
-        if not logged[signature] and lines<MAX_LINES then logged[signature]=true;lines=lines+1;say(message)end
+        if not logged[signature] and lines<MAX_LINES then
+            logged[signature]=true;lines=lines+1
+            say(type(message)=='function' and message() or message)
+        end
     end
     local function bump(t,k)t[k]=(t[k] or 0)+1 end
 
-    -- The unit a context object belongs to, walking outers and asking controllers for their pawn.
-    -- Cached per address until the next tick, so a burst of calls costs one walk.
+    local function addr(object)
+        if object==nil then return nil end
+        local ok,key=pcall(function()return object:GetAddress()end)
+        return ok and key~=nil and tostring(key) or nil
+    end
+    -- The level of the unit a context object belongs to: the unit or its controller, or an object whose
+    -- outer (or the outer's outer, e.g. a behaviour-tree node under the controller's tree component) is
+    -- one of them. Objects the game passes in are alive for the call, so no validity calls here.
+    -- Results, misses included, are cached until the next tick.
     local function resolve(object)
-        local key=U.key(object)
+        local key=addr(object)
         if not key then return nil end
-        local hit=cache[key]
-        if hit then return hit end
-        local level
+        local level=cache[key]
+        if level~=nil then return level or nil end
+        level=index[key]
         local current=object
-        for _=1,8 do
-            if not U.valid(current) then break end
-            level=options.levelOfKey(U.key(current))
+        for _=1,2 do
             if level then break end
-            local okPawn,pawn=pcall(function()return current:K2_GetPawn()end)
-            if okPawn and U.valid(pawn) then
-                level=options.levelOfKey(U.key(pawn))
-                if level then break end
-            end
-            local okOuter,outer=pcall(function()return current:GetOuter()end)
-            if not okOuter then break end
-            current=outer
+            local ok,outer=pcall(function()return current:GetOuter()end)
+            local outerKey=ok and addr(outer)
+            if not outerKey then break end
+            level=index[outerKey];current=outer
         end
-        hit={level=level,class=className(object)}
-        cache[key]=hit
-        return hit
+        cache[key]=level or false
+        return level
     end
 
     local function difficultyCallback(name,phase)
         return function(_,contextObject)
             if not self.alive or self.state~='running' then return nil end
             bump(self.calls,name..'.'..phase)
-            local hit=resolve(U.unwrap(contextObject))
-            local value=hit and hit.level and VALUES[hit.level]
+            local object=U.unwrap(contextObject)
+            local level=resolve(object)
+            local value=level and VALUES[level]
             if value==nil then return nil end
             self.overrides=self.overrides+1
-            note(name..'|'..phase..'|'..hit.class..'|'..hit.level,'改写 '..name..'('..phase..') 上下文='..hit.class..' → '..hit.level..'('..value..')')
+            note(name..'|'..phase..'|'..level..'|'..tostring(addr(object)),function()
+                return '改写 '..name..'('..phase..') 上下文='..className(object)..' → '..level..'('..value..')' end)
             return value
         end
     end
@@ -111,14 +124,17 @@ function AI.new(options)
                 note('args|'..spec.name,'检查节点参数 '..spec.name..' 节点='..className(node)..' '..table.concat(kinds,' '))
             end
             local subject=spec.subject(U.unwrap(args[1]),U.unwrap(args[2]))
-            local hit=resolve(subject)
-            local threshold=tonumber((U.field(node,'Difficulty')))
-            if not hit or not hit.level or not threshold then return nil end
-            local answer=VALUES[hit.level]>=threshold
+            local level=resolve(subject)
+            if not level then return nil end
+            local okThreshold,threshold=pcall(function()return node.Difficulty end)
+            threshold=okThreshold and tonumber(U.unwrap(threshold)) or nil
+            if not threshold then return nil end
+            local answer=VALUES[level]>=threshold
             self.overrides=self.overrides+1
             bump(self.answers,spec.name..' 门槛='..threshold..' → '..tostring(answer))
-            samples[spec.name]=samples[spec.name] or {node=node,args={U.unwrap(args[1]),U.unwrap(args[2])},threshold=threshold,level=hit.level}
-            note(spec.name..'|'..threshold..'|'..hit.level,'改写 '..spec.name..' 单位='..hit.class..'/'..hit.level..' 门槛='..threshold..' → '..tostring(answer))
+            samples[spec.name]=samples[spec.name] or {node=node,args={U.unwrap(args[1]),U.unwrap(args[2])},threshold=threshold,level=level}
+            note(spec.name..'|'..threshold..'|'..level,function()
+                return '改写 '..spec.name..' 单位='..className(subject)..'/'..level..' 门槛='..threshold..' → '..tostring(answer) end)
             return answer
         end
     end
@@ -146,6 +162,27 @@ function AI.new(options)
         self.state='running'
         self.message='已挂钩，等待读回'
     end
+    local function uninstall(reason)
+        local kept={}
+        for _,hook in ipairs(hooks)do
+            local ok=pcall(UnregisterHook,hook.path,hook.pre,hook.post)
+            if not ok then kept[#kept+1]=hook end
+        end
+        say('摘除挂钩 reason='..reason..' 摘除='..(#hooks-#kept)..' 失败='..#kept)
+        hooks=kept;installed={}
+        self.state=#kept==0 and 'idle' or 'running'
+        self.message='没有按所选难度召唤的单位，挂钩已摘除'
+    end
+
+    -- Called by the spawn path right before a unit with a chosen level finishes spawning, so its own
+    -- start-up questions are already answered with its level.
+    function self:ensure(actor,level)
+        if not self.alive or not VALUES[level] then return end
+        local key=addr(actor)
+        if key then index[key]=level;cache={} end
+        emptySince=nil
+        if self.state=='idle' then install() end
+    end
 
     -- Lua calls go through the same hooks. Asking for a unit's difficulty proves the GetDifficulty
     -- override and asking with the World proves everyone else still gets the game's answer; calling a
@@ -161,8 +198,14 @@ function AI.new(options)
         local game=gameValue()
         local ok=unit==VALUES[level] and game~=nil
         if ok then self.verified=self.verified+1 else self.failed=self.failed+1 end
+        -- Which of the character's two AI configs its AI ended up with (PDA_ActorConfig: AIConfig  Default /
+        -- AIConfig Nightmare); read only.
+        local config=U.field(actor,'Actor Config')
+        local ai=U.field(U.field(actor,'Controller'),'SGameAIComponent')
         say('读回 GetDifficulty 单位='..className(actor)..' 期望='..level..'('..tostring(VALUES[level])..') 返回='..tostring(unit)
-            ..' World返回='..tostring(game)..' 结果='..tostring(ok)..' 前回调计数='..(self.calls['GetDifficulty.pre'] or 0))
+            ..' World返回='..tostring(game)..' 结果='..tostring(ok)..' 前回调计数='..(self.calls['GetDifficulty.pre'] or 0)
+            ..' AI配置 默认='..show((U.field(config,'AIConfig  Default')))..' 噩梦='..show((U.field(config,'AIConfig Nightmare')))
+            ..' 当前='..show((U.field(ai,'AIConfig'))))
     end
     local function readbackCheck(spec,sample)
         if not U.valid(sample.node) then return end
@@ -192,16 +235,34 @@ function AI.new(options)
         if not self.alive then return end
         cache={}
         if options.ready and not options.ready() then return end
-        local leveled={}
+        local leveled,fresh={},{}
         for _,entry in ipairs(options.members and options.members() or {})do
             local level=options.levelOf(entry.actor)
-            if level and VALUES[level] then leveled[#leveled+1]={actor=entry.actor,level=level}end
+            if level and VALUES[level] then
+                leveled[#leveled+1]={actor=entry.actor,level=level}
+                local key=addr(entry.actor)
+                if key then fresh[key]=level end
+                local controllerKey=addr(U.field(entry.actor,'Controller'))
+                if controllerKey then fresh[controllerKey]=level end
+            end
         end
-        if self.state=='idle' and #leveled>0 then install() end
+        index=fresh
+        if #leveled==0 then
+            emptySince=emptySince or clock()
+            if self.state=='running' and clock()-emptySince>=UNHOOK_SECONDS then uninstall('召唤单位已全部离场') end
+            return
+        end
+        emptySince=nil
+        if self.state=='idle' then install() end
         if self.state~='running' then return end
         -- The blueprint checks load with the first AI that uses them.
-        for _,spec in ipairs(CHECKS)do
-            if not installed[spec.name] and register(spec.path,spec.name,checkCallback(spec)) then installed[spec.name]=true end
+        -- Looking up a function whose class is not loaded is slow in UE4SS (60–70 ms a tick in v0.35.5
+        -- with only 魔渊 out, whose AI does not use these checks), so try at most every 15 s.
+        if not checksAt or clock()-checksAt>=15 then
+            checksAt=clock()
+            for _,spec in ipairs(CHECKS)do
+                if not installed[spec.name] and register(spec.path,spec.name,checkCallback(spec)) then installed[spec.name]=true end
+            end
         end
         library=StaticFindObject(DEFAULT);world=options.getWorld and options.getWorld()
         if not U.valid(library) or not U.valid(world) then return end

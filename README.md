@@ -75,6 +75,14 @@
 
 你自己、地图上原有的怪，以及存档里的游戏难度都不会变。六十六天和逆天者对怪物来说完全一样，区别只在玩家的死亡次数上限。少数以整个世界为对象的难度查询，以及游戏底层直接读取难度的部分（例如 BOSS 召唤小怪的血量门槛），仍按游戏本身的难度。
 
+### 随从：让 BOSS 跟着你打
+召唤时阵营选「随从」，召出来的怪就成了你的随从，数量不限，召唤难度照样生效：
+- **跟着你走**：用的是游戏自带的助战 NPC 跟随行为。离你 10 米内走路，超过 10 米加速追上；超过 100 米，或者你在地图上快速移动后，会直接传送到你身边。正在和 BOSS 打的时候不会传送。
+- **帮你打**：和你同一阵营，互相不伤害。会主动去打附近的敌人，投技对地图上原有的怪也能用。
+- **随时解散**：「停止并清理」不会带走随从，右侧随从区有单独的「解散随从」按钮。单位召唤键也可以直接召随从。
+
+目前的限制：随从加速追你时速度是对的，但很多怪仍然是走路的动作；换地图或读档后随从会消失，需要重新召唤；个别单位在复杂地形上可能找不到路，离远了会靠传送回来。
+
 ### 观战
 - **自由观战**：无仇恨 + 隐身 + 无敌（锁血），声音跟随镜头。用 WASD 移动、Q / E 升降、Shift 加速、鼠标转向，退出后恢复进入前的状态。可以在助手里点「进入」，也可以绑定快捷键。
 - **无仇恨**：只让怪物不主动打你，不隐身也不锁血，适合在普通视角下观战。
@@ -107,6 +115,7 @@
 
 - 已实测：普通持刀暴徒互斗；新娘阿花与暗魔天堡之主魔渊对战；数值统一（两轮 109 项数值读回全部一致）；BOSS 常驻血条和生命数字；自由观战的隐身、锁血、声音跟随与退出恢复；暂不配队单位的召唤与存活计数；全部 8 个功能键的保存与生效回执；单位召唤键按各自的阵营召唤。
 - 召唤难度已实测：游戏本身保持入阵者，阿花和魔渊按逆天者、六十六天召唤，数值读回与游戏配置表一致（攻击约 1.43 倍、杀气攻击约 3 倍、杀气上限 2 倍；这两个 BOSS 的血量在各难度相同）。AI 的两类难度检查（行为树分支、技能池条件）都按所选难度回答，地图上的其他怪和整个世界仍是游戏难度。
+- 随从已实测（魔渊、阿花）：跟随、远距离和快速移动后的传送、和地图怪战斗、投技抓地图怪、与玩家互不伤害、召唤后立刻进入战斗；同时召两只、开着召唤难度时不卡顿。
 - 可以尝试、但不保证：图鉴里的其他单位都能召唤，但不一定都能正常对打。个别单位有天生机制（例如机灵鬼天生无敌/穿透），不会因为召唤而改变。
 - 已知情况：清理时如果还有单位活着，游戏端第一遍会留下一条恢复记录。助手会在同一次点击里自动补做第二遍；在游戏里直接按「停止并清理」快捷键时，目前需要按两次。
 
@@ -222,7 +231,7 @@ python tools/package/build.py --deps <下载目录> --seed <游戏的 Runtime �
 2. Run `PhantomGladiator.exe`. The first-run guide finds the game in your Steam library and installs UE4SS and the mod in one click.
 3. Start the game, load a save, wait for the green "Connected" badge, then summon and fight.
 
-**Features**: 177 codex characters (75 bosses) · Blue / Red / No team (fight a boss yourself) · 1–8 per summon, no total cap · equal stats mode (107 combat attributes matched to a baseline) · summon difficulty: new units play at Wayfarer, Pathbreaker, Hellwalker or Sixty-Six Days (stats and the AI's difficulty checks) while the game, map enemies and your save keep their own difficulty · free camera and no-aggro spectating · all 8 function keys rebindable (none bound by default) · per-unit summon keys that remember their own team and amount · rematch with the last lineup · six UI languages chosen from your time zone · light and dark themes · update checks with mirrors and SHA-256 verification.
+**Features**: 177 codex characters (75 bosses) · Blue / Red / No team (fight a boss yourself) · 1–8 per summon, no total cap · equal stats mode (107 combat attributes matched to a baseline) · summon difficulty: new units play at Wayfarer, Pathbreaker, Hellwalker or Sixty-Six Days (stats and the AI's difficulty checks) while the game, map enemies and your save keep their own difficulty · free camera and no-aggro spectating · all 8 function keys rebindable (none bound by default) · per-unit summon keys that remember their own team and amount · companions: summon any unit to follow you and fight on your side (no limit, teleports back from 100 m or after fast travel, grabs work on map enemies, dismiss any time) · rematch with the last lineup · six UI languages chosen from your time zone · light and dark themes · update checks with mirrors and SHA-256 verification.
 
 **Requirements**: Windows 10/11 64-bit, WebView2 runtime (built in), Steam version of *Phantom Blade Zero* build 26266538 (other builds untested).
 

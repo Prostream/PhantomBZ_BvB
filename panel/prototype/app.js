@@ -26,7 +26,7 @@
   const VK_CODES = { Space: 32, Pause: 19, CapsLock: 20, NumLock: 144, ScrollLock: 145, Backquote: 192, NumpadEnter: 13, Tab: 9, Enter: 13, Backspace: 8, Delete: 46, Insert: 45, Home: 36, End: 35, PageUp: 33, PageDown: 34, ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, Minus: 189, Equal: 187, BracketLeft: 219, BracketRight: 221, Backslash: 220, Semicolon: 186, Quote: 222, Comma: 188, Period: 190, Slash: 191, NumpadAdd: 107, NumpadSubtract: 109, NumpadMultiply: 106, NumpadDivide: 111, NumpadDecimal: 110 };
   const VK_NAMES = { 8: "Backspace", 9: "Tab", 13: "Enter", 32: "Space", 33: "PageUp", 34: "PageDown", 35: "End", 36: "Home", 37: "←", 38: "↑", 39: "→", 40: "↓", 45: "Insert", 46: "Delete", 106: "Num*", 107: "Num+", 109: "Num-", 110: "Num.", 111: "Num/", 186: ";", 187: "=", 188: ",", 189: "-", 190: ".", 191: "/", 219: "[", 220: "\\", 221: "]", 222: "'" };
   const BEGINNER_ID = "BP_Monster_MaleThug_Sword_Blue";
-  const TEAMS = ["blue", "red", "neutral"];
+  const TEAMS = ["blue", "red", "neutral", "companion"];
 
   // ---------- Units ----------
   function initialOf(name) {
@@ -53,7 +53,7 @@
     selectedId: store.get("selected", null),
     team: "blue",
     count: 1,
-    roster: { blue: {}, red: {}, neutral: {} },
+    roster: { blue: {}, red: {}, neutral: {}, companion: {} },
     lastSolo: null,           // { id, count } of the latest no-team summon, for "summon again"
     busy: new Set(),
     capture: null,            // { kind: "global", action } | { kind: "unit", id }
@@ -117,7 +117,8 @@
   }
   const keyLabel = b => (b ? vkLabel(b.code, b.mods) : "");
   // What a unit key summons: its own team and count, or (keys saved before that) the current selection.
-  const unitKeyUses = k => (!k.team ? t("keys.unit.follow") : k.team === "neutral" ? t("keys.unit.usesNeutral", { n: k.count || 1 }) : t("keys.unit.uses", { team: teamName(k.team), n: k.count || 1 }));
+  const unitKeyUses = k => (!k.team ? t("keys.unit.follow") : k.team === "neutral" ? t("keys.unit.usesNeutral", { n: k.count || 1 })
+    : k.team === "companion" ? t("keys.unit.usesCompanion", { n: k.count || 1 }) : t("keys.unit.uses", { team: teamName(k.team), n: k.count || 1 }));
   const keyCap = (b, cls = "") => (b ? kbd(keyLabel(b), cls) : "");
   // Combos the game or Windows already own: the same list as binding_system_owner() in backend.py.
   function systemOwner(code, mods) {
@@ -363,6 +364,7 @@
           <div id="dock-banner"></div>
           <section class="dock-section" id="dock-sel"></section>
           <section class="dock-section" id="dock-solo" aria-labelledby="solo-title"></section>
+          <section class="dock-section" id="dock-companion" aria-labelledby="companion-title"></section>
           <section class="dock-section" id="dock-diff" aria-labelledby="diff-title"></section>
           <section class="dock-section" id="dock-match" aria-labelledby="match-title"></section>
           <section class="dock-section" id="dock-view"></section>
@@ -495,6 +497,7 @@
     renderBanner();
     renderSelection();
     renderSolo();
+    renderCompanion();
     renderDifficulty();
     renderMatch();
     renderBattle();
@@ -532,8 +535,9 @@
       return;
     }
     const blocker = summonBlocker(), busy = ui.busy.has("spawn");
-    const label = busy ? t("sel.summoning") : ui.team === "neutral" ? t("sel.summonNeutral", { n: ui.count }) : t("sel.summonTo", { n: ui.count, team: teamName(ui.team) });
-    const btnTone = { blue: "btn-blue", red: "btn-red", neutral: "btn-neutral" }[ui.team];
+    const label = busy ? t("sel.summoning") : ui.team === "neutral" ? t("sel.summonNeutral", { n: ui.count })
+      : ui.team === "companion" ? t("sel.summonCompanion", { n: ui.count }) : t("sel.summonTo", { n: ui.count, team: teamName(ui.team) });
+    const btnTone = { blue: "btn-blue", red: "btn-red", neutral: "btn-neutral", companion: "btn-companion" }[ui.team];
     let hint;
     if (blocker) hint = `${icon("info")}<span>${esc(blocker)}</span>`;
     else if (synced() && S.keys.spawn) hint = `<span class="sync-ok">${icon("check-circle")}</span><span>${tHtml("sel.synced", { key: keyCap(S.keys.spawn) })}</span>`;
@@ -626,6 +630,32 @@
         <button class="btn btn-ghost btn-sm solo-clear" type="button" data-action="clear-neutral" ${online && held && !busy ? "" : "disabled"}>${ui.busy.has("clear_neutral") ? '<span class="spinner" style="width:12px;height:12px"></span>' : icon("trash", "icon-sm")}<span>${esc(t("solo.clear"))}</span></button>
       </div>
       ${held ? `<p class="solo-note">${esc(t("solo.clearNote"))}</p>` : ""}`;
+  }
+  // Companions (team "companion", companion.lua): they follow the player with the game's own helper-NPC follow
+  // state and fight on the player's side. "Stop and clear" leaves them; only dismissing removes them.
+  function renderCompanion() {
+    const el = $("#dock-companion");
+    if (!el) return;
+    const alive = S.companion, down = S.down.companion, held = alive + down, online = RT.online();
+    const busy = ui.busy.has("dismiss_companions");
+    const chips = Object.entries(ui.roster.companion)
+      .map(([id, n]) => `<span class="roster-item" title="${esc(byId.get(id)?.name)} ×${n}"><span>${esc(byId.get(id)?.name)}</span><b>×${n}</b></span>`).join("");
+    const use = !held && ui.team !== "companion"
+      ? `<button class="btn btn-secondary btn-sm" type="button" data-action="team" data-team="companion">${esc(t("companion.use"))}</button>`
+      : "";
+    const warn = online && held && S.companionFailures
+      ? `<div class="solo-warn">${icon("alert", "icon-sm")}<span>${esc(t("companion.followWarn"))}</span></div>`
+      : "";
+    el.innerHTML = `<div class="dock-title"><span id="companion-title">${esc(teamName("companion"))}</span></div>
+      ${held
+        ? `<div class="side-chips companion-roster">${chips}</div>
+           <div class="solo-stats">${esc(t("companion.stats", { alive: fmtNum(alive), down: fmtNum(down) }))}</div>`
+        : `<p class="solo-desc">${esc(t("companion.desc"))}</p>`}
+      ${warn}
+      <div class="solo-actions">${use}
+        <button class="btn btn-ghost btn-sm solo-clear" type="button" data-action="dismiss-companions" ${online && held && !busy ? "" : "disabled"}>${busy ? '<span class="spinner" style="width:12px;height:12px"></span>' : icon("trash", "icon-sm")}<span>${esc(t("companion.dismiss"))}</span></button>
+      </div>
+      ${held ? `<p class="solo-note">${esc(t("companion.note"))}</p>` : ""}`;
   }
   async function soloAgain() {
     const last = ui.lastSolo;
@@ -835,7 +865,8 @@
       if (job.status === "succeeded" && job.warning === "matchFailed") {
         toast({ id: tid, kind: "warning", title: t("toast.summon.matchWarn", { name: u.name, n: job.spawned }), body: t("toast.summon.matchWarn.body", { n: job.spawned }), actions: [{ label: t("history.open"), action: "open-history" }] });
       } else if (job.status === "succeeded") {
-        const title = team === "neutral" ? t("toast.summon.okNeutral", { name: u.name, n: job.spawned }) : t("toast.summon.ok", { name: u.name, n: job.spawned, team: teamName(team) });
+        const title = team === "neutral" ? t("toast.summon.okNeutral", { name: u.name, n: job.spawned })
+          : team === "companion" ? t("toast.summon.okCompanion", { name: u.name, n: job.spawned }) : t("toast.summon.ok", { name: u.name, n: job.spawned, team: teamName(team) });
         toast({ id: tid, kind: "success", title, body: matchNote(before, job.spawned) });
       } else if (job.status === "uncertain") {
         toast({ id: tid, kind: "warning", title: t("toast.summon.uncertainTitle"), body: t("toast.summon.uncertain"), actions: [{ label: t("history.open"), action: "open-history" }] });
@@ -893,7 +924,7 @@
       if (job.status === "succeeded") toast({ id: tid, kind: "success", title: t("toast.stop.ok", { n: cleared }) });
       else if (S.cleanup && S.cleanup !== "spawn_uncertain") toast({ id: tid, kind: "warning", title: t("toast.stop.partial"), body: t("toast.stop.partial.body"), actions: [{ label: t("field.unfinished.again"), action: "stop-again" }] });
       else toast({ id: tid, kind: job.status === "uncertain" ? "warning" : "error", title: t("toast.failed"), body: reasonText(job.code, job.message) });
-      if (job.status === "succeeded" || RT.owned() === 0) ui.roster = { blue: {}, red: {}, neutral: {} };
+      if (job.status === "succeeded" || RT.owned() === 0) ui.roster = { blue: {}, red: {}, neutral: {}, companion: ui.roster.companion };
     } catch (error) {
       toast({ id: tid, kind: "error", title: t("toast.notSent"), body: reasonText(error.code, error.detail) });
     } finally {
@@ -914,7 +945,7 @@
       let job = await RT.command("stop");
       if (job.code === "restorePending") job = await RT.command("stop");
       if (job.status !== "succeeded") throw job;
-      ui.roster = { blue: {}, red: {}, neutral: {} };
+      ui.roster = { blue: {}, red: {}, neutral: {}, companion: ui.roster.companion };
       renderDock();
       for (const [i, item] of lineup.entries()) {
         for (let left = item.n; left > 0; left -= 8) {
@@ -1255,7 +1286,8 @@
   function jobTitle(job) {
     const p = job.payload || {}, u = byId.get(p.unit_id);
     switch (job.action) {
-      case "spawn": return p.team === "neutral" ? t("action.spawnNeutral", { name: u?.name, n: p.count }) : t("action.spawn", { name: u?.name, n: p.count, team: teamName(p.team) });
+      case "spawn": return p.team === "neutral" ? t("action.spawnNeutral", { name: u?.name, n: p.count })
+        : p.team === "companion" ? t("action.spawnCompanion", { name: u?.name, n: p.count }) : t("action.spawn", { name: u?.name, n: p.count, team: teamName(p.team) });
       case "configure_unit_key": return t("action.configure_unit_key", { name: u?.name });
       case "set_spawn_difficulty": return t("action.set_spawn_difficulty", { name: diffName(p.difficulty) });
       default: return t("action." + job.action);
@@ -1523,7 +1555,7 @@
     type: el => { ui.type = el.dataset.type; renderToolbar(); renderGrid({ animate: true }); },
     "clear-search": () => { ui.query = ""; const input = $("#search"); input.value = ""; input.focus(); renderToolbar(); renderGrid(); },
     "clear-filters": () => { Object.assign(ui, { query: "", type: "all", chapter: "all" }); $("#search").value = ""; renderToolbar(); renderGrid({ animate: true }); },
-    team: el => { ui.team = el.dataset.team; renderSelection(); renderSolo(); scheduleSync(); followUnitKey(); },
+    team: el => { ui.team = el.dataset.team; renderSelection(); renderSolo(); renderCompanion(); scheduleSync(); followUnitKey(); },
     "count-dec": () => setCount(ui.count - 1),
     "count-inc": () => setCount(ui.count + 1),
     "count-preset": el => setCount(Number(el.dataset.n)),
@@ -1533,6 +1565,7 @@
     "stop-confirm": () => stopAll(),
     "stop-again": el => { if (el.dataset.toastId) dismissToast(el.dataset.toastId); stopAll(); },
     rematch: () => rematch(),
+    "dismiss-companions": async () => { const job = await run("dismiss_companions", { ok: j => t("toast.companion.dismissed", { n: j.cleared }) }); if (job?.status === "succeeded") { ui.roster.companion = {}; renderCompanion(); } },
     "clear-neutral": async () => { const job = await run("clear_neutral", { ok: j => t("toast.neutral.cleared", { n: j.cleared }) }); if (job?.status === "succeeded") { ui.roster.neutral = {}; renderSolo(); } },
     "solo-again": el => { if (el.dataset.toastId) dismissToast(el.dataset.toastId); soloAgain(); },
     spectator: () => run("toggle_spectator", { busyKey: "toggle_spectator", ok: () => t(S.spectator ? "toast.spectator.on" : "toast.spectator.restoring") }),
@@ -1741,7 +1774,7 @@
     switch (event.type) {
       case "game":
         // Closing the game removes every summoned unit, so the lineup goes with it.
-        if (S.game === "offline") ui.roster = { blue: {}, red: {}, neutral: {} };
+        if (S.game === "offline") ui.roster = { blue: {}, red: {}, neutral: {}, companion: {} };
         renderTopbar();
         if (ui.page === "arena") renderDock(); else if (ui.page === "hotkeys" || ui.page === "settings") renderPage();
         if (S.game === "ready" && event.type === "game" && ui.prevGame && ui.prevGame !== "ready" && ui.prevGame !== "mismatch") toast({ kind: "success", title: t("toast.connected"), body: t("toast.connected.body") });
@@ -1769,6 +1802,8 @@
       case "teamKey":
         ui.team = event.team;
         renderSelection();
+        renderSolo();
+        renderCompanion();
         toast({ kind: "info", title: t("toast.teamKey", { team: teamName(event.team) }), body: t("toast.teamKey.body") });
         break;
       case "job":
@@ -1803,6 +1838,7 @@
         if (ui.page === "arena") {
           if (p.has("sel")) { renderBanner(); renderSelection(); }
           if (p.has("solo")) renderSolo();
+          if (p.has("companion")) renderCompanion();
           if (p.has("diff")) renderDifficulty();
           if (p.has("match")) renderMatch();
           if (p.has("battle")) renderBattle();

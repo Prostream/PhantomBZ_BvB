@@ -14,8 +14,8 @@ local function vector(v)
 end
 
 local function team_name(value)
-    local aliases = { blue = "blue", red = "red", neutral = "neutral", ["蓝"] = "blue",
-        ["蓝队"] = "blue", ["红"] = "red", ["红队"] = "red", ["中立"] = "neutral" }
+    local aliases = { blue = "blue", red = "red", neutral = "neutral", companion = "companion", ["蓝"] = "blue",
+        ["蓝队"] = "blue", ["红"] = "red", ["红队"] = "red", ["中立"] = "neutral", ["随从"] = "companion" }
     return type(value) == "string" and aliases[value:lower()] or nil
 end
 
@@ -121,6 +121,13 @@ function Arena.new(options)
         return ok
     end
 
+    -- Companions follow the player and are dismissed on their own; cleanup state is about the rest.
+    local function arena_records()
+        local n=0
+        for _,unit in ipairs(units) do if unit.team~='companion' then n=n+1 end end
+        return n
+    end
+
     local function prune()
         local kept, changed = {}, false
         for _, unit in ipairs(units) do
@@ -133,7 +140,7 @@ function Arena.new(options)
         units = kept
         if changed then
             notify_units()
-            if #units==0 and state=="cleanup_pending" then
+            if arena_records()==0 and state=="cleanup_pending" then
                 state=lastRestoreConfirmed and "idle" or "restore_pending"
                 message=lastRestoreConfirmed and "清理已读回完成" or "参赛者已清理，部分恢复仍待确认"
                 log(message)
@@ -164,7 +171,7 @@ function Arena.new(options)
     local function choose(path, requestedTeam, requestedCount)
         local newTeam = requestedTeam == nil and team or team_name(requestedTeam)
         local newCount = requestedCount == nil and count or tonumber(requestedCount)
-        if not newTeam then return false, "队伍只允许 blue/red/neutral" end
+        if not newTeam then return false, "队伍只允许 blue/red/neutral/companion" end
         if not finite(newCount) or newCount % 1 ~= 0 or newCount < 1 or newCount > MAX_BATCH then
             return false, "单次数量必须是1到8的整数"
         end
@@ -195,9 +202,9 @@ function Arena.new(options)
     function instance:cycleTeam()
         return run(function()
             local before=team
-            team=({blue='red',red='neutral',neutral='blue'})[team] or 'blue'
+            team=({blue='red',red='neutral',neutral='companion',companion='blue'})[team] or 'blue'
             teamRevision=teamRevision+1
-            return response(true,'召唤队伍切换 '..before..' -> '..team..'（'..({blue='蓝队',red='红队',neutral='暂不配队'})[team]..'）；读回 revision='..teamRevision..' count='..count..'，未生成或改动场上单位',{spawned_count=0})
+            return response(true,'召唤队伍切换 '..before..' -> '..team..'（'..({blue='蓝队',red='红队',neutral='暂不配队',companion='随从'})[team]..'）；读回 revision='..teamRevision..' count='..count..'，未生成或改动场上单位',{spawned_count=0})
         end)
     end
 
@@ -274,6 +281,9 @@ function Arena.new(options)
         local distance, lateral
         if whichTeam == "neutral" then
             distance, lateral = 600 + (slot - 1) * 360, 0
+        elseif whichTeam == "companion" then
+            distance = 150 - math.floor((slot - 1) / 2) * 200
+            lateral = 300 * (slot % 2 == 1 and -1 or 1)
         else
             distance = 600 + math.floor((slot - 1) / 3) * 360
             lateral = (360 + ((slot - 1) % 3) * 360) * (whichTeam == "blue" and -1 or 1)
@@ -378,7 +388,7 @@ function Arena.new(options)
                         end
                     end
                     local okActivate, activation, detail, warning
-                    if removed(actor) == false then okActivate, activation, detail, warning = invoke("activate", actor,entry.path)
+                    if removed(actor) == false then okActivate, activation, detail, warning = invoke("activate", actor,entry.path,team)
                     else okActivate, activation, detail = false, false, "生成后对象已失效、进入销毁或状态不可读" end
                     if okActivate and activation == true then activated = activated + 1
                     else failures = failures + 1; cleanupRequired=true end
@@ -495,10 +505,11 @@ function Arena.new(options)
             log("停止阶段=恢复会话；随后仅销毁本控制器登记的参赛者")
             local okRestore, restored = invoke("restore")
             lastRestoreConfirmed=okRestore and restored==true
-            local kept, destroyed = {}, 0
+            local kept, destroyed, companions = {}, 0, {}
             for _, unit in ipairs(units) do
                 local before = live(unit.actor)
-                if before == true then
+                if unit.team == "companion" then companions[#companions + 1] = unit
+                elseif before == true then
                     local okDestroy, detail = invoke("destroy", unit.actor)
                     local after = live(unit.actor)
                     local gone,proof=removed(unit.actor)
@@ -508,46 +519,54 @@ function Arena.new(options)
                 elseif before == false then destroyed = destroyed + 1
                 else kept[#kept + 1] = unit end
             end
+            local pending = #kept
+            for _, unit in ipairs(companions) do kept[#kept + 1] = unit end
             units = kept
             local synced = notify_units()
             local block=spawn_block()
-            state = block and 'spawn_uncertain' or (#kept > 0 and "cleanup_pending" or (okRestore and restored == true and synced and "idle" or "restore_pending"))
-            return response(not block and #kept == 0 and okRestore and restored == true and synced,
-                string.format("清理读回：已失效/进入销毁=%d，待确认=%d；恢复确认=%s", destroyed, #kept, tostring(okRestore and restored == true))..(block and ('；'..block) or ''),
-                { destroyed_count = destroyed, remaining_count = #kept, restored = okRestore and restored == true })
+            state = block and 'spawn_uncertain' or (pending > 0 and "cleanup_pending" or (okRestore and restored == true and synced and "idle" or "restore_pending"))
+            return response(not block and pending == 0 and okRestore and restored == true and synced,
+                string.format("清理读回：已失效/进入销毁=%d，待确认=%d；恢复确认=%s；随从保留=%d", destroyed, pending, tostring(okRestore and restored == true), #companions)..(block and ('；'..block) or ''),
+                { destroyed_count = destroyed, remaining_count = pending, restored = okRestore and restored == true })
         end)
     end
 
-    function instance:clearNeutral()
+    -- Removes only this team's records; Blue and Red, a running fight and the other teams stay.
+    local function clear_team(which,label)
         return run(function()
             local kept,pending,destroyed={},0,0
-            log('清理未配队：仅处理本Mod的neutral记录，不停止蓝红交战')
+            log('清理'..label..'：仅处理本Mod的'..which..'记录，不停止蓝红交战')
             for _,unit in ipairs(units) do
-                if unit.team~='neutral' then kept[#kept+1]=unit
+                if unit.team~=which then kept[#kept+1]=unit
                 else
                     local valid=live(unit.actor)
                     if valid==true then invoke('destroy',unit.actor) end
                     local gone,proof=removed(unit.actor)
-                    log('未配队清理读回 actor='..actor_name(unit.actor)..'；'..proof)
+                    log(label..'清理读回 actor='..actor_name(unit.actor)..'；'..proof)
                     if gone==true then destroyed=destroyed+1
                     else kept[#kept+1]=unit;pending=pending+1 end
                 end
             end
             units=kept;notify_units()
-            if #units==0 and state=='cleanup_pending' then state=lastRestoreConfirmed and 'idle' or 'restore_pending' end
-            return response(pending==0,'未配队清理：已确认='..destroyed..'，待确认='..pending,{destroyed_count=destroyed,remaining_count=pending})
+            if arena_records()==0 and state=='cleanup_pending' then state=lastRestoreConfirmed and 'idle' or 'restore_pending' end
+            return response(pending==0,label..'清理：已确认='..destroyed..'，待确认='..pending,{destroyed_count=destroyed,remaining_count=pending})
         end)
     end
+    function instance:clearNeutral() return clear_team('neutral','未配队') end
+    function instance:clearCompanions() return clear_team('companion','随从') end
 
     function instance:status()
         prune()
         local blue, red, neutral, unreadable, dead,neutralOwned,summons = 0, 0, 0, 0, 0,0,0
+        local companions,companionOwned=0,0
         for _, unit in ipairs(units) do
             if unit.summoner then summons=summons+1 end
             if unit.team=='neutral' then neutralOwned=neutralOwned+1 end
+            if unit.team=='companion' then companionOwned=companionOwned+1 end
             local alive,proof=alive_readback(unit)
             if alive==true then
-                if unit.team == "blue" then blue = blue + 1 elseif unit.team == "red" then red = red + 1 else neutral = neutral + 1 end
+                if unit.team == "blue" then blue = blue + 1 elseif unit.team == "red" then red = red + 1
+                elseif unit.team == "companion" then companions = companions + 1 else neutral = neutral + 1 end
             elseif alive==false then dead=dead+1
             else unreadable=unreadable+1 end
             if unit.countedAlive~=alive and (alive==false or unit.countedAlive==false) then
@@ -556,7 +575,7 @@ function Arena.new(options)
             unit.countedAlive=alive
         end
         return { blue_count = blue, red_count = red, neutral_count = neutral, total = blue + red + neutral,
-            owned_records = #units,neutral_owned=neutralOwned,unreadable_count = unreadable, dead_count=dead,max_units=maxUnits,summon_count=summons,battle_active=battleActive,current_unit = selected or "", current_team = team,
+            owned_records = #units,neutral_owned=neutralOwned,companion_count=companions,companion_owned=companionOwned,unreadable_count = unreadable, dead_count=dead,max_units=maxUnits,summon_count=summons,battle_active=battleActive,current_unit = selected or "", current_team = team,
             current_count = count,team_revision=teamRevision, state = state, message = message, busy = busy }
     end
 

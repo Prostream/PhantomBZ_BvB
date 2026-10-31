@@ -159,7 +159,7 @@ class BridgeTests(unittest.TestCase):
             self.bridge._wire({"id": 1, "payload": json.dumps({"action": "configure_keys", "bindings": {"spawn": "a" * 2050}})})
 
     def test_non_spawn_wire_fields_satisfy_the_lua_fixed_column_parser(self):
-        for action in ("start", "stop", "refresh_catalog", "configure_keys", "toggle_spectator", "toggle_stat_match"):
+        for action in ("start", "stop", "refresh_catalog", "configure_keys", "toggle_spectator", "toggle_stat_match", "dismiss_companions"):
             payload = {"action": action}
             if action == "configure_keys":
                 payload["bindings"] = BINDINGS
@@ -168,6 +168,13 @@ class BridgeTests(unittest.TestCase):
             columns = wire.rstrip("\n").split("\t")
             self.assertEqual(len(columns), 14 if action=='configure_keys' else 10)
             self.assertEqual(columns[3:5], ["blue", "1"])
+
+    def test_companion_team_is_accepted_for_summons_and_unit_keys(self):
+        command = self.spawn(team="companion")
+        columns = self.bridge._wire({"id": command["id"], "payload": json.dumps(command["payload"])}).rstrip("\n").split("\t")
+        self.assertEqual(columns[1:5], ["spawn", UNIT, "companion", "1"])
+        with self.assertRaises(backend.ValidationError):
+            self.spawn(team="pet")
 
     def test_spawn_difficulty_travels_in_the_spawn_key_column(self):
         for difficulty in backend.SPAWN_DIFFICULTIES:

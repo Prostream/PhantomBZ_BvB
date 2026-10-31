@@ -68,6 +68,10 @@ function Runtime.new(options)
             if options.support then options.support:discover() end
             return options.arena:clearNeutral()
         end,
+        dismiss_companions=function()
+            if options.support then options.support:discover() end
+            return options.arena:clearCompanions()
+        end,
         toggle_spectator=function()
             local why=readyError(); if why then return {ok=false,message=why,spawned_count=0} end
             if not options.spectator then return {ok=false,message="无仇恨模块未加载",spawned_count=0} end
@@ -128,6 +132,14 @@ function Runtime.new(options)
         out.arena_unreadable_count=arena.unreadable_count
         out.arena_max_units=arena.max_units
         out.neutral_owned_records=arena.neutral_owned
+        out.companion_count=arena.companion_count or 0
+        out.companion_owned_records=arena.companion_owned or 0
+        local companion=options.companions and options.companions:status() or {}
+        out.companion_supported=not not options.companions
+        out.companion_follow=companion.follow or 0
+        out.companion_friendly=companion.friendly or 0
+        out.companion_failures=companion.failures or 0
+        out.companion_message=companion.message or ''
         out.arena_team_revision=arena.team_revision or 0
         out.arena_summon_count=arena.summon_count or 0
         local support=options.support and options.support:status() or {}
@@ -264,9 +276,17 @@ function Runtime:start()
         if self.healthTicks%2==0 and self.options.support then self.options.support:tick() end
         self.bridge:tick()
     end
+    -- A whole pump slower than 15 ms is logged (at most 60 times per Lua lifetime) to find stutter.
+    local slowPumps=0
     self.pumpCallback=function()
         if not self.alive or not self.pumpReady then return end
+        local started=os.clock()
         local ok,err=xpcall(pumpBody,debug.traceback)
+        local spent=(os.clock()-started)*1000
+        if spent>=15 and slowPumps<60 then
+            slowPumps=slowPumps+1
+            self.log(string.format('[Perf] 面板轮询耗时 %.1fms',spent))
+        end
         if not ok and self.lastError~=tostring(err) then
             self.lastError=tostring(err); self.log("面板轮询失败: "..tostring(err))
         end

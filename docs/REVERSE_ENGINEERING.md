@@ -559,3 +559,136 @@ v0.28.2改为实例原生Health_Min基础值写入，沿用已经核对的原位
 - 组件列表里旧版模组显示“需要更新”，不再显示“未安装”。
 - 六种语言同步更新，原型演示已核对。
 
+## v0.35.0：随从（2026-11-01，能打不跟随）
+
+B站评论区请求“随从：BOSS或精英怪跟着，能一直跟着、随时删除”。用户决定：用官方的跟随组件，阵营里加“随从”选项，数量不限，换地图或读档后自动召回，其余由助手决定。
+
+官方组件证据（资产注册表与头文件）：
+- SGameAI 插件自带一套 NPC 助战跟随：`/SGameAI/Data/IdleStateData_Follow`（闲置状态数据 USGameAIStateData 子类，含 BehaviorTreeAsset/Bindings/AssignParameters）、`/SGameAI/BehaviorTree/SubTree/BT_SGameAI_Idle_NpcHelper_FollowPlayer`、`BT_SGameAI_Idle_Follow`、`/SGameAI/StateTree/ActionStateTree/AST_Follow_Advanced`、`/SGameAI/StateTree/Evaluator/STEvaluator_GetFollowDestination`（字段有 Move_OffsetToPlayerRange、Teleport_OffsetToCameraRange、LastResetPlayerLocation，说明落后太远会传送到镜头附近）、`BTService_FollowTarget(_New)`。
+- 游戏里的助战角色：`034_EMei/BP_Monster_EMei_Crossbow_NPChelper*`、`BP_Monster_EMei_NPCHelper_XiaoJu`、`StrategyConfig_EMeiCrossbow_NPCHelper`、长枪兵 NpcHelper 动画蓝图，以及西谷“营地一 npcHelper”任务流。
+- 闲置状态由 `FAISpawnInfo.IdleStateData` 决定（SGameAIComponent.SpawnInfo；关卡刷怪器配置）；我们用 SpawnAIDefered 不带刷怪器，所以默认没有闲置状态。资产依赖在 cooked 包里被剥离（reference-queries 都是 empty_or_stripped），无法反查哪个刷怪器用了跟随状态。
+- 其他可用接口：`BP_SGameAIFunctionLibrary.SyncHatredList(From,To)`（召唤物共享召唤者目标）、`ForceOffCombat/ForceIntoCombat`；UFactionComponent `SetFaction/GetCurrnetFaction/SetFactionRelationOverride`。
+
+做法（`companion.lua`，阵营 `companion`）：
+- 激活前：用 StaticConstructObject 新建一个 IdleStateData_Follow 实例（外层=该单位的 SGameAIComponent），写入 `SpawnInfo.IdleStateData` 并读回地址；把单位阵营设为玩家当前阵营并读回标签；单位↔玩家关系覆盖为友好（双向）并读回。AI 在写入前已经启动的，激活后 StopAI/StartAI 一次。
+- 每0.5秒：玩家仇恨列表非空时，每2秒 SyncHatredList(玩家→随从)；生成后90秒内每5秒记录距离、AI状态标签和闲置状态数据，用来判断是否真的跟随。首次加载跟随类时只读输出它的字段和函数。
+- 擂台：随从不参加开战、不被“停止并清理”带走，有单独的“解散随从”（dismiss_companions）；不做数值统一；血条和抓取只管蓝红方；F2 切换顺序 蓝→红→暂不配队→随从。单位快捷键也可以绑定到随从阵营。
+- 同时修正召唤难度：AI难度挂钩改为“选了难度就挂上”，不再等第一只带难度的单位出现，使新单位初始化时的难度查询也按所选难度回答（ActorConfig 里另有 `AIConfig Nightmare`，可能在初始化时按难度挑选）；读回日志增加该单位的 AI 配置（默认/噩梦/当前）。
+- 自动召回（换地图/读档）留到跟随在实机验证后再做。
+- 离线：companion 5项、arena_controller（含随从分组、停止保留、单独解散）、ai_difficulty（选难度即挂钩）、panel_runtime 22项、后端56项、main_boot 等全部通过；原型演示里召唤随从、停止保留、解散均正常。46个Lua部署哈希一致，BUILD=v0.35.0-companion。
+
+**v0.35.0 实机读回（UE4SS.log 自930行，06:07–06:13，地图 PBZ_Pangzhen_WP）**：用户把魔渊绑到单位快捷键（team=companion），用六十六天召唤 1 只。
+- 跟随状态写入读回 true，阵营 Faction.Enemy → Faction.Player 读回 true，双向友好 0/0。AI 出生时已启动，重启一次后状态 AI.State.Idle，跟随数据保留。
+- 跟随状态类只读：自身字段 `ActorToFollow`（软指针，本轮没设）、`FollowStartDistance=500`、`FollowStopDistance=200`；继承 `BehaviorTreeAsset=BT_SGameAI_Idle_Follow`、`bLoop=true`；函数 `AssignParameters(Blackboard)`、`OnSpawnAI(Spawner,Pawn)`（图里有软引用转对象、转换为 BP_AISpawner、`SetValueAsFloatByTag`）。即跟随目标和距离靠黑板“按标签”写入。
+- 召唤约5秒后进入 AI.State.Combat，此后90秒观察期内一直是战斗状态，离玩家 2–13 m；HP 12000→约7800，被地图怪攻击。玩家仇恨列表一直为空，SyncHatredList 没有触发。
+- 召唤难度部分：魔渊 `AIConfig  Default` 和 `AIConfig Nightmare` 都是 AIConfig_MoTian，魔渊没有单独的噩梦AI。AI难度挂钩在召唤前已经装好（出生时就有 `改写 GetDifficulty(pre) 上下文=BP_Monster_MoTian_C`）。
+- 用户画面：**能正常和地图怪打架；没有跟随，也没有传送；随从和玩家互相不造成伤害。**
+
+## v0.35.1：跟随目标、走/跑、100米传送（2026-11-01，召唤时原生崩溃）
+
+用户要求：5 米内走路，10 米外跑步，100 米直接传送；正在和 BOSS 打的时候不传送。
+- 跟随目标：创建跟随状态时尝试 `ActorToFollow=玩家`（软指针，Lua 是否能写入未知）。黑板出现后，列出全部键（名称、类型、对象值），调用一次 `AssignParameters(黑板)`；名字含 follow 的对象键全部写成玩家并读回。非战斗时每2秒检查一次，被清空就再写回。
+- 走/跑：用角色自己的 `SetMovementMode(标签)`（BP_RenewalNPC），标签取 GlobalConfig_Mechanic 的 `Walking Tag`/`Jogging Tag`。非战斗时距离 ≤10 m 走、>10 m 跑；被 AI 自己的移动模式服务改掉时，最多每2秒再设一次。读回 `AIMovementMode`。
+- 备用跟随：距离超过 5 m（官方起跟距离）且3秒内没有靠近 0.5 m 以上时，改用引擎的 `AIController.MoveToActor(玩家, 2m)`，每2秒重发。日志区分“官方跟随在靠近”和“备用跟随”。
+- 传送：距离 ≥100 m 时传送到玩家身边 2.5 m（`K2_TeleportTo`，保留朝向，冷却3秒）。随从或玩家的仇恨列表里有 BOSS（`Actor Config` 的 Difficulty Tag 以 Boss 结尾）时不传送。
+- 状态变化（Idle/Combat 等）全程记录，上限40行。
+- 离线：companion 新增一项（跟随键、走/跑、卡住改用 MoveToActor、100米传送、BOSS战不传送）；全部 Lua 测试通过。46个Lua部署哈希一致，BUILD=v0.35.1-companion-follow。
+
+**v0.35.1 崩溃（06:20:06，crash_2026_11_01_06_20_06.7456130.dmp）**：用户按召唤后游戏崩溃。本局运行日志 `Runtime/run-20261101-061923.log` 的最后一行是“官方跟随状态类 …”的只读描述（在 prepare 里加载跟随类时打印），没有出现 prepare 结尾的“准备 unit=…”。按代码顺序，接下来依次是：新建跟随状态对象、写 SpawnInfo.IdleStateData（v0.35.0 同样做过，没崩），以及本版新增的 `state.ActorToFollow=player`。
+
+结论：**用 UE4SS Lua 给 `TSoftObjectPtr` 属性直接赋 UObject，会导致原生崩溃，pcall 拦不住。**不要再这样写软指针。
+
+## v0.35.2：去掉软指针写入（2026-11-01，待实机读回）
+
+- 删除 ActorToFollow 写入，跟随对象只通过黑板写入：`AssignParameters(黑板)`，再把名字含 follow 的对象键 `SetValueAsObject` 成玩家。
+- 备用跟随从 `AIController.MoveToActor(…, FilterClass=nil, …)` 改为 `AIBlueprintHelperLibrary.SimpleMoveToActor(控制器, 玩家)`，避免给类参数传 nil。
+- 测试夹具会记录对跟随状态对象的任何写入，并断言写入次数为 0，防止以后又写回去。全部 Lua 测试通过；46个Lua部署哈希一致，BUILD=v0.35.2-companion-follow。
+
+## v0.35.3：难度挂钩改为按需、轻量（2026-11-01，待实机读回）
+
+用户反映“游戏一卡一卡的”。本局（06:24:02 起，PBZ_Pangzhen_WP）还没召唤任何单位。06:24:59 因为召唤难度选着六十六天，v0.35.0 起的“选了难度就挂钩”立即注册了 GetDifficulty/GetDiffcultMode 挂钩。之后地图上**每只怪**每次查询难度，都会进入 Lua 回调做归属判断：沿外层链最多8级；每级 `U.key/U.valid` 都会经引擎有效性检查（原生 Kismet IsValid）；还会对每个对象 pcall `K2_GetPawn`（非控制器会抛 Lua 错误）。缓存每0.5秒清空一次。怪多的大地图上，这是卡顿的主要嫌疑。没有逐帧计时证据，修复后由用户对比确认。
+
+修改（ai_difficulty.lua）：
+- 只挂 `GetDifficulty`。`GetDiffcultMode` 在 v0.32.1–v0.35 的日志里只出现过 World 上下文，从未被本Mod单位使用。
+- 不再“选了难度就挂钩”。改为在出生路径上调用 `ensure(单位, 难度)`：main 的 FinishSpawnViaAILib 在 spawn_difficulty 写入槽位之后、FinishSpawn 之前调用，所以单位初始化时的难度查询仍会被回答。最后一只带难度的单位离场10秒后，摘掉全部挂钩（含两个蓝图检查节点）。
+- 归属改为查表：每个 tick 把带难度单位及其控制器的地址建成索引；回调里只读上下文对象、它的外层、外层的外层这三个地址，不做有效性检查，结果缓存到下一个 tick。日志消息只在第一次出现时才拼接。检查节点的门槛直接读 `node.Difficulty`。
+- 离线：ai_difficulty 测试覆盖“没有带难度单位不挂钩、出生前挂钩并立即回答、单位/控制器/行为树节点归属、单位离场10秒后摘除全部挂钩”；全部 Lua 测试通过。46个Lua部署哈希一致，BUILD=v0.35.3-light-hooks。
+
+## v0.35.4–v0.35.5：随从跑步、少打断、投技、卡顿计时（2026-11-01，待实机读回）
+
+v0.35.3 实机（run-20261101-063110.log，06:31–06:36，PBZ_Pangzhen_WP）：
+- 用户反馈：随从会跟着人走，但不会跑；卡顿又出现了；随从的投技对地图原生怪不起作用。
+- 日志：
+  - 黑板共49个键，跟随对象键指向玩家，读回1/1。
+  - 移动模式标签：走路 `CharacterState.Native.Attitude.Walking`，跑步 `…Jogging`。切到 Jogging 读回正确，但画面上仍是走路。
+  - 官方跟随从未让它靠近（没有“官方跟随在靠近”一行），全靠备用 SimpleMoveToActor，每2秒重发一次，距离一度拉到 48 m。
+  - GetDifficulty 挂钩每分钟只调用几十到几百次（464/174/30），量不大，不像卡顿主因。
+- 用户确认魔渊是人形NPC，跑步用冲刺即可。
+
+修改：
+- 跑步改用 GlobalConfig_Mechanic 的 `Sprinting Tag`（构建里没有时退回 Jogging）。走/跑被AI改回时，最多每5秒再设一次（原来2秒），日志同时记录 CharacterMovement.MaxWalkSpeed。
+- 备用跟随不再每2秒重发：只有 `AIController.GetMoveStatus()` 不是 Moving(3)，并且距上次下令已超过3秒，才重新下 SimpleMoveToActor。走向某个 Actor 的移动会一直追着它，重发反而会打断起步。
+- 投技：arena_grabs 的范围改为“开战且蓝红都有活单位时的蓝红族”加上“任何时候在场的随从族”。随从在场时，它所属族的共享 `BP_BulletEvent_Grab.NonPlayerGE` 会清空，让投技对地图怪走完整的双人动作；随从全部离场后恢复。共享资源和恢复记录的机制不变（见 NPC_GRABS.md）。Config.EnableNPCGrabs=false 时传空名单，整个功能关闭。
+- 卡顿排查：
+  - 投技事件重扫是 FindAllOf 全对象遍历。只有随从时改为每30秒一次，交战中仍是5秒。
+  - 新增 `[Perf]` 日志：支持循环超过10 ms 时记录各步骤耗时（prune/aiDifficulty/companions/freeCamera/summonLinks/activity/grabs/reinforce/bossHUD），整个面板轮询超过15 ms 时也记录，各最多60行。
+- 离线：companion（冲刺、移动中不重发、停下后重发）、arena_grabs 9项（新增“随从单独在场时启用，解散后恢复；只有蓝方时不启用”），以及全部 Lua 测试通过。46个Lua部署哈希一致，BUILD=v0.35.5-companion-grabs。
+
+## v0.35.6：真正跑起来、卡顿源头（2026-11-01，待实机读回）
+
+v0.35.5 实机（run-20261101-064533.log，06:45–06:57；魔渊之后又召了阿花，两只都是六十六天随从）：
+- 用户确认：**和地图怪打架完全正常，投技对地图原生怪生效**；切换点位（快速移动）时传送生效。还是只会走、不会跑。
+- 传送读回：两次各 583 m / 573 m 的远距离（用户快速移动后）都传送到 2.5–2.7 m 内；另有一次原距离 1001292.5 m（切图过程中的坐标）也传送成功。
+- 移动模式：切到 `CharacterState.Native.Attitude.Sprinting`，调用和读回都成功，但 `CharacterMovement.MaxWalkSpeed` 一直是 80（魔渊）或 100（阿花），切换前后没变。**NPC 的移动模式标签不改变速度**，速度由 AI 自己的移动服务控制（BTService/STTask_SetAIMovementMode 里有 CachedMaxWalkSpeed、ShouldWalking）。
+- 备用跟随按移动状态下令，`上次移动状态=0`（Idle）时才重发，不再每2秒打断。
+- **卡顿源头**：`[Perf]` 显示召唤魔渊后，支持循环每0.5秒耗时 61–75 ms，其中 `aiDifficulty=47–70ms`，其余各步都在0–2 ms（另有 grabs=17 ms 只出现一次，是投技事件重扫）。原因是 aiDifficulty 每个 tick 都对两个蓝图检查节点函数调用 StaticFindObject，而魔渊的 AI 不用这两个节点，类未加载、查找失败。**UE4SS 里查找一个不存在的对象路径很慢**（每次约30 ms）。
+
+修改：
+- aiDifficulty：蓝图检查节点的查找最多每15秒一次。
+- 随从跑步：超过10 m 且不在战斗时，直接把 `CharacterMovement.MaxWalkSpeed` 设为跑步速度。取值为该角色 ActorConfig `Sprint Parameters.ExplicitWalkSpeed`、玩家当前 MaxWalkSpeed×1.1、500 三者中的最大值。每个 tick 若被AI改回就再设一次。回到10 m内或进入战斗时，恢复它最初的走路速度。移动模式仍按走路/冲刺切换。
+- 离线：companion（跑步速度、被改回后再设、10 m内恢复）、ai_difficulty（查找每15秒一次）及全部 Lua 测试通过。46个Lua部署哈希一致，BUILD=v0.35.6-companion-run。
+
+## v0.35.7：跑步速度改走移动驱动（2026-11-01，待实机读回）
+
+v0.35.6 实机（run-20261101-070524.log，07:05–07:07）：
+- 卡顿已消除：`[Perf]` 只剩召唤时的单次 19–25 ms（companions 8–9 ms 是首次加载跟随类和黑板，grabs 5–13 ms 是投技事件扫描），aiDifficulty 降到 1–2 ms。
+- 跑步：阿花和魔渊的跑步速度都取 1045（冲刺配置 ExplicitWalkSpeed=-1，即未配置；玩家 950×1.1）。直接写 `MaxWalkSpeed` 当下读回 1045，但切回走路时读到的已经是 80，说明下一帧就被改回。用户画面上仍然只会走。
+- 阿花在离玩家 34.4 m 处不动：每5秒重发一次 SimpleMoveToActor，移动状态一直是 Idle，位置不变（疑似路径不可达）。用户猜阿花可能本来就没有跑步动画，魔渊应该有。
+
+头文件证据：`ULocomotionDriverComponent`（角色字段 `Locomotion Driver`）提供 `UseCustomMaxSpeed(MaxSpeed, HasBlendArgs, ExplicitBlendArgs)`、`UseCustomMovementParameters` 和 `StopUseCustomMovementParameters`。速度由它按当前移动参数每帧维护，直接写 CharacterMovement 会被覆盖。
+
+修改：跑步时调用一次 `Locomotion Driver:UseCustomMaxSpeed(跑速,false,{})`，1秒后读回 MaxWalkSpeed 记一行日志。回到10 m内或进入战斗时调用 `StopUseCustomMovementParameters()`，把速度交还给驱动。不再直接写 MaxWalkSpeed。离线测试和全部 Lua 测试通过。46个Lua部署哈希一致，BUILD=v0.35.7-companion-run。
+
+## v0.35.8：跑步动作（2026-11-01，待实机读回）
+
+v0.35.7 实机（run-20261101-070929.log）：
+- 用户画面：**速度对了，但动作还是走路**，即走路动画配很快的移速。
+- `UseCustomMaxSpeed(1045)` 生效，1秒后读回 1045。`StopUseCustomMovementParameters` 调用成功，但当下读回仍是 1045（可能有过渡）。
+- 黑板里的官方跟随键是 `FollowTargetActor`，另有 `FollowStartDistance`/`FollowStopDistance`/`RunPointActor`。本局第一次出现“官方跟随在靠近玩家 6.3m → 5.8m”。
+
+推测：NPC 追击用的是 Jogging，冲刺（Sprinting）状态在不少 NPC 上没有对应动画，于是退回走路动画。v0.35.3 试 Jogging 时看起来像走，是因为当时速度被压在80。
+
+修改：跑步改用 Jogging 标签（构建里没有时才用 Sprinting），速度仍通过移动驱动设置。跑起来1秒后，只读记录一次：动画实例里名字含 gait/speed/walk/run/jog/sprint/attitude/locomotion/move/velocity 的字段及其值，以及能力组件身上含 Attitude/Locomotion/Movement 的标签，用来确认动画按什么切换走/跑。全部 Lua 测试通过；46个Lua部署哈希一致，BUILD=v0.35.8-companion-jog。
+
+## v0.35.9：随从立即迎敌（2026-11-01，待实机读回）
+
+用户反馈：召唤出来的随从要过几秒才去锁定敌对单位。日志佐证：每只随从召唤后都要 5–10 s 才从 AI.State.Idle 转入 Search，再过约1 s 才进入 Combat（例如 07:14:24 召唤魔渊，07:14:34 进入 Search，07:14:35 进入 Combat）。推测原因：SGameAI 用“警觉值”（黑板 Awareness/MinAwareness）慢慢积累后才开战；召唤时为装跟随状态重启了 AI，感知也被清零。
+
+修改（companion.lua）：
+- 随从不在战斗时，每秒一次调用自己感知组件的 `AIPerception:GetPerceivedHostileActors(out)`（出参取 `out.OutActors`，即已经感知到、按阵营判定为敌对的单位），开销很小。
+- 从中挑选：离玩家 20 m 内、HP>0、不是玩家、不是本Mod任何队伍的单位，取离随从最近的一个，调用 `SGameAIComponent:ForceIntoCombat(目标)`（斗蛐蛐开战用的同一接口）。
+- 日志记录目标、距离、感知到的敌对数量和调用后的状态，最多20行。
+- 没有使用全对象扫描（FindAllOf），避免再造成卡顿。
+
+离线：companion 新增一项（选最近、排除本Mod单位/死亡/过远、每秒最多一次、战斗中不触发）；全部 Lua 测试通过。46个Lua部署哈希一致，BUILD=v0.35.9-companion-engage。
+
+## v0.35.10：跑步动画输入采样（2026-11-01，待实机读回）
+
+v0.35.9 实机（run-20261101-072358.log，07:24–07:29）：
+- 用户先召了一只暂不配队的 YuCong，3秒后召魔渊随从。魔渊 07:24:46 召唤，07:24:47 从 Idle 直接进入 Combat（此前要5–10 s）。本局没有出现“主动迎敌”日志，说明这次是它自己当即开战的。
+- 跑步：Jogging 标签读回正确，`UseCustomMaxSpeed(825)` 生效（玩家 MaxWalkSpeed=750×1.1），1秒后读回825。`StopUseCustomMovementParameters` 后最大速度要到下一次才恢复80。
+- 动画实例 `PBZ_ABP_Base_Template_MoTian_C` 的相关字段（采样时随从刚停下，速度为0）：`moveState=0`、`GameplayTag_IsSprint=false`、`SpeedWalkRun`（向量）、`DisplacementSpeed=0`、`HasVelocity=false`、`SpeedMultiplier=0.01`、VelocityBlend 等。角色本身没有 `AbilitySystemComponent` 字段，标签不可读。
+- 画面是否为跑步动作，用户尚未说明。
+
+修改：只读采样。我们让它跑时每秒记一次，共8次；它自己在战斗中实际速度超过 300 时记4次。内容包括实际速度、moveState、GameplayTag_IsSprint、SpeedWalkRun(x,y,z)、DisplacementSpeed、AIMovementMode、AI状态，以及能力组件（改从 SGameAIComponent.AbilitySystemComponent 取）上含 Attitude/Sprint/Move 的标签。用来对比两种情况下动画输入的差别。全部 Lua 测试通过；46个Lua部署哈希一致，BUILD=v0.35.10-anim-sample。
+

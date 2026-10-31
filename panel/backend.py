@@ -31,7 +31,9 @@ _taxonomy_module = importlib.util.module_from_spec(_taxonomy_spec)
 _taxonomy_spec.loader.exec_module(_taxonomy_module)
 
 DEFAULT_RUNTIME = Path(r"D:\steam\steamapps\common\PBZ\platform\steam\ue4ss\Mods\PhantomGladiator\Runtime")
-ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty"}
+ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions"}
+# Teams a unit can be summoned to; companion units follow the player (companion.lua).
+TEAMS = ("blue", "red", "neutral", "companion")
 # FOLLOW keeps the game difficulty; the others are the game's own four levels (spawn_difficulty.lua).
 SPAWN_DIFFICULTIES = ("FOLLOW", "EASY", "NORMAL", "HARD", "NIGHTMARE")
 LEGACY_BINDING_NAMES = ("spawn", "start", "stop", "refresh_catalog")
@@ -354,7 +356,7 @@ class Bridge:
                 unit,key,mask=row[:3];clean_field(unit,'unit key path',512)
                 vk,mod=int(key),int(mask)
                 team,count=(row[3] or None,int(row[4]) if row[4] else None) if columns==5 else (None,None)
-                if team not in (None,'blue','red','neutral') or not (count is None or 1<=count<=8):raise ValidationError('invalid unit key team or count')
+                if team not in (None,)+TEAMS or not (count is None or 1<=count<=8):raise ValidationError('invalid unit key team or count')
                 if not 1<=vk<=255 or not 0<=mod<=7 or unit in result or vk in seen:raise ValidationError('invalid or duplicated unit key')
                 seen.add(vk);result[unit]={'key_code':vk,'modifiers':mod,'team':team,'count':count,'active':False,'message':'等待游戏确认'}
             status=bounded_read(self._path('unit-keybinds-state.tsv'),2*1024*1024)
@@ -620,8 +622,8 @@ class Bridge:
             if unit["spawnable"] is False:
                 raise ValidationError("unit is marked unavailable for spawning: " + unit["reason"])
             team = request.get("team", "blue")
-            if not isinstance(team, str) or team not in {"blue", "red", "neutral"}:
-                raise ValidationError("team must be blue, red or neutral")
+            if not isinstance(team, str) or team not in TEAMS:
+                raise ValidationError("team must be blue, red, neutral or companion")
             count = request.get("count", 1)
             if type(count) is not int or not 1 <= count <= 8:
                 raise ValidationError("count must be an integer from 1 to 8")
@@ -637,7 +639,7 @@ class Bridge:
             # Team and count come together: the key then summons this unit there, whatever the panel shows.
             if 'team' in request or 'count' in request:
                 team,count=request.get('team'),request.get('count')
-                if team not in {'blue','red','neutral'}:raise ValidationError('team must be blue, red or neutral')
+                if team not in TEAMS:raise ValidationError('team must be blue, red, neutral or companion')
                 if type(count) is not int or not 1<=count<=min(8,unit.get('max_count',8)):raise ValidationError('count must be an integer from 1 to 8')
                 payload.update(team=team,count=count)
             vk=request.get('key_code');mods=request.get('modifiers',0)

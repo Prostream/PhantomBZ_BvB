@@ -38,8 +38,10 @@ const MockRuntime = (() => {
     appVersion: "0.26.2",
     modVersion: "0.26.2",
     blue: 0, red: 0, neutral: 0,  // alive (HP above 0), like blue_count / red_count / neutral_count
+    companion: 0,               // companions follow the player and stay through "stop and clear" (companion_count)
+    companionFailures: 0,
     // Fallen units stay registered until cleanup (arena_dead_count, neutral_owned_records).
-    down: { blue: 0, red: 0, neutral: 0 },
+    down: { blue: 0, red: 0, neutral: 0, companion: 0 },
     unreadable: 0,              // HP could not be read (arena_unreadable_count); not counted as alive or fallen
     freeCam: false,             // F6 observer camera: forces spectator on, locks HP, hides the player
     team: "blue",               // the game's current summon team (F2 cycles it)
@@ -70,7 +72,7 @@ const MockRuntime = (() => {
   const ready = () => s.game === "ready" || s.game === "mismatch";
   const fail = code => Object.assign(new Error(code), { code });
   // Every unit the app still holds, alive or fallen; cleanup and the equal-stats reset go by this.
-  const owned = () => s.blue + s.red + s.neutral + s.down.blue + s.down.red + s.down.neutral;
+  const owned = () => s.blue + s.red + s.neutral + s.down.blue + s.down.red + s.down.neutral;   // companions are not the arena's
 
   async function command(action, payload = {}) {
     if (!online()) throw fail("offline");
@@ -131,9 +133,14 @@ const MockRuntime = (() => {
         // Like arena_controller.lua: units go, but an unconfirmed restore leaves restore_pending.
         const partial = (s.stopOutcome === "partial" && job.cleared > 0) || s.stopOutcome === "stuck";
         if (s.stopOutcome === "partial") s.stopOutcome = "ok";
-        Object.assign(s, { blue: 0, red: 0, neutral: 0, down: { blue: 0, red: 0, neutral: 0 }, unreadable: 0, fight: "idle", winner: "", cleanup: partial ? "restore_pending" : "" });
+        Object.assign(s, { blue: 0, red: 0, neutral: 0, down: { blue: 0, red: 0, neutral: 0, companion: s.down.companion }, unreadable: 0, fight: "idle", winner: "", cleanup: partial ? "restore_pending" : "" });
         if (partial) { job.status = "failed"; job.code = "restorePending"; job.message = `清理读回：已失效/进入销毁=${job.cleared}，待确认=0；恢复确认=false`; }
         releaseBaseline();
+        return;
+      case "dismiss_companions":
+        job.cleared = s.companion + s.down.companion;
+        s.companion = 0;
+        s.down.companion = 0;
         return;
       case "clear_neutral":
         // Only the app's no-team units, fallen ones included; Blue, Red and a running fight stay as they are.
@@ -246,7 +253,7 @@ const MockRuntime = (() => {
 
   function cycleTeam() {
     if (!online()) return;
-    s.team = { blue: "red", red: "neutral", neutral: "blue" }[s.team];
+    s.team = { blue: "red", red: "neutral", neutral: "companion", companion: "blue" }[s.team];
     emit({ type: "teamKey", team: s.team });
   }
 

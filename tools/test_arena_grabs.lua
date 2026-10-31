@@ -59,6 +59,15 @@ test('only confirmed fallback on participating NPC asset families is changed and
     assert(h.grabs:restore() and h.own.NonPlayerGE==h.original and h.grabs:status().events==0)
     assert(h.files['memory/npc-grab-policy.tsv']=='NPCGrabPolicyV1\n')
 end)
+test('a companion out of any fight gets full grabs on map enemies until it is dismissed',function()
+    local h=harness()
+    local companion={{actor=h.blue,team='companion',class_path=ROOT..'Alpha/BP_Blue.BP_Blue_C'}}
+    assert(h.grabs:sync(companion,false,true))
+    assert(h.own.NonPlayerGE==h.emptyClass and h.other.NonPlayerGE==h.original and h.player.NonPlayerGE==h.original)
+    assert(h.grabs:sync({},false) and h.own.NonPlayerGE==h.original,'dismissed: the shared event is restored')
+    h.members[2].team='neutral'
+    assert(h.grabs:sync(h.members,true,true) and h.own.NonPlayerGE==h.original,'a lone Blue unit without Red still enables nothing')
+end)
 test('inactive battle, neutral actors and missing live opponents do not enable grabs',function()
     local h=harness();h.grabs:sync(h.members,false,true);assert(h.scans==0)
     h.members[2].team='neutral';h.grabs:sync(h.members,true,true);assert(h.scans==0)

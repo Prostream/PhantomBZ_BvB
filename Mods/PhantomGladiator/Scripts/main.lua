@@ -38,6 +38,7 @@ local SpectatorTargets = require('spectator_targets')
 local KeyRouter = require('key_router')
 local SpawnDifficulty=require('spawn_difficulty')
 local AIDifficulty=require('ai_difficulty')
+local Companion=require('companion')
 
 local MOD = "[PhantomGladiator]"
 local runLogPath=Config.RuntimePath..'/run-'..os.date('%Y%m%d-%H%M%S')..'.log'
@@ -60,7 +61,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.34.0-difficulty-ai"
+local BUILD = "v0.35.0-companions"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -104,6 +105,8 @@ local arenaActivity
 local arenaGrabs
 local statMatch
 local spawnDifficulty
+local companions
+local aiDifficulty
 local BeginArenaObservation
 local spawnAudit=SpawnAudit.new(Config.RuntimePath.."/spawn-attempts.tsv",log)
 local spawnGuard=SpawnGuard.new()
@@ -492,7 +495,11 @@ local function FinishSpawnViaAILib(pawn,t,world)
     if route~='npc' and route~='actor' then return false,'生成路径未登记，保留清理记录' end
     if route=='npc' and arenaActivity then arenaActivity:prepare(pawn) end
     -- The app's chosen difficulty goes into this actor's own config slots before it initialises.
-    if route=='npc' and spawnDifficulty then spawnDifficulty:prepare(pawn,objectName(pawn)) end
+    if route=='npc' and spawnDifficulty then
+        local applied=spawnDifficulty:prepare(pawn,objectName(pawn))
+        -- Its AI asks for the difficulty while it initialises, so the hooks must be in place first.
+        if applied and applied.applied and aiDifficulty then aiDifficulty:ensure(pawn,spawnDifficulty:levelOf(pawn)) end
+    end
     local lib=route=='npc' and GetAILib() or StaticFindObject('/Script/Engine.Default__GameplayStatics')
     if not safeValid(lib) then return false,"FinishSpawn函数库不可用，保留清理记录" end
     if not spawnAudit:record("finish_spawn_begin",objectName(pawn),"所有权已登记；"..objectName(world)) then
@@ -1195,9 +1202,14 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
     getForward=function(actor) checked(actor); return actor:GetActorForwardVector() end,
     spawnClass=SpawnViaAILib,
     finishSpawn=FinishSpawnViaAILib,
-    activate=function(actor,unitPath)
+    activate=function(actor,unitPath,team)
         if spawnRoutes[actor]=='actor' then return safeValid(actor),'通用Actor初始化完成；未调用PBZ战斗AI，不保证具有血量或战斗能力' end
         spectator:applyTo(actor)
+        -- Companions get the official follow state, the player's faction and a friendly relation before their AI starts.
+        if team=='companion' and companions then
+            local prepared,prepareError=pcall(function()companions:prepare(actor,unitPath)end)
+            if not prepared then log('[Companion] 准备失败: '..tostring(prepareError)) end
+        end
         local activationRequested=FinishEntrance(actor)
         if spectator:status().enabled_requested then spectatorTargets:refresh(true) end
         spectator:applyTo(actor)
@@ -1206,7 +1218,12 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
         log("召唤激活读回 ControllerAI="..tostring(ai~=nil).." HP="..tostring(hp))
         local verified,verifyError=pcall(function()spawnDifficulty:verify(actor,unitPath)end)
         if not verified then log('[SpawnDifficulty] 生成后读回失败: '..tostring(verifyError)) end
-        if activationRequested==true and ai~=nil and type(hp)=='number' and hp>0 then
+        if team=='companion' and companions then
+            local checked,checkError=pcall(function()companions:afterActivate(actor,unitPath)end)
+            if not checked then log('[Companion] 激活后读回失败: '..tostring(checkError)) end
+        end
+        -- Equal stats is for the arena; companions keep their own numbers.
+        if activationRequested==true and ai~=nil and type(hp)=='number' and hp>0 and team~='companion' then
             local result=statMatch:onSpawn(actor,unitPath)
             if not result.ok then
                 if result.rollback_verified then return true,'初始化通过；数值统一失败已回滚',result.message..'；单位保留原生数值，可正常交战' end
@@ -1220,7 +1237,7 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
         return activationRequested==true and ai~=nil and type(hp)=="number" and hp>0,"仅确认初始化调用、AI组件和正HP；行为待验收"
     end,
     setRelation=SetFactionRelation,forceAttack=ForceAttack,
-    prepareBattle=function(members)return arenaGrabs:sync(members,Config.EnableNPCGrabs,true) end,
+    prepareBattle=function(members)return arenaGrabs:sync(Config.EnableNPCGrabs and members or {},true,true) end,
     destroy=function(actor) checked(actor); actor:K2_DestroyActor() end,
     isDestroying=actorIsDestroying,
     restore=function()
@@ -1283,24 +1300,42 @@ function arenaSupport:discover()
         if not result.ok then log('[SummonLinks] 接管未确认：'..tostring(result.message)) end
     end
 end
+companions=Companion.new({log=log,getPlayer=GetPlayerPawn,getWorld=UEHelpers.GetWorld,aiLib=GetAILib,getLocation=GetLocation,hp=GetHP,
+    members=function()return arena:members()end})
 -- Units summoned at a chosen difficulty also get that difficulty when their AI asks for it.
-local aiDifficulty=AIDifficulty.new({log=log,getWorld=UEHelpers.GetWorld,
+aiDifficulty=AIDifficulty.new({log=log,getWorld=UEHelpers.GetWorld,
     ready=function()return runtimeSession:status().game_ready==true end,members=function()return arena:members()end,
-    levelOf=function(actor)return spawnDifficulty:levelOf(actor)end,levelOfKey=function(key)return spawnDifficulty:levelOfKey(key)end})
+    levelOf=function(actor)return spawnDifficulty:levelOf(actor)end})
+-- A support tick slower than this is logged with the time of each step, to find the source of stutter.
+local SLOW_TICK_MS,slowTicks=10,0
 function arenaSupport:tick()
-    local memberKeys={}
-    for _,entry in ipairs(arena:members())do local key=UEObserve.key(entry.actor);if key then memberKeys[key]=true end end
-    spawnDifficulty:prune(memberKeys)
-    aiDifficulty:tick()
-    freeCamera:recover()
-    if grabStudy then grabStudy:tick() end
-    self:discover()
-    arenaActivity:sync(arena:members())
-    arenaGrabs:sync(arena:members(),Config.EnableNPCGrabs and arena:status().battle_active)
-    arena:tickReinforcements()
-    local state=arena:status().state
-    if state=='cleanup_pending' or state=='restore_pending' or state=='spawn_uncertain' then bossHUD:clear()
-    else bossHUD:sync(arena:members()) end
+    local started,parts=os.clock(),{}
+    local function step(name,fn)
+        local t=os.clock();fn();parts[#parts+1]=string.format('%s=%.1f',name,(os.clock()-t)*1000)
+    end
+    step('prune',function()
+        local memberKeys={}
+        for _,entry in ipairs(arena:members())do local key=UEObserve.key(entry.actor);if key then memberKeys[key]=true end end
+        spawnDifficulty:prune(memberKeys)
+    end)
+    step('aiDifficulty',function()aiDifficulty:tick()end)
+    step('companions',function()companions:tick()end)
+    step('freeCamera',function()freeCamera:recover()end)
+    if grabStudy then step('grabStudy',function()grabStudy:tick()end) end
+    step('summonLinks',function()self:discover()end)
+    step('activity',function()arenaActivity:sync(arena:members())end)
+    step('grabs',function()arenaGrabs:sync(Config.EnableNPCGrabs and arena:members() or {},arena:status().battle_active)end)
+    step('reinforce',function()arena:tickReinforcements()end)
+    step('bossHUD',function()
+        local state=arena:status().state
+        if state=='cleanup_pending' or state=='restore_pending' or state=='spawn_uncertain' then bossHUD:clear()
+        else bossHUD:sync(arena:members()) end
+    end)
+    local total=(os.clock()-started)*1000
+    if total>=SLOW_TICK_MS and slowTicks<60 then
+        slowTicks=slowTicks+1
+        log(string.format('[Perf] 支持循环耗时 %.1fms：%s',total,table.concat(parts,' ')))
+    end
 end
 function arenaSupport:status()
     local result=bossHUD:status();local activity=arenaActivity:status()
@@ -1339,7 +1374,7 @@ RegisterKeyBind(Key.F9,{ModifierKey.SHIFT},function()
 end)
 end
 panelRuntime=PanelRuntime.new({arena=arena,exporter=exporter,path=Config.RuntimePath,
-    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,spawnDifficulty=spawnDifficulty,aiDifficulty=aiDifficulty,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
+    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,spawnDifficulty=spawnDifficulty,aiDifficulty=aiDifficulty,companions=companions,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
     router=keyRouter,camera={status=function()return {active=freeCamera:isActive(),pending=freeCamera:hasPending()}end,
         toggle=ToggleFreeCam,exit=ForceExitFreeCam},
     spawnCatalog=SpawnCatalog.new({log=log,path=Config.RuntimePath,getWorld=UEHelpers.GetWorld}),
@@ -1354,6 +1389,7 @@ if ModRef then
         probeSampleGen=probeSampleGen+1
         probe:silence("Mod卸载")
         aiDifficulty:silence("Mod卸载")
+        companions:silence()
         battle:cancel("Mod卸载")
         if battle:pendingCount()>0 or #arenaActors>0 then
             log("卸载时仍有参赛者或恢复记录；重载不会替代停止清理")

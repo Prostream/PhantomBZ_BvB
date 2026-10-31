@@ -9,7 +9,7 @@ const RealRuntime = (() => {
   const fail = (code, detail = "") => Object.assign(new Error(detail || code), { code, detail });
   const webview = window.chrome && window.chrome.webview;
   const KEY_NAMES = ["spawn", "start", "stop", "refresh_catalog", "toggle_camera", "exit_camera", "cycle_team", "toggle_spectator"];
-  const TEAMS = ["blue", "red", "neutral"];
+  const TEAMS = ["blue", "red", "neutral", "companion"];
 
   const s = {
     game: "offline",            // offline | connecting | notInMap | ready | mismatch
@@ -18,8 +18,9 @@ const RealRuntime = (() => {
     modVersion: "",             // build the running mod reports
     expectedBuild: "",          // build this app installs
     gamePath: "",
-    blue: 0, red: 0, neutral: 0,
-    down: { blue: 0, red: 0, neutral: 0 },
+    blue: 0, red: 0, neutral: 0, companion: 0,
+    down: { blue: 0, red: 0, neutral: 0, companion: 0 },
+    companionFailures: 0,       // companions whose follow state or side did not read back (companion.lua)
     unreadable: 0,
     freeCam: false,
     team: "blue",
@@ -140,10 +141,14 @@ const RealRuntime = (() => {
       s.blue = num("blue_count");
       s.red = num("red_count");
       s.neutral = num("neutral_count");
+      s.companion = num("companion_count");
+      s.companionFailures = num("companion_failures");
       const soloDown = Math.max(0, num("neutral_owned_records") - s.neutral);
-      s.down = { blue: Math.max(0, num("arena_dead_count") - soloDown), red: 0, neutral: soloDown };
+      const companionDown = Math.max(0, num("companion_owned_records") - s.companion);
+      s.down = { blue: Math.max(0, num("arena_dead_count") - soloDown - companionDown), red: 0, neutral: soloDown, companion: companionDown };
       s.unreadable = num("arena_unreadable_count");
-      owned = num("arena_owned_records");
+      // Companions stay through "stop and clear"; everything counted as the arena's leaves them out.
+      owned = Math.max(0, num("arena_owned_records") - num("companion_owned_records"));
       s.freeCam = yes("arena_free_camera");
       s.spectator = yes("spectator_enabled");
       if (TEAMS.includes(v.current_team)) s.team = v.current_team;
@@ -171,7 +176,7 @@ const RealRuntime = (() => {
       s.scan = v.catalog_state === "scanning" ? { done: num("catalog_paths_done"), total: Math.max(1, num("catalog_paths_total")) } : null;
     } else {
       // Closing the game removes everything the mod spawned.
-      Object.assign(s, { blue: 0, red: 0, neutral: 0, down: { blue: 0, red: 0, neutral: 0 }, unreadable: 0, freeCam: false, spectator: false, fight: "idle", winner: "", cleanup: "", synced: null, scan: null });
+      Object.assign(s, { blue: 0, red: 0, neutral: 0, companion: 0, down: { blue: 0, red: 0, neutral: 0, companion: 0 }, unreadable: 0, freeCam: false, spectator: false, fight: "idle", winner: "", cleanup: "", synced: null, scan: null });
       Object.assign(s.statMatch, { baseline: null, matched: 0, failures: 0, reset: false });
       s.difficulty.game = "";
       owned = 0;
@@ -212,6 +217,7 @@ const RealRuntime = (() => {
       topbar: [s.game, jobs.filter(j => j.status === "failed" || j.status === "uncertain").length],
       sel: [s.game, s.cleanup, s.team, JSON.stringify(s.synced), s.spectator, s.statMatch.enabled, s.statMatch.baseline?.id, s.keys.spawn?.code, s.keys.spawn?.mods],
       solo: [s.game, s.neutral, s.down.neutral, s.spectator, s.spectatorPhase, s.freeCam],
+      companion: [s.game, s.companion, s.down.companion, s.companionFailures],
       match: [s.game, JSON.stringify(s.statMatch)],
       diff: [s.game, JSON.stringify(s.difficulty)],
       battle: [s.game, s.cleanup, s.blue, s.red, s.neutral, s.down.blue, s.down.neutral, s.unreadable, s.fight, owned, JSON.stringify([s.keys.start, s.keys.stop])],
@@ -257,6 +263,7 @@ const RealRuntime = (() => {
     else if (action === "configure_keys") { path = "/api/keybinds"; body = Object.fromEntries(KEY_NAMES.map(k => [k, wireKey(payload.bindings[k])])); }
     else body = { action };
     const held = action === "stop" ? owned : action === "clear_neutral" ? s.neutral + s.down.neutral : 0;
+    const companionsHeld = action === "dismiss_companions" ? s.companion + s.down.companion : 0;
     const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf }, body: JSON.stringify(body) });
     const reply = await r.json().catch(() => ({}));
     if (!r.ok) throw fail("rejected", reply.error || "");
@@ -272,6 +279,8 @@ const RealRuntime = (() => {
     });
     if (!done) return { ...job, status: "uncertain", code: "noAck" };
     if (held) done.cleared = Math.max(0, held - owned);
+    // arena_controller.lua answers "随从清理：已确认=N"; fall back to the counts before and after.
+    if (action === "dismiss_companions") done.cleared = Number((done.message || "").match(/已确认=(\d+)/)?.[1] ?? Math.max(0, companionsHeld - s.companion - s.down.companion));
     // The mod saved and read the choice back; show it before the next poll does.
     if (action === "set_spawn_difficulty" && done.status === "succeeded") s.difficulty.level = payload.difficulty;
     return done;
