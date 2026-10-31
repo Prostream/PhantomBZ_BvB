@@ -1,52 +1,52 @@
 {
-  "version": "0.34.0",
-  "date": "2026-10-31T15:54:13+08:00",
-  "size": 20610663,
-  "sha256": "a38d8863d4837925656d44d047e3a6022fb952fdb165547a58f15bf3f8e103f8",
+  "version": "0.35.0",
+  "date": "2026-11-01T07:40:39+08:00",
+  "size": 20626479,
+  "sha256": "756bc7a0b34ad5c3e49fc9cc427d018595719af3934651b39bbe18bcd3030c31",
   "notes": {
     "zh": [
-      "召唤难度：不改游戏难度和存档，按入阵者 / 破局者 / 逆天者 / 六十六天召唤，数值和 AI 的难度判断都按所选难度",
-      "单位召唤键记住各自的阵营和数量，在对战页切换阵营就能把这个键改到对应队伍",
-      "界面说明和六种语言随新功能更新；更新后请在助手里按提示更新游戏内模组"
+      "新增随从：阵营选「随从」召唤的怪会跟着你、帮你打，数量不限；离太远或快速移动后自动传送回来，投技对地图怪也能用，可随时解散",
+      "召唤难度更轻、更准：只在有带难度的单位时才生效，消除了地图上怪多时的卡顿，单位出生时的难度判断也按所选难度",
+      "界面和六种语言同步更新；更新后请按助手提示更新游戏内模组"
     ],
     "en": [
-      "Summon difficulty: new units play at Wayfarer, Pathbreaker, Hellwalker or Sixty-Six Days, stats and AI difficulty checks included, without changing the game's difficulty or your save",
-      "Unit summon keys remember their own team and amount; switch the team in the Arena to move a key to that side",
+      "New companions: units summoned to the Companion team follow you and fight on your side, no limit; they teleport back from far away or after fast travel, their grabs work on map enemies, and you can dismiss them any time",
+      "Summon difficulty is lighter and more accurate: it only runs while leveled units are out, which removes stutter in busy areas, and units get their level from the moment they spawn",
       "Interface and all six languages updated; after updating, follow the prompt in the app to update the in-game mod"
     ],
     "ja": [
-      "召喚難易度：ゲームの難易度やセーブを変えずに、Wayfarer / Pathbreaker / Hellwalker / Sixty-Six Days で召喚。ステータスとAIの難易度判定が選んだ難易度に従います",
-      "ユニット召喚キーがそれぞれのチームと数を記憶。バトル画面でチームを切り替えると、そのキーの召喚先も変わります",
-      "画面と6言語を新機能に合わせて更新。更新後はアプリの案内に従ってゲーム内Modも更新してください"
+      "お供を追加：「お供」チームで召喚したユニットがあなたについて来て一緒に戦います（数は無制限）。離れすぎたときやファストトラベル後は近くへテレポートし、投げ技はマップの敵にも有効、いつでも解散できます",
+      "召喚難易度を軽量化・改善：難易度付きユニットがいるときだけ動作し、敵の多い場所でのカクつきを解消。出現した瞬間から選んだ難易度で判定します",
+      "画面と6言語を更新。更新後はアプリの案内に従ってゲーム内Modも更新してください"
     ],
     "fr": [
-      "Difficulté d'invocation : les nouvelles unités jouent en Wayfarer, Pathbreaker, Hellwalker ou Sixty-Six Days, stats et vérifications de difficulté de l'IA comprises, sans changer la difficulté du jeu ni votre sauvegarde",
-      "Les touches d'invocation retiennent l'équipe et le nombre de chaque unité ; changez l'équipe dans l'Arène pour déplacer la touche",
+      "Nouveaux compagnons : les unités invoquées dans l'équipe Compagnon vous suivent et combattent à vos côtés, sans limite ; elles se téléportent près de vous quand elles sont trop loin ou après un voyage rapide, leurs prises fonctionnent sur les ennemis de la carte, et vous pouvez les renvoyer à tout moment",
+      "Difficulté d'invocation plus légère et plus précise : active seulement quand des unités concernées sont présentes, ce qui supprime les saccades dans les zones chargées, et appliquée dès l'apparition des unités",
       "Interface et six langues mises à jour ; après la mise à jour, suivez l'invite de l'application pour mettre à jour le mod en jeu"
     ],
     "de": [
-      "Beschwörungsschwierigkeit: neue Einheiten spielen auf Wayfarer, Pathbreaker, Hellwalker oder Sixty-Six Days, inklusive Werten und KI-Schwierigkeitsprüfungen, ohne die Spielschwierigkeit oder deinen Spielstand zu ändern",
-      "Beschwörungstasten merken sich Team und Anzahl jeder Einheit; wechsle das Team in der Arena, um die Taste umzustellen",
+      "Neue Begleiter: Einheiten im Team Begleiter folgen dir und kämpfen auf deiner Seite, ohne Limit; sie teleportieren sich zu dir, wenn sie zu weit weg sind oder nach einer Schnellreise, ihre Würfe wirken auf Gegner der Karte, und du kannst sie jederzeit entlassen",
+      "Beschwörungsschwierigkeit leichter und genauer: nur aktiv, solange betroffene Einheiten da sind, was Ruckler in vollen Gebieten beseitigt, und ab dem Erscheinen wirksam",
       "Oberfläche und alle sechs Sprachen aktualisiert; nach dem Update dem Hinweis in der App folgen, um den Mod im Spiel zu aktualisieren"
     ],
     "es": [
-      "Dificultad de invocación: las nuevas unidades juegan en Wayfarer, Pathbreaker, Hellwalker o Sixty-Six Days, con estadísticas y comprobaciones de dificultad de la IA, sin cambiar la dificultad del juego ni tu partida guardada",
-      "Las teclas de invocación recuerdan el equipo y la cantidad de cada unidad; cambia el equipo en la Arena para mover la tecla",
+      "Nuevos compañeros: las unidades invocadas en el equipo Compañero te siguen y luchan de tu lado, sin límite; se teletransportan a tu lado si se alejan demasiado o tras un viaje rápido, sus agarres funcionan con los enemigos del mapa y puedes despedirlas cuando quieras",
+      "Dificultad de invocación más ligera y precisa: solo actúa mientras hay unidades afectadas, lo que elimina los tirones en zonas con muchos enemigos, y se aplica desde que aparecen",
       "Interfaz y seis idiomas actualizados; tras actualizar, sigue el aviso de la aplicación para actualizar el mod del juego"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.34.0/PhantomGladiator-0.34.0-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.34.0/PhantomGladiator-0.34.0-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.34.0/PhantomGladiator-0.34.0-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
     }
   ]
 }
