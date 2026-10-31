@@ -1,94 +1,54 @@
 -- PhantomGladiator 配置
 -- ============================================================
--- 这里集中了所有"游戏特定"的名字。发售后用 UE4SS 的 Object Dumper
--- 和 Live View 找到真实类名/属性名后，只需要改这个文件。
--- 填法见 README「发售日适配指南」。
+-- v0.16：新增F8无仇恨观战与销毁状态读回，所有周期工作在游戏线程执行。
+-- 操作和恢复边界见 docs/HANDOFF.md。
 -- ============================================================
 
 local Config = {}
+Config.RuntimePath = "D:/steam/steamapps/common/PBZ/platform/steam/ue4ss/Mods/PhantomGladiator/Runtime"
+Config.CatalogPath = Config.RuntimePath .. "/known-classes.tsv"
+-- 来自原生图鉴/已观察实例的完整路径；仅普通暴徒开放有限测试，许可不等于验收。
+Config.KnownMonsterClasses = {
+    "/PBZCombatAsset/ActorData/Mobs/003_MaleThug/BP_Monster_MaleThug_Sword_Blue.BP_Monster_MaleThug_Sword_Blue_C",
+    "/PBZCombatAsset/ActorData/Mobs/023_Vessel_Child/BP_Monster_Vessel_Child.BP_Monster_Vessel_Child_C",
+}
+Config.AssetCatalog = {PathsPerTick=32,MaxSeconds=1800}
+-- 只限制旧的全场互殴/全场中立；F3/F9的一对参赛者流程默认可用。
+Config.EnableBattleExperiments = false
+-- 18:45/18:55同址原生崩溃，后者紧邻玩家Health Post Func回调。
+-- 关闭诊断挂钩做隔离验证；游戏互斗依靠原生流程，不依赖这些hook。
+Config.Probe = {Enabled=false,DurationMs=60000,MaxEvents=2000,MaxLogs=100,MaxLogsPerHook=12}
 
 -- 敌人搜索：FindAllOf 会按这些类名找 Pawn。
--- "Character" 是引擎基类，保证能扫到所有角色（含玩家，稍后按关键词排除）。
--- TODO(解包后): 换成真实敌人基类，例如 "BP_EnemyBase_C"，可大幅减少误伤。
-Config.EnemyClasses = { "Character" }
+-- 使用本地头文件确认的NPC基类；仍不能据此保证都是可用于竞技场的敌人。
+Config.EnemyClasses = { "PBZCharacter_NPC" }
 
 -- 类名里含有这些关键词的 Pawn 视为玩家/友方，永不参与斗蛐蛐
 Config.ExcludeClassKeywords = { "Player", "Hero", "Soul", "Protagonist",
     -- 影之刃零: 主角"魂"的 Blueprint 类 (实测 2026-10-29)
     "Renewal_Hun" }
 
--- 阵营写入策略（按顺序尝试，成功即停）：
--- 1) 在 Pawn / Controller 上找这些属性名直接写值
-Config.TeamPropertyCandidates = { "GenericTeamId", "TeamId", "TeamID", "Team", "FactionId" }
--- 2) 在 Pawn / Controller 上找这些函数名调用
--- BlueprintSetGenericTeamId 是本作 SGameAI 框架的正门 (2026-10-29 解剖发现)
-Config.TeamFunctionCandidates = { "BlueprintSetGenericTeamId", "SetGenericTeamId",
-    "SetTeamId", "SetTeam", "SetFaction" }
-
--- 态度 hook：这些函数决定"谁恨谁"，被我们点名的怪强制互相敌对
-Config.AttitudeHookPaths = {
-    "/PBZCombatAsset/Prototypes/AI/BP_PBZAIController.BP_PBZAIController_C:BlueprintGetTeamAttitudeTowards",
-    "/SGameAI/BP_SGameAIController.BP_SGameAIController_C:BlueprintGetTeamAttitudeTowards",
-}
-
 -- 全局互殴时把敌人分成几个阵营（2 = 捉对厮杀，更大 = 混战）
 Config.TeamCount = 2
--- 写入的阵营 ID 从这个值开始（避开游戏自己常用的 0/1/255）
-Config.TeamIdBase = 50
--- 重置时写回的阵营 ID。TODO(解包后): 用 Live View 看敌人原始值后修改
-Config.DefaultTeamId = 1
+-- 八项功能统一在面板改键，首次使用全部留空；相机保留玩家控制器。
+-- Saved function bindings live in Runtime/function-keybinds.tsv; no default keys.
+Config.EnableDeveloperKeybinds = false
+Config.FreeCamera = { MoveSpeed = 900, MouseSensitivity = 1.0 }
+-- Existing native hit-triggered grabs; snapshots restore the shared event resources on F4.
+Config.EnableNPCGrabs = true
+Config.EnableGrabStudy = false
 
--- 按键映射（改这里换键位；键名见 UE4SS 的 Key 枚举，如 "F1"、"NUM_ONE"、"K"）
--- Summon 键加 Shift = 切换要召唤的怪
-Config.Keybinds = {
-    Scan = "F1",          -- 扫描场上 NPC（同时登记进召唤图鉴）
-    Infight = "F2",       -- 全场互殴
-    Duel = "F3",          -- 决斗：最近两个 NPC 互杀（自动种仇恨）
-    Reset = "F4",         -- 恢复所有被改过的阵营
-    SlowMo = "F5",        -- 慢动作档位
-    FreeCam = "F6",       -- 自由镜头开/关
-    ForceExitCam = "F7",  -- 强制退出自由镜头
-    PlayerNeutral = "F8", -- 玩家中立化开关（怪物无视你）
-    Summon = "F9",        -- 在面前召唤选中的怪
-}
+-- 历史碰撞复制实验，默认关；响应差异不证明实际攻击查询通道。
+Config.CopyPlayerHurtChannels = false
 
--- 玩家中立化写入的阵营 ID（FGenericTeamId::NoTeam = 255）
-Config.NeutralTeamId = 255
-
--- 让怪物能被怪物的刀扫到：把玩家模型/胶囊在游戏自定义通道（14-31）上的反应
--- 复制到参战怪物身上（只补不减）。实测：怪物攻击扫的通道只有玩家模型会响应，
--- 怪物模型全部忽略，所以怪打怪刀会直接穿过去
-Config.CopyPlayerHurtChannels = true
-
--- 召唤蓝方 / 决斗第一方改到这个原生阵营（实测：怪物默认都是 Faction.Enemy，
--- 玩家是 Faction.Player）。改成另一阵营后，游戏所有按阵营判断敌我的系统都会
--- 把双方当敌人，而不只是我们覆盖的那一处关系。留空 "" 则不改阵营
-Config.SwitchFactionTo = "Faction.Player"
+-- 可选的NPC阵营标签实验，默认不改；不能据此推定攻击模块同样敌对。
+Config.SwitchFactionTo = ""
 
 -- 召唤位置：玩家前方多少厘米、抬高多少厘米
-Config.SummonDistance = 400
+Config.SummonDistance = 600
 Config.SummonHeightOffset = 50
-
--- 种仇恨的点火伤害（互相打一下，触发 AI 的受击感知）
-Config.SeedDamage = 1.0
-
--- 裁判判伤：决斗监视每轮给双方结算的伤害（0 = 关闭，只观察原生战斗）
--- 改用原生阵营接口后默认关闭，用来验证怪物的攻击能否自己造成伤害；
--- 如果仍不掉血，改回 15 即恢复裁判模式
-Config.JudgeDamagePerTick = 0
-
--- Astra 实验：血量降到该阈值就直接执行 Kill（不等归零——
--- 先写 0 可能让 Kill 内部的判死前置检查提前返回，导致时灵时不灵）
-Config.KillThreshold = 25
 
 -- 慢动作档位（循环切换）
 Config.TimeDilationSteps = { 1.0, 0.5, 0.2, 0.05 }
-
--- V2 仇恨矩阵（实验性，默认关）。
--- 开启后尝试 hook 下面的伤害事件来累积仇恨值。
-Config.EnableHatred = false
-Config.DamageHookFunction = "/Script/Engine.Actor:ReceiveAnyDamage"
-Config.HatredThreshold = 30.0   -- 仇恨超过该值视为"结仇"
-Config.HatredDecayPerSecond = 1.0
 
 return Config

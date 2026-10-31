@@ -1,0 +1,581 @@
+-- 纯 Lua 擂台控制：引擎访问全部由注入回调完成，调用方负责游戏线程。
+-- 只管理本控制器创建的参赛者；不枚举地图、不补伤害、不操作镜头。
+local Arena = {}
+local MAX_UNITS, MAX_BATCH = 24, 8
+
+local function finite(n)
+    return type(n) == "number" and n == n and n ~= math.huge and n ~= -math.huge
+end
+
+local function vector(v)
+    if v == nil then return nil end
+    local ok, x, y, z = pcall(function() return v.X, v.Y, v.Z end)
+    if ok and finite(x) and finite(y) and finite(z) then return { X = x, Y = y, Z = z } end
+end
+
+local function team_name(value)
+    local aliases = { blue = "blue", red = "red", neutral = "neutral", ["蓝"] = "blue",
+        ["蓝队"] = "blue", ["红"] = "red", ["红队"] = "red", ["中立"] = "neutral" }
+    return type(value) == "string" and aliases[value:lower()] or nil
+end
+
+function Arena.new(options)
+    options = options or {}
+    local maxUnits=options.maxUnits or MAX_UNITS
+    assert(finite(maxUnits) and maxUnits%1==0 and maxUnits>=0,'invalid arena unit limit')
+    local catalog = options.catalog
+    local units, selected, team, count = {}, nil, "blue", 1
+    local state, message, busy = "idle", "请选择单位与队伍", false
+    local lastRestoreConfirmed = true
+    local unknownSpawn = false
+    local battleActive=false
+    local teamRevision=0
+    local instance = {}
+
+    local function log(text)
+        if options.log then pcall(options.log, "[Arena] " .. text) end
+    end
+
+    local function invoke(name, ...)
+        local fn = options[name]
+        if type(fn) ~= "function" then return false, "缺少回调 " .. name end
+        return pcall(fn, ...)
+    end
+
+    local function spawn_block()
+        if unknownSpawn then return '生成结果未知，不能确认全部对象的所有权；请重新启动游戏后再试' end
+        if options.spawnGuard then
+            local ok,reason=pcall(options.spawnGuard.reason,options.spawnGuard)
+            if not ok then return '生成保护状态读取失败' end
+            return reason
+        end
+    end
+
+    local function guard_call(method)
+        if not options.spawnGuard then return true end
+        local ok,result,reason=pcall(options.spawnGuard[method],options.spawnGuard)
+        return ok and result==true,reason or (not ok and tostring(result) or nil)
+    end
+
+    local function live(actor)
+        if actor == nil then return false end
+        local ok, value = invoke("valid", actor)
+        if not ok or type(value) ~= "boolean" then return nil end
+        return value
+    end
+
+    local function actor_name(actor)
+        if live(actor) ~= true then return "unknown(invalid_or_unreadable)" end
+        local ok, value = invoke("name", actor)
+        return ok and tostring(value) or "unknown(name)"
+    end
+
+    local function actor_key(actor)
+        if live(actor)~=true then return nil end
+        if options.actorKey then
+            local ok,key=invoke('actorKey',actor)
+            return ok and key~=nil and tostring(key) or nil
+        end
+        return tostring(actor)
+    end
+
+    local function health(actor)
+        if live(actor) ~= true then return "unknown" end
+        local ok, value = invoke("hp", actor)
+        return ok and value ~= nil and tostring(value) or "unknown"
+    end
+
+    -- Actor进入销毁流程后，UObject仍可留在内存中；不能只等GC使IsValid变false。
+    local function removed(actor)
+        local validity=live(actor)
+        if validity==false then return true,"IsValid=false" end
+        if validity==nil then return nil,"IsValid=UNKNOWN" end
+        if type(options.isDestroying)=="function" then
+            local ok,destroying=invoke("isDestroying",actor)
+            if not ok or type(destroying)~="boolean" then return nil,"IsActorBeingDestroyed=UNKNOWN" end
+            return destroying,"IsActorBeingDestroyed="..tostring(destroying)
+        end
+        return false,"IsValid=true"
+    end
+
+    local function alive_readback(unit)
+        local gone,why=removed(unit.actor)
+        if gone==true then return false,why end
+        if gone==nil then return nil,why end
+        if options.hasCombatHealth then
+            local ok,tracked=invoke('hasCombatHealth',unit.actor)
+            if not ok then return nil,'血量类别未知' end
+            if tracked==false then return true,'Actor有效；无战斗血量' end
+        end
+        local ok,hp=invoke('hp',unit.actor)
+        if not ok or not finite(hp) then return nil,'HP=UNKNOWN' end
+        return hp>0,'HP='..tostring(hp)
+    end
+
+    local function notify_units()
+        if not options.onUnitsChanged then return true end
+        local copy = {}
+        for _, unit in ipairs(units) do copy[#copy + 1] = { actor = unit.actor, team = unit.team,class_path=unit.class_path,summoner=unit.summoner } end
+        local ok, err = pcall(options.onUnitsChanged, copy)
+        if not ok then log("参赛者同步失败: " .. tostring(err)) end
+        return ok
+    end
+
+    local function prune()
+        local kept, changed = {}, false
+        for _, unit in ipairs(units) do
+            -- 有效性读回未知时保留所有权，不能把回调错误当作已销毁。
+            local gone,proof=removed(unit.actor)
+            if gone==true then
+                changed=true;log('移出已销毁登记：'..tostring(unit.class_path)..'；读回='..proof)
+            else kept[#kept+1]=unit end
+        end
+        units = kept
+        if changed then
+            notify_units()
+            if #units==0 and state=="cleanup_pending" then
+                state=lastRestoreConfirmed and "idle" or "restore_pending"
+                message=lastRestoreConfirmed and "清理已读回完成" or "参赛者已清理，部分恢复仍待确认"
+                log(message)
+            end
+        end
+    end
+
+    local function response(ok, text, extra)
+        message = text
+        local result = { ok = ok, message = text }
+        for key, value in pairs(extra or {}) do result[key] = value end
+        log(text)
+        return result
+    end
+
+    local function run(fn)
+        if busy then return response(false, "上一个擂台操作尚未完成") end
+        busy = true
+        local ok, result = pcall(fn)
+        busy = false
+        if not ok then
+            state = "operation_failed"
+            return response(false, "操作异常，已登记参赛者保留供清理: " .. tostring(result), { remaining_count = #units })
+        end
+        return result
+    end
+
+    local function choose(path, requestedTeam, requestedCount)
+        local newTeam = requestedTeam == nil and team or team_name(requestedTeam)
+        local newCount = requestedCount == nil and count or tonumber(requestedCount)
+        if not newTeam then return false, "队伍只允许 blue/red/neutral" end
+        if not finite(newCount) or newCount % 1 ~= 0 or newCount < 1 or newCount > MAX_BATCH then
+            return false, "单次数量必须是1到8的整数"
+        end
+        if path ~= nil then
+            if type(path) ~= "string" or path == "" then return false, "单位类路径为空" end
+            local okPolicy,allowed,why=invoke("canSpawn",path)
+            if not okPolicy or allowed~=true then return false,tostring(why or "未取得该单位的生成验证许可") end
+            if type(catalog) ~= "table" or type(catalog.registerPath) ~= "function" or type(catalog.select) ~= "function" then
+                return false, "目录不支持路径登记和选择"
+            end
+            local okRegister, entry, why = pcall(catalog.registerPath, catalog, path)
+            if not okRegister or not entry then return false, "登记失败: " .. tostring(why or entry) end
+            local okSelect, chosen, selectError = pcall(catalog.select, catalog, path)
+            if not okSelect or not chosen then return false, "选择失败: " .. tostring(selectError or chosen) end
+            selected = path
+        end
+        team, count = newTeam, newCount
+        return true
+    end
+
+    function instance:select(path, requestedTeam, requestedCount)
+        return run(function()
+            local ok, why = choose(path, requestedTeam, requestedCount)
+            if not ok then return response(false, why) end
+            return response(true, "已选择 " .. tostring(selected or "目录默认单位") .. "，队伍=" .. team .. "，数量=" .. count)
+        end)
+    end
+    function instance:cycleTeam()
+        return run(function()
+            local before=team
+            team=({blue='red',red='neutral',neutral='blue'})[team] or 'blue'
+            teamRevision=teamRevision+1
+            return response(true,'召唤队伍切换 '..before..' -> '..team..'（'..({blue='蓝队',red='红队',neutral='暂不配队'})[team]..'）；读回 revision='..teamRevision..' count='..count..'，未生成或改动场上单位',{spawned_count=0})
+        end)
+    end
+
+    local function next_slot(whichTeam)
+        local used = {}
+        for _, unit in ipairs(units) do if unit.team == whichTeam then used[unit.slot] = true end end
+        for slot = 1, #units+1 do if not used[slot] then return slot end end
+    end
+
+    function instance:members()
+        prune()
+        local copy={}
+        for _,unit in ipairs(units) do copy[#copy+1]={actor=unit.actor,team=unit.team,class_path=unit.class_path,summoner=unit.summoner} end
+        return copy
+    end
+
+    function instance:adoptSummon(actor,parent,classPath,evidence)
+        local childKey,parentKey=actor_key(actor),actor_key(parent)
+        if not childKey or not parentKey or childKey==parentKey then return {ok=false,message='召唤关系对象无效'} end
+        local owner
+        for _,unit in ipairs(units) do
+            local key=actor_key(unit.actor)
+            if key==childKey then return {ok=true,existing=true} end
+            if key==parentKey then owner=unit end
+        end
+        if not owner then return {ok=false,message='召唤者不在本擂台，未接管单位'} end
+        units[#units+1]={actor=actor,team=owner.team,class_path=classPath,slot=next_slot(owner.team),summoner=owner.actor,needsJoin=true}
+        local synced=notify_units()
+        log('接管原生召唤物：team='..owner.team..' parent='..actor_name(owner.actor)..' child='..actor_name(actor)..'；归属证据='..tostring(evidence)..'；登记读回='..tostring(synced))
+        return {ok=synced,adopted=true}
+    end
+
+    function instance:tickReinforcements()
+        if not battleActive or busy or state=='cleanup_pending' or state=='restore_pending' or spawn_block() then return end
+        prune()
+        local active={}
+        for _,unit in ipairs(units) do
+            if (unit.team=='blue' or unit.team=='red') and alive_readback(unit)==true then
+                local ok,ready=invoke('combatReady',unit.actor)
+                if ok and ready==true then active[#active+1]=unit end
+            end
+        end
+        for _,unit in ipairs(active) do
+            if unit.needsJoin then
+                local verified=true
+                for _,other in ipairs(active) do
+                    if other~=unit then
+                        local relation=unit.team==other.team and 0 or 2
+                        local ok,readback=invoke('setRelation',unit.actor,other.actor,relation)
+                        verified=verified and ok and readback==true
+                    end
+                end
+                unit.needsJoin=not verified
+                log('增援关系读回 team='..unit.team..' actor='..actor_name(unit.actor)..' verified='..tostring(verified))
+            end
+            -- Issue once for a new unit or after its assigned opponent dies.
+            -- Never force the same live target every tick and interrupt attacks.
+            if not unit.assignedTarget or alive_readback({actor=unit.assignedTarget})==false then
+                local target
+                for _,other in ipairs(active) do if other.team~=unit.team then target=other.actor;break end end
+                if target then
+                    local called,verified=invoke('forceAttack',unit.actor,target)
+                    if called then unit.assignedTarget=target end
+                    log('增援/换敌请求 '..actor_name(unit.actor)..' -> '..actor_name(target)..'；读回='..tostring(called and verified))
+                end
+            end
+        end
+    end
+
+    local function spawn_transform(origin, forward, whichTeam, slot)
+        local length = math.sqrt(forward.X * forward.X + forward.Y * forward.Y)
+        if length < 0.0001 then return nil end
+        local x, y = forward.X / length, forward.Y / length
+        local distance, lateral
+        if whichTeam == "neutral" then
+            distance, lateral = 600 + (slot - 1) * 360, 0
+        else
+            distance = 600 + math.floor((slot - 1) / 3) * 360
+            lateral = (360 + ((slot - 1) % 3) * 360) * (whichTeam == "blue" and -1 or 1)
+        end
+        return { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Scale3D = { X = 1, Y = 1, Z = 1 },
+            Translation = { X = origin.X + x * distance - y * lateral,
+                Y = origin.Y + y * distance + x * lateral, Z = origin.Z + 50 } }
+    end
+
+    function instance:spawn(path, requestedTeam, requestedCount)
+        return run(function()
+            prune()
+            local block=spawn_block()
+            if block then return response(false,block,{uncertain=true,spawned_count='unknown'}) end
+            if state=="cleanup_pending" or state=="restore_pending" then
+                return response(false,"上次清理或恢复未完成，已阻止继续生成；请先完成清理",{spawned_count=0})
+            end
+            local okChoose, whyChoose = choose(path, requestedTeam, requestedCount)
+            if not okChoose then return response(false, whyChoose, { spawned_count = 0 }) end
+            -- 必须先有可控制玩家与当前World；启动/读档期间不能先加载类再发现玩家无效。
+            local okPlayer, player = invoke("getPlayer")
+            if not okPlayer or live(player) ~= true then return response(false, "玩家无效，未加载资产", { spawned_count = 0 }) end
+            local okWorld, world = invoke("getWorld", player)
+            if not okWorld or live(world) ~= true then return response(false, "World无效，未加载资产", { spawned_count = 0 }) end
+            prune()
+            if maxUnits>0 and #units + count > maxUnits then
+                return response(false, "擂台总数上限"..maxUnits.."；当前=" .. #units .. "，请求=" .. count, { spawned_count = 0 })
+            end
+            if type(catalog) ~= "table" or type(catalog.selected) ~= "function" or type(catalog.resolveSelected) ~= "function" then
+                return response(false, "目录接口不可用", { spawned_count = 0 })
+            end
+            log("召唤阶段=直接读取所选路径；跳过全量类扫描")
+            local okEntry,entry=pcall(catalog.selected,catalog)
+            if not okEntry or type(entry)~="table" or type(entry.path)~="string" then
+                return response(false,"没有可用的明确单位路径",{spawned_count=0})
+            end
+            local policyOk,allowed,policyReason=invoke("canSpawn",entry.path)
+            if not policyOk or allowed~=true then
+                return response(false,tostring(policyReason or "未取得该单位的生成验证许可"),{spawned_count=0})
+            end
+            if options.spawnLimits then
+                local limitsOk,limits=invoke('spawnLimits',entry.path)
+                if not limitsOk then return response(false,'单位测试限制不可读',{spawned_count=0}) end
+                if limits then
+                    local existing=0
+                    for _,unit in ipairs(units) do if unit.class_path==entry.path then existing=existing+1 end end
+                    if count>limits.max_count or existing+count>limits.max_live then
+                        return response(false,'该单位当前仅允许每次1只、场上最多2只的有限测试',{spawned_count=0})
+                    end
+                end
+            end
+            log("召唤阶段=解析当前选中类")
+            local okClass, cls, classError = pcall(catalog.resolveSelected, catalog)
+            if not okClass or live(cls) ~= true then
+                return response(false, "类解析未通过: " .. tostring(classError or cls), { spawned_count = 0 })
+            end
+            if type(catalog.selected) == "function" then
+                local okEntry, entry = pcall(catalog.selected, catalog)
+                if okEntry and type(entry) == "table" and type(entry.path) == "string" then selected = entry.path end
+            end
+            if live(player)~=true or live(world)~=true then return response(false,"加载后玩家或World失效",{spawned_count=0}) end
+            if live(player) ~= true then return response(false, "玩家已失效", { spawned_count = 0 }) end
+            local okLoc, location = invoke("getLocation", player)
+            if live(player) ~= true then return response(false, "玩家已失效", { spawned_count = 0 }) end
+            local okForward, forward = invoke("getForward", player)
+            location, forward = okLoc and vector(location) or nil, okForward and vector(forward) or nil
+            if not location or not forward then return response(false, "位置或朝向读回无效", { spawned_count = 0 }) end
+            local spawned, activated, failures = 0, 0, 0
+            local spawnWarning
+            local cleanupRequired=false
+            for index = 1, count do
+                if live(player) ~= true or live(world) ~= true or live(cls) ~= true then
+                    failures = failures + 1; log("召唤中止：玩家/World/Class已失效"); break
+                end
+                local slot = next_slot(team)
+                local transform = slot and spawn_transform(location, forward, team, slot)
+                if not transform then failures = failures + 1; log("召唤中止：朝向或站位无效"); break end
+                log(string.format("召唤阶段=生成 %d/%d team=%s slot=%d position=%.1f,%.1f,%.1f",
+                    index, count, team, slot, transform.Translation.X, transform.Translation.Y, transform.Translation.Z))
+                local guarded,guardError=guard_call('begin')
+                if not guarded then failures=failures+1; log(tostring(guardError)); break end
+                local okSpawn, actor, spawnError, outcome = invoke("spawnClass", cls, transform, world)
+                local duplicate = false
+                for _, unit in ipairs(units) do if unit.actor == actor then duplicate = true; break end end
+                if okSpawn and live(actor) == true and not duplicate then
+                    -- 先接管所有权并通知root，再调用可能失败的登场操作。
+                    units[#units + 1] = { actor = actor, team = team, slot = slot, class_path=entry.path,needsJoin=battleActive }
+                    spawned = spawned + 1
+                    if spawnError~=nil then failures=failures+1; log("生成返回警告: "..tostring(spawnError)) end
+                    if not notify_units() then failures = failures + 1; cleanupRequired=true; break end
+                    local ownedConfirmed,ownedError=guard_call('complete')
+                    if not ownedConfirmed then
+                        unknownSpawn=true; failures=failures+1; log(tostring(ownedError)); break
+                    end
+                    -- FinishSpawn may execute game initialization before throwing. Keep
+                    -- the returned Actor owned, and do not destroy or activate it here.
+                    if options.finishSpawn then
+                        local okFinish,finished,finishError=invoke('finishSpawn',actor,transform,world)
+                        if not okFinish or finished~=true then
+                            failures=failures+1; cleanupRequired=true
+                            log('FinishSpawn未确认；保留对象供F4清理: '..tostring(finishError or finished)); break
+                        end
+                    end
+                    local okActivate, activation, detail, warning
+                    if removed(actor) == false then okActivate, activation, detail, warning = invoke("activate", actor,entry.path)
+                    else okActivate, activation, detail = false, false, "生成后对象已失效、进入销毁或状态不可读" end
+                    if okActivate and activation == true then activated = activated + 1
+                    else failures = failures + 1; cleanupRequired=true end
+                    if type(warning)=='string' and warning~='' then spawnWarning=warning end
+                    log("召唤读回 actor=" .. actor_name(actor) .. " HP=" .. health(actor)
+                        .. " activate=" .. tostring(okActivate and activation) .. " detail=" .. tostring(detail or "unknown"))
+                    if cleanupRequired then break end
+                else
+                    failures = failures + 1
+                    log("生成未确认新有效实例: " .. (duplicate and "返回了已登记对象" or tostring(spawnError or actor)))
+                    if okSpawn and outcome=='not_started' then
+                        local cleared=guard_call('complete')
+                        if not cleared then unknownSpawn=true; break end
+                    else
+                        -- A Lua conversion error or nil return does not prove that the
+                        -- C++ call created nothing. Stop the batch; never retry/fallback.
+                        unknownSpawn=true; break
+                    end
+                end
+            end
+            state = unknownSpawn and 'spawn_uncertain' or (cleanupRequired and 'cleanup_pending'
+                or (spawned > 0 and "units_ready" or "spawn_failed"))
+            if unknownSpawn then
+                return response(false,'生成调用结果未知，已立即停止；已登记'..spawned..'只，未重试。请重新启动游戏，避免遗留未知对象',
+                    {uncertain=true,spawned_count='unknown',confirmed_spawned_count=spawned,remaining_count=#units})
+            end
+            return response(spawned == count and failures == 0,
+                string.format("生成读回 %d/%d；激活确认=%d；失败/未验证=%d；已生成者保留，开战需蓝红双方", spawned, count, activated, failures)..(spawnWarning and ('；提示：'..spawnWarning) or ''),
+                { spawned_count = spawned, activated_count = activated, failure_count = failures, remaining_count = #units })
+        end)
+    end
+
+    function instance:start()
+        return run(function()
+            prune()
+            local block=spawn_block()
+            if block then return response(false,block,{uncertain=true}) end
+            if state=="cleanup_pending" or state=="restore_pending" then
+                return response(false,"清理或恢复尚未完成，未下达交战指令")
+            end
+            local blue, red = {}, {}
+            for _, unit in ipairs(units) do
+              if unit.team=='blue' or unit.team=='red' then
+                local alive=alive_readback(unit)
+                if alive==nil then return response(false,'参赛者存活状态未读回，未下达交战指令') end
+                if alive == true then
+                    if unit.team=="blue" or unit.team=="red" then
+                        if options.canBattle then
+                            local allowed,battleAllowed,reason=invoke('canBattle',unit.class_path)
+                            if not allowed or battleAllowed~=true then
+                                return response(false,tostring(reason or '该单位未开放交战'))
+                            end
+                        end
+                        local okHP,hp=invoke("hp",unit.actor)
+                        local okCombat,combat=invoke("combatReady",unit.actor)
+                        if not okHP or not finite(hp) or hp<=0 or not okCombat or combat~=true then
+                            return response(false,"参赛者没有已确认的正血量或战斗AI；未修改关系、未发起攻击")
+                        end
+                    end
+                    if unit.team == "blue" then blue[#blue + 1] = unit.actor end
+                    if unit.team == "red" then red[#red + 1] = unit.actor end
+                end
+              end
+            end
+            if #blue == 0 or #red == 0 then return response(false, "开战至少需要蓝队和红队各一名有效参赛者") end
+            local okPlayer, player = invoke("getPlayer")
+            if not okPlayer or live(player) ~= true then return response(false, "玩家无效，未修改战斗关系") end
+            if options.prepareBattle then
+                local prepared,readback=invoke('prepareBattle',instance:members())
+                if not prepared or readback~=true then return response(false,'交战前配置未确认；未发起攻击') end
+            end
+            local failures, requests = 0, 0
+            -- Player neutrality belongs exclusively to the F8 spectator switch.
+            -- Starting a duel must not silently grant a separate no-aggro mode.
+            for _, a in ipairs(blue) do
+                for _, b in ipairs(red) do
+                    if live(a) == true and live(b) == true then
+                        local ok, readback = invoke("setRelation", a, b, 2)
+                        if not ok or readback ~= true then failures = failures + 1 end
+                    end
+                end
+            end
+            local function request_attack(attackers, opponents)
+                for i, attacker in ipairs(attackers) do
+                    local opponent = opponents[(i - 1) % #opponents + 1]
+                    if live(attacker) == true and live(opponent) == true then
+                        local ok, verified = invoke("forceAttack", attacker, opponent)
+                        local attackerKey=actor_key(attacker)
+                        for _,unit in ipairs(units) do
+                            if attackerKey and actor_key(unit.actor)==attackerKey then unit.assignedTarget=opponent;unit.needsJoin=false;break end
+                        end
+                        requests = requests + 1
+                        if not ok or verified ~= true then failures = failures + 1 end
+                        log("开战请求 " .. actor_name(attacker) .. " -> " .. actor_name(opponent)
+                            .. "；读回=" .. tostring(ok and verified) .. "；HP=" .. health(attacker) .. "/" .. health(opponent))
+                    else failures = failures + 1 end
+                end
+            end
+            request_attack(blue, red); request_attack(red, blue)
+            if options.onBattleStarted and live(blue[1]) == true and live(red[1]) == true then
+                local ok, err = pcall(options.onBattleStarted, blue[1], red[1])
+                if not ok then failures = failures + 1; log("开战观察回调失败: " .. tostring(err)) end
+            end
+            state = "battle_requested"
+            battleActive=true
+            return response(failures == 0, string.format("已请求%d名参赛者攻击；失败/未验证=%d；实际伤害仍待读回", requests, failures),
+                { attack_requests = requests, failure_count = failures })
+        end)
+    end
+
+    function instance:stop()
+        return run(function()
+            battleActive=false
+            log("停止阶段=恢复会话；随后仅销毁本控制器登记的参赛者")
+            local okRestore, restored = invoke("restore")
+            lastRestoreConfirmed=okRestore and restored==true
+            local kept, destroyed = {}, 0
+            for _, unit in ipairs(units) do
+                local before = live(unit.actor)
+                if before == true then
+                    local okDestroy, detail = invoke("destroy", unit.actor)
+                    local after = live(unit.actor)
+                    local gone,proof=removed(unit.actor)
+                    log("清理 actor=" .. (after == true and actor_name(unit.actor) or "invalid_or_unreadable")
+                        .. " 调用=" .. tostring(okDestroy) .. " 有效性读回=" .. tostring(after) .. " 销毁读回="..proof.." detail=" .. tostring(detail))
+                    if gone == true then destroyed = destroyed + 1 else kept[#kept + 1] = unit end
+                elseif before == false then destroyed = destroyed + 1
+                else kept[#kept + 1] = unit end
+            end
+            units = kept
+            local synced = notify_units()
+            local block=spawn_block()
+            state = block and 'spawn_uncertain' or (#kept > 0 and "cleanup_pending" or (okRestore and restored == true and synced and "idle" or "restore_pending"))
+            return response(not block and #kept == 0 and okRestore and restored == true and synced,
+                string.format("清理读回：已失效/进入销毁=%d，待确认=%d；恢复确认=%s", destroyed, #kept, tostring(okRestore and restored == true))..(block and ('；'..block) or ''),
+                { destroyed_count = destroyed, remaining_count = #kept, restored = okRestore and restored == true })
+        end)
+    end
+
+    function instance:clearNeutral()
+        return run(function()
+            local kept,pending,destroyed={},0,0
+            log('清理未配队：仅处理本Mod的neutral记录，不停止蓝红交战')
+            for _,unit in ipairs(units) do
+                if unit.team~='neutral' then kept[#kept+1]=unit
+                else
+                    local valid=live(unit.actor)
+                    if valid==true then invoke('destroy',unit.actor) end
+                    local gone,proof=removed(unit.actor)
+                    log('未配队清理读回 actor='..actor_name(unit.actor)..'；'..proof)
+                    if gone==true then destroyed=destroyed+1
+                    else kept[#kept+1]=unit;pending=pending+1 end
+                end
+            end
+            units=kept;notify_units()
+            if #units==0 and state=='cleanup_pending' then state=lastRestoreConfirmed and 'idle' or 'restore_pending' end
+            return response(pending==0,'未配队清理：已确认='..destroyed..'，待确认='..pending,{destroyed_count=destroyed,remaining_count=pending})
+        end)
+    end
+
+    function instance:status()
+        prune()
+        local blue, red, neutral, unreadable, dead,neutralOwned,summons = 0, 0, 0, 0, 0,0,0
+        for _, unit in ipairs(units) do
+            if unit.summoner then summons=summons+1 end
+            if unit.team=='neutral' then neutralOwned=neutralOwned+1 end
+            local alive,proof=alive_readback(unit)
+            if alive==true then
+                if unit.team == "blue" then blue = blue + 1 elseif unit.team == "red" then red = red + 1 else neutral = neutral + 1 end
+            elseif alive==false then dead=dead+1
+            else unreadable=unreadable+1 end
+            if unit.countedAlive~=alive and (alive==false or unit.countedAlive==false) then
+                log('存活人数更新 team='..unit.team..' actor='..actor_name(unit.actor)..'；读回='..proof..' alive='..tostring(alive)..'；保留所有权供清理')
+            end
+            unit.countedAlive=alive
+        end
+        return { blue_count = blue, red_count = red, neutral_count = neutral, total = blue + red + neutral,
+            owned_records = #units,neutral_owned=neutralOwned,unreadable_count = unreadable, dead_count=dead,max_units=maxUnits,summon_count=summons,battle_active=battleActive,current_unit = selected or "", current_team = team,
+            current_count = count,team_revision=teamRevision, state = state, message = message, busy = busy }
+    end
+
+    -- Called by the existing panel loop once a second, including before a duel.
+    -- This is observation only; a health change does not identify its attacker.
+    function instance:sampleHealth()
+        for _,unit in ipairs(units) do
+            if removed(unit.actor)==false then
+                local ok,hp=invoke('hp',unit.actor)
+                if ok and finite(hp) and hp~=unit.lastHP then
+                    log('生命读回 team='..unit.team..' actor='..actor_name(unit.actor)
+                        ..' HP='..tostring(unit.lastHP or 'initial')..' -> '..tostring(hp)..'；只读，伤害来源待画面核对')
+                    unit.lastHP=hp
+                end
+            end
+        end
+    end
+
+    return instance
+end
+
+return Arena

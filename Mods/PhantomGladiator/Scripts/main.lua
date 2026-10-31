@@ -1,15 +1,111 @@
 -- ============================================================
 -- PhantomGladiator — 《影之刃零》斗蛐蛐 Mod (UE4SS Lua)
 -- 让 NPC 互相为敌、召唤单位、观战、慢动作、自由镜头。
--- 按键见 config.lua 的 Keybinds 表，可自行改键。
+-- 功能快捷键在面板配置；首次使用全部未绑定。
 -- ============================================================
 local Config = require("config")
-local Teams = require("teams")
-local Hatred = require("hatred")
 local UEHelpers = require("UEHelpers")
+local Session = require("battle_session")
+local CombatProbe = require("combat_probe")
+local AttackProfile = require("attack_profile")
+local Catalog = require("npc_catalog")
+local AssetExporter = require("asset_inventory")
+local ArenaController = require("arena_controller")
+local PanelRuntime = require("panel_runtime")
+local SpectatorMode = require("spectator_mode")
+local SpawnPolicy = require("spawn_policy")
+local RuntimeSession = require("runtime_session")
+local SpawnAudit = require("spawn_audit")
+local CodexExporter = require("codex_catalog_export")
+local SpawnGuard = require("spawn_guard")
+local SpawnInspector = require("spawn_inspector")
+local WorldMapCatalog = require("world_map_catalog")
+local SpawnCatalog = require("spawn_catalog_export")
+local ReferenceAudit = require("asset_reference_audit")
+local TableCatalog = require("table_catalog_export")
+local SummonLinks = require('arena_summon_links')
+local BossHUD = require('arena_hud')
+local EngineObjectState = require('engine_object_state')
+local UEObserve = require('ue_observe')
+local UnitKeys = require('unit_keybinds')
+local ArenaActivity = require('arena_activity')
+local FreeCamera = require('free_camera')
+local GrabStudy = require('grab_study')
+local ArenaGrabs = require('arena_grabs')
+local StatMatch = require('stat_match')
+local ObserverGuard = require('observer_guard')
+local SpectatorTargets = require('spectator_targets')
+local KeyRouter = require('key_router')
 
 local MOD = "[PhantomGladiator]"
-local function log(msg) print(string.format("%s %s\n", MOD, tostring(msg))) end
+local runLogPath=Config.RuntimePath..'/run-'..os.date('%Y%m%d-%H%M%S')..'.log'
+local runLogBytes,runLogWarning=0,false
+local function log(msg)
+    local line=string.format('%s %s\n',MOD,tostring(msg))
+    print(line)
+    -- UE4SS.log is overwritten on game restart. Preserve bounded per-load UTF-8
+    -- evidence outside the source tree, without touching game save data.
+    local durable=os.date('%Y-%m-%d %H:%M:%S')..' '..line
+    if runLogBytes+#durable>8*1024*1024 then return end
+    local ok,saved=pcall(function()
+        local file=io.open(runLogPath,'ab')
+        if not file then return false end
+        local wrote=file:write(durable)
+        local flushed=file:flush()
+        local closed=file:close()
+        return wrote~=nil and flushed~=nil and closed~=nil
+    end)
+    if ok and saved then runLogBytes=runLogBytes+#durable
+    elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
+end
+local BUILD = "v0.30-custom-keys"
+SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
+SpawnPolicy.enableAllCatalog()
+log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
+local function safeValid(obj)
+    if obj == nil then return false end
+    local ok, value = pcall(function() return obj:IsValid() end)
+    return ok and value == true
+end
+local engineObjectState=EngineObjectState.new({log=log})
+local function engineValid(obj)
+    return safeValid(obj) and engineObjectState:check(obj)~=false
+end
+UEObserve.setEngineValidator(function(obj) return engineObjectState:check(obj) end)
+local function checked(obj)
+    if not safeValid(obj) then error("object invalid; access refused") end
+    return obj
+end
+local function objectName(obj)
+    if not safeValid(obj) then return "UNKNOWN(invalid)" end
+    local ok, value = pcall(function() return obj:GetFullName() end)
+    return ok and tostring(value) or "UNKNOWN(name)"
+end
+local function actorIsDestroying(actor)
+    checked(actor)
+    return actor:IsActorBeingDestroyed()
+end
+local battle = Session.new(log)
+local probeFinished
+local probe = CombatProbe.new({log=log, valid=safeValid, config=Config.Probe,
+    onStop=function(state) if probeFinished then probeFinished(state) end end})
+local probeSampleGen = 0
+local attackProfile = AttackProfile.new({log=log,valid=safeValid})
+local arenaActors = {}
+local arenaOwned = {}
+local spawnRoutes={}
+local arena
+local panelRuntime
+local spectator
+local bossHUD
+local arenaActivity
+local arenaGrabs
+local statMatch
+local BeginArenaObservation
+local spawnAudit=SpawnAudit.new(Config.RuntimePath.."/spawn-attempts.tsv",log)
+local spawnGuard=SpawnGuard.new()
+local spawnInspector=SpawnInspector.new({log=log,canSpawn=SpawnPolicy.check})
+
 
 local function FNameToString(v)
     local ok, s = pcall(function() return v:ToString() end)
@@ -26,10 +122,10 @@ local function GetRealPlayerController()
     for _, pc in ipairs(list) do
         local okP, good = pcall(function()
             if not pc:IsValid() then return false end
-            if pc:GetClass():GetFullName():find("DebugCameraController") then
-                return false
-            end
-            return pc.Player ~= nil and pc.Player:IsValid()
+            local cls = pc:GetClass()
+            if not safeValid(cls) or objectName(cls):find("DebugCameraController") then return false end
+            local player = pc.Player
+            return safeValid(player)
         end)
         if okP and good then return pc end
     end
@@ -51,6 +147,7 @@ local function GetPlayerPawn()
 end
 
 local function GetLocation(actor)
+    if not safeValid(actor) then return nil end
     local ok, loc = pcall(function() return actor:K2_GetActorLocation() end)
     if ok and loc then return loc end
     return nil
@@ -62,6 +159,7 @@ local function DistSq(a, b)
 end
 
 local function IsExcluded(pawn)
+    if not safeValid(pawn) then return true end
     local ok, name = pcall(function() return pawn:GetFullName() end)
     if not ok or not name then return true end
     for _, kw in ipairs(Config.ExcludeClassKeywords) do
@@ -76,133 +174,28 @@ local function GetGameplayStatics()
     return nil
 end
 
--- ---------- 阵营快照（F4 恢复原状的依据） ----------
-
-local originalTeams = {}   -- addr -> 原始阵营 ID
-local teamOf = {}          -- addr(pawn/controller) -> 我们指派的阵营
 local playerNeutral = false
-local playerPawnAddr = nil
+local dilationIndex = 1
 
-local function ApplyTeamTracked(pawn, teamId)
-    local addr = pawn:GetAddress()
-    if originalTeams[addr] == nil then
-        local orig = Teams.ReadTeam(pawn)
-        if orig ~= nil then originalTeams[addr] = orig end
-    end
-    teamOf[addr] = teamId
-    local ok, ctrl = pcall(function() return pawn.Controller end)
-    if ok and ctrl ~= nil then
-        pcall(function()
-            if ctrl:IsValid() then teamOf[ctrl:GetAddress()] = teamId end
-        end)
-    end
-    return Teams.ApplyTeam(pawn, teamId)
-end
+-- 旧态度返回值修改已移除。脚本态度函数由 CombatProbe 正确注册只读回调。
 
--- ---------- 态度 hook：最终裁决"谁恨谁" ----------
--- 本作的敌我判定走 SGameAI 的 BlueprintGetTeamAttitudeTowards（解剖发现），
--- hook 它的返回值：被我们分过队的怪按队伍敌我，玩家中立时对玩家返回中立。
--- ETeamAttitude: 0=Friendly 1=Neutral 2=Hostile
-
-local attitudeHooksInstalled = false
-local attitudeCalls = 0
-
-local function lookupTeam(actor)
-    if actor == nil then return nil end
-    local okV, valid = pcall(function() return actor:IsValid() end)
-    if not okV or not valid then return nil end
-    local t = teamOf[actor:GetAddress()]
-    if t then return t end
-    local ok, p = pcall(function() return actor.Pawn end)
-    if ok and p ~= nil then
-        local okA, a = pcall(function()
-            return p:IsValid() and teamOf[p:GetAddress()] or nil
-        end)
-        if okA and a then return a end
-    end
-    local ok2, c = pcall(function() return actor.Controller end)
-    if ok2 and c ~= nil then
-        local okA, a = pcall(function()
-            return c:IsValid() and teamOf[c:GetAddress()] or nil
-        end)
-        if okA and a then return a end
-    end
-    return nil
-end
-
-local function isPlayerActor(actor)
-    if not playerPawnAddr or actor == nil then return false end
-    local ok, hit = pcall(function()
-        if not actor:IsValid() then return false end
-        if actor:GetAddress() == playerPawnAddr then return true end
-        local p = actor.Pawn
-        return p ~= nil and p:IsValid() and p:GetAddress() == playerPawnAddr
-    end)
-    return ok and hit
-end
-
-local function EnsureAttitudeHooks()
-    if attitudeHooksInstalled then return end
-    local okAny = false
-    for _, path in ipairs(Config.AttitudeHookPaths) do
-        local ok, err = pcall(function()
-            RegisterHook(path, function() end, function(Context, Other, Ret)
-                attitudeCalls = attitudeCalls + 1
-                if attitudeCalls == 1 or attitudeCalls % 200 == 0 then
-                    log(string.format("态度函数被调用第 %d 次", attitudeCalls))
-                end
-                pcall(function()
-                    local selfCtrl = Context:get()
-                    local other = Other:get()
-                    if playerNeutral and (isPlayerActor(other) or isPlayerActor(selfCtrl)) then
-                        Ret:set(1) -- Neutral
-                        return
-                    end
-                    local tSelf = lookupTeam(selfCtrl)
-                    local tOther = lookupTeam(other)
-                    if tSelf and tOther then
-                        Ret:set(tSelf == tOther and 0 or 2) -- Friendly / Hostile
-                    end
-                end)
-            end)
-        end)
-        if ok then
-            okAny = true
-            log("态度 hook 挂载成功: " .. path:match("([%w_]+)$"))
-        else
-            log("态度 hook 失败: " .. tostring(err))
-        end
-    end
-    attitudeHooksInstalled = okAny
-end
-
--- ---------- 召唤图鉴（F1 扫描时登记；后续版本接 AssetRegistry 全量目录） ----------
-
-local catalog = {}         -- { {name=短类名, class=UClass}, ... }
-local catalogIndex = 0
-local catalogSeen = {}
-local summonCount = 0      -- 擂台模式：交替分队计数
-local lastSummoned = nil   -- 上一只召唤物（与新召唤互种仇恨）
-
-local function RegisterInCatalog(pawn)
-    local ok = pcall(function()
-        local cls = pawn:GetClass()
-        if not cls or not cls:IsValid() then return end
-        local full = cls:GetFullName()
-        if catalogSeen[full] then return end
-        catalogSeen[full] = true
-        local short = full:match("([%w_]+)%s*$") or full
-        table.insert(catalog, { name = short, class = cls })
-        if catalogIndex == 0 then catalogIndex = 1 end
-    end)
-    return ok
-end
+-- 单位类型目录与活怪列表分开；已知路径及选择跨热重载保存。
+local npcCatalog=Catalog.new({log=log,valid=safeValid,getPlayer=GetPlayerPawn,
+    path=Config.CatalogPath,knownPaths=Config.KnownMonsterClasses,canSpawn=SpawnPolicy.check,allowActors=true,
+    audit=function(stage,unit,detail) return spawnAudit:record(stage,unit,detail) end})
+local exporter=AssetExporter.new({log=log,path=Config.RuntimePath,
+    config=Config.AssetCatalog})
+local worldMaps=WorldMapCatalog.new({log=log,getWorld=UEHelpers.GetWorld})
+local codexExporter=CodexExporter.new({log=log,path=Config.RuntimePath.."/codex.tsv",getWorld=UEHelpers.GetWorld,
+    locationsPath=Config.RuntimePath..'/codex-locations.tsv',
+    maps=worldMaps})
 
 -- ---------- 强制锁敌：走 SGameAI 自家的作战指令（2026-10-29 解剖成果） ----------
 -- SGameAIComponent:ForceIntoCombat(Target) = "进入战斗，目标是他"；
 -- 另把目标写进 AI 的黑板目标键（PBZ_TargetingHandler_AI 从那里读目标）做双保险。
 
 local function GetAIComp(pawn)
+    if not safeValid(pawn) then return nil end
     local ok, sg = pcall(function()
         local ctrl = pawn.Controller
         if not ctrl or not ctrl:IsValid() then return nil end
@@ -215,6 +208,7 @@ end
 
 -- 本作的原生仇恨组件（挂在每个 NPC/玩家身上，感知与索敌都以它为准）
 local function GetHatredComp(pawn)
+    if not safeValid(pawn) then return nil end
     local ok, h = pcall(function() return pawn.BP_PBZHatredManagerComponent end)
     if ok and h ~= nil then
         local okV, v = pcall(function() return h:IsValid() end)
@@ -224,39 +218,65 @@ local function GetHatredComp(pawn)
 end
 
 local function HatredListContains(hm, actor)
-    local found = false
-    pcall(function()
+    if not safeValid(hm) or not safeValid(actor) then return nil end
+    local found, unreadable = false, false
+    local ok = pcall(function()
         local hl = hm.HatredList
         local addr = actor:GetAddress()
         for i = 1, #hl do
             local okE, hit = pcall(function()
-                return hl[i]:IsValid() and hl[i]:GetAddress() == addr
+                local entry = hl[i]
+                return safeValid(entry) and entry:GetAddress() == addr
             end)
-            if okE and hit then found = true return end
+            if not okE then unreadable = true end
+            if okE and hit then found = true; return end
         end
     end)
-    return found
+    if found then return true end
+    if not ok or unreadable then return nil end
+    return false
 end
 
 local function AddHatred(attacker, victim)
     local hm = GetHatredComp(attacker)
-    if not hm then return false, "无仇恨组件" end
-    -- 0) 开门：受害者的"可被恨"开关掰成 true（门禁疑似读这个）
-    pcall(function()
-        local vh = GetHatredComp(victim)
-        if vh then vh.CanBeHatredNow = true end
+    if not hm or not safeValid(victim) then return false, "对象无效" end
+    local before = HatredListContains(hm, victim)
+    if before == nil then return false, "成员读取失败" end
+    if before then return true, "原本存在" end
+    battle:remember("hatred:" .. hm:GetAddress() .. ":" .. victim:GetAddress(), function()
+        if (arenaOwned[attacker] or arenaOwned[victim])
+            and (not engineValid(hm) or not engineValid(victim)) then
+            return true,"参赛对象有效性读回=false，目标已不存在；丢弃过期成员记录"
+        end
+        checked(hm); checked(victim)
+        hm:RemoveActorFromHatredList(victim)
+        local has = HatredListContains(hm, victim)
+        return has == false, "成员读回=" .. tostring(has)
     end)
-    -- 1) 正门：官方 Add（正门进去的条目不会被当非法清理）
-    pcall(function() hm:AddActorToHatredList(victim, false) end)
-    if HatredListContains(hm, victim) then return true, "官方Add" end
-    -- 2) 后门：直接把对方写进 HatredList 数组
-    pcall(function()
-        local hl = hm.HatredList
-        hl[#hl + 1] = victim
-    end)
-    if HatredListContains(hm, victim) then return true, "数组直写" end
-    return false, "两条路都被拒"
+    local ok, err = pcall(function() hm:AddActorToHatredList(victim, false) end)
+    local has = HatredListContains(hm, victim)
+    -- 仅对本Mod创建的两名参赛者保留历史已观察到出招的数组配对路径。
+    local ownA,ownB=false,false
+    for _,actor in ipairs(arenaActors) do
+        if safeValid(actor) then
+            ownA=ownA or actor:GetAddress()==attacker:GetAddress()
+            ownB=ownB or actor:GetAddress()==victim:GetAddress()
+        end
+    end
+    if not has and ownA and ownB then
+        local wrote=pcall(function()
+            checked(hm); checked(victim)
+            local list=hm.HatredList
+            list[#list+1]=victim
+        end)
+        has=HatredListContains(hm,victim)
+        log("参赛者配对数组写入=" .. tostring(wrote) .. "；成员读回=" .. tostring(has))
+        return wrote and has==true,"参赛者数组配对（官方门禁尚未修复）"
+    end
+    log("官方Add调用=" .. tostring(ok) .. "；成员读回=" .. tostring(has))
+    return ok and has == true, ok and (has and "官方Add读回存在" or "官方Add未接纳") or tostring(err)
 end
+
 
 -- ---------- 原生阵营系统 ----------
 -- NPC 和玩家身上的 "Faction Component"（UFactionComponent）决定谁和谁是敌人，
@@ -268,6 +288,7 @@ local ATTITUDE_NAME = { [0] = "友好", [1] = "中立", [2] = "敌对" }
 local HOSTILE, NEUTRAL = 2, 1
 
 local function GetFactionComp(pawn)
+    if not safeValid(pawn) then return nil end
     local ok, fc = pcall(function() return pawn["Faction Component"] end)
     if ok and fc ~= nil then
         local okV, v = pcall(function() return fc:IsValid() end)
@@ -277,6 +298,7 @@ local function GetFactionComp(pawn)
 end
 
 local function ReadRelation(a, b)
+    if not safeValid(b) then return nil end
     local fc = GetFactionComp(a)
     if not fc then return nil end
     local ok, r = pcall(function() return fc:GetFactionRelation(b) end)
@@ -298,50 +320,41 @@ local function ReadFactionTag(pawn)
     return okN and n or "?"
 end
 
-local originalFaction = {}  -- addr -> { pawn=, tag= } 改阵营前的原阵营，供重置键改回
-
--- 把 pawn 的阵营改成 tagName（原生 SetFaction），读回验证
-local function SetFactionTag(pawn, tagName)
-    local fc = GetFactionComp(pawn)
-    if not fc then return false end
-    local addr = pawn:GetAddress()
-    if not originalFaction[addr] then
-        originalFaction[addr] = { pawn = pawn, tag = ReadFactionTag(pawn) }
-    end
-    pcall(function() fc:SetFaction({ TagName = FName(tagName) }) end)
-    return ReadFactionTag(pawn) == tagName
-end
-
-local function RestoreFactionTags()
-    local n = 0
-    for _, rec in pairs(originalFaction) do
-        pcall(function()
-            if rec.pawn:IsValid() and rec.tag and rec.tag:find("^Faction%.") then
-                local fc = GetFactionComp(rec.pawn)
-                if fc then
-                    fc:SetFaction({ TagName = FName(rec.tag) })
-                    n = n + 1
+local function SetFactionRelation(a, b, relation)
+    local fa, fb = GetFactionComp(a), GetFactionComp(b)
+    if not fa or not fb then return false,nil,nil end
+    local beforeA,beforeB = ReadRelation(a,b),ReadRelation(b,a)
+    if beforeA == nil or beforeB == nil then return false,beforeA,nil end
+    local function rememberOne(source,target,fc,original)
+        local owned=arenaOwned[source] or arenaOwned[target]
+        battle:remember("relation:" .. source:GetAddress() .. ":" .. target:GetAddress(), function()
+            if owned and (not engineValid(source) or not engineValid(target) or not engineValid(fc)) then
+                return true,"参赛对象有效性读回=false，目标已不存在；丢弃过期关系记录"
+            end
+            checked(source); checked(target); checked(fc)
+            -- 停止擂台时仍开启的全局观战模式继续生效，不撤销它的单向中立关系。
+            if spectator and spectator:status().enabled_requested then
+                local player=GetPlayerPawn()
+                if safeValid(player) and target:GetAddress()==player:GetAddress()
+                    and source:GetAddress()~=player:GetAddress() then
+                    fc:SetFactionRelationOverride(target,NEUTRAL,false)
+                    local neutral=ReadRelation(source,target)
+                    return neutral==NEUTRAL,"观战模式仍开启，保留单向中立；读回="..tostring(neutral)
                 end
             end
+            fc:ClearFactionRelationOverride(target)
+            local actual=ReadRelation(source,target)
+            return actual==original,"清除本轮覆盖；原关系=" .. tostring(original)
+                .. "；读回=" .. tostring(actual) .. "；原覆盖结构未知"
         end)
     end
-    originalFaction = {}
-    return n
+    rememberOne(a,b,fa,beforeA); rememberOne(b,a,fb,beforeB)
+    local ok=pcall(function() fa:SetFactionRelationOverride(b,relation,true) end)
+    local afterA,afterB=ReadRelation(a,b),ReadRelation(b,a)
+    log(string.format("关系写入=%s；A %s→%s；B %s→%s",tostring(relation),tostring(beforeA),tostring(afterA),tostring(beforeB),tostring(afterB)))
+    return ok and afterA==relation and afterB==relation,beforeA,afterA
 end
 
-local factionOverrides = {}  -- 怪物之间的覆盖记录 { {a=, b=}, ... }，供重置键清除
-
--- 把 a 与 b 的关系覆盖为 relation（Both=true 一次设两边）。
--- 返回 是否调用成功, 覆盖前关系, 覆盖后关系
-local function SetFactionRelation(a, b, relation, noTrack)
-    local fc = GetFactionComp(a)
-    if not fc then return false, nil, nil end
-    local before = ReadRelation(a, b)
-    local ok = pcall(function() fc:SetFactionRelationOverride(b, relation, true) end)
-    local after = ReadRelation(a, b)
-    if ok and not noTrack then table.insert(factionOverrides, { a = a, b = b }) end
-    return ok, before, after
-end
 
 -- ---------- 召唤物的"登场状态"：伏击/隐藏/免伤效果 ----------
 -- 召唤物实测互相攻击但无敌、带半透明特效，且官方加仇恨被拒。怀疑是游戏刷怪时
@@ -349,13 +362,12 @@ end
 -- 正常刷怪会走 ActivateAI，我们是直接造出来的。
 -- 闪避无敌帧、格挡保护属于正常战斗机制，只诊断不移除。
 
-local GE_TO_STRIP = { "GE_IgnoreAllDamage_C", "GE_AmbushTags_C", "GE_HiddenTags_C",
-    "GE_HiddenTagsCanNotBeHatred_C" }
 local GE_TO_REPORT = { "GE_IgnoreAllDamage_C", "GE_AmbushTags_C", "GE_HiddenTags_C",
     "GE_HiddenTagsCanNotBeHatred_C", "GE_HiddenTags_DodgeInvunlerable_C",
     "GE_ReadyToDeflectProtect_C" }
 
 local function GetASC(pawn)
+    if not safeValid(pawn) then return nil end
     local ok, asc = pcall(function() return pawn.AbilitySystemComponent end)
     if ok and asc ~= nil then
         local okV, v = pcall(function() return asc:IsValid() end)
@@ -399,17 +411,6 @@ local function ListSuspectGEs(pawn)
     return string.format("%s｜类找到%d/%d 查询成功%d", body, resolved, #GE_TO_REPORT, queried)
 end
 
-local function StripSpawnStateGEs(pawn)
-    local asc = GetASC(pawn)
-    if not asc then return end
-    for _, name in ipairs(GE_TO_STRIP) do
-        local cls = FindGEClass(name)
-        if cls then
-            pcall(function() asc:RemoveActiveGameplayEffectBySourceEffect(cls, nil, -1) end)
-        end
-    end
-end
-
 local aiLib = nil
 local function GetAILib()
     if aiLib then
@@ -438,6 +439,7 @@ end
 -- 碰撞诊断：胶囊体和模型的碰撞是否开启、用的什么碰撞配置
 -- ECollisionEnabled: 0=关 1=仅查询 2=仅物理 3=查询+物理
 local function DescribeCollision(pawn)
+    if not safeValid(pawn) then return "UNKNOWN(invalid pawn)" end
     local function comp(c)
         if c == nil then return "无" end
         local okV, v = pcall(function() return c:IsValid() end)
@@ -453,90 +455,83 @@ local function DescribeCollision(pawn)
     return string.format("胶囊=%s 模型=%s", comp(cap), comp(mesh))
 end
 
--- 把玩家"能被怪物攻击扫到"的通道反应复制到怪物身上（只补不减）。
--- 只处理游戏自定义通道 14-31；引擎内置通道（Pawn、相机、物理等）不动。
--- 碰撞对照实测：玩家模型对 16/17/18/24/31 有反应，怪物模型全部忽略。
-local function CopyHurtChannels(pawn)
-    if not Config.CopyPlayerHurtChannels then return "未启用" end
-    local player = GetPlayerPawn()
-    if not player then return "找不到玩家" end
-    local function valid(c)
-        if c == nil then return false end
-        local ok, v = pcall(function() return c:IsValid() end)
-        return ok and v
-    end
-    local changed = {}
-    local function sync(src, dst, label)
-        if not valid(src) or not valid(dst) then return end
-        for ch = 14, 31 do
-            local okS, rs = pcall(function() return src:GetCollisionResponseToChannel(ch) end)
-            local okD, rd = pcall(function() return dst:GetCollisionResponseToChannel(ch) end)
-            if okS and okD and type(rs) == "number" and type(rd) == "number" and rs > rd then
-                pcall(function() dst:SetCollisionResponseToChannel(ch, rs) end)
-                local okR, rr = pcall(function() return dst:GetCollisionResponseToChannel(ch) end)
-                table.insert(changed, string.format("%s%d:%d→%s", label, ch, rd,
-                    okR and tostring(rr) or "?"))
-            end
-        end
-    end
-    local pm, pcap, mm, mcap = nil, nil, nil, nil
-    pcall(function() pm = player.Mesh end)
-    pcall(function() pcap = player.CapsuleComponent end)
-    pcall(function() mm = pawn.Mesh end)
-    pcall(function() mcap = pawn.CapsuleComponent end)
-    sync(pm, mm, "模型")
-    sync(pcap, mcap, "胶囊")
-    return #changed > 0 and table.concat(changed, " ") or "无需改动"
-end
-
--- 用游戏官方的刷怪函数生成（刷怪点用的那套），失败返回 nil 和原因
+-- 延迟生成只负责拿到Actor；控制器登记所有权后才会调用FinishSpawn。
 local function SpawnViaAILib(cls, t, world)
-    local lib = GetAILib()
-    if not lib then return nil, "找不到函数库" end
+    if not safeValid(cls) or not safeValid(world) then return nil,"Class/World无效","not_started" end
+    local className=objectName(cls)
+    local classPath=className:match(" (/.+)$")
+    local allowed,why=SpawnPolicy.check(classPath)
+    if not allowed then return nil,why,"not_started" end
+    local entry=npcCatalog:selected()
+    if not entry or entry.path~=classPath or type(entry.isNPC)~='boolean' then return nil,'实体类型未读回','not_started' end
+    local npc=entry.isNPC
+    local lib=npc and GetAILib() or StaticFindObject('/Script/Engine.Default__GameplayStatics')
+    if not safeValid(lib) then return nil,'找不到函数库','not_started' end
+    if not spawnAudit:record("spawn_deferred_begin",classPath,objectName(world)) then return nil,"阶段日志写入失败；未生成","not_started" end
+    if not safeValid(cls) or not safeValid(lib) or not safeValid(world) then return nil,"生成前对象失效","not_started" end
     local pawn = nil
-    local ok, err = pcall(function() pawn = lib:SpawnAIDefered(cls, t, nil, world) end)
-    if not ok then return nil, "SpawnAIDefered 报错: " .. tostring(err) end
-    local okV = pawn ~= nil and pcall(function() return pawn:IsValid() end) and pawn:IsValid()
-    if not okV then return nil, "SpawnAIDefered 未返回实例" end
-    local ok2, err2 = pcall(function() lib:FinishSpawnAIDefered(pawn, t, world) end)
-    if not ok2 then
-        pcall(function() pawn:K2_DestroyActor() end)
-        return nil, "FinishSpawnAIDefered 报错: " .. tostring(err2)
-    end
-    return pawn, nil
+    local ok, err = pcall(function()
+        if npc then pawn=lib:SpawnAIDefered(cls,t,nil,world)
+        else pawn=lib:BeginDeferredActorSpawnFromClass(world,cls,t,1,nil,1) end
+    end)
+    spawnAudit:record("spawn_deferred_return",classPath,"call="..tostring(ok).." valid="..tostring(safeValid(pawn)))
+    if not ok then return nil, "延迟生成接口报错，创建结果未知: " .. tostring(err),"uncertain" end
+    local okV = safeValid(pawn)
+    if not okV then return nil, "延迟生成接口未返回有效实例；创建结果未知","uncertain" end
+    spawnRoutes[pawn]=npc and 'npc' or 'actor'
+    log('生成路径读回='..spawnRoutes[pawn]..'；actor='..objectName(pawn))
+    return pawn,nil,"created"
 end
 
--- 让召唤物走完正常的登场流程：ActivateAI + 移除伏击/隐藏/免伤效果
+local function FinishSpawnViaAILib(pawn,t,world)
+    if not safeValid(pawn) or not safeValid(world) then return false,"Actor/World无效，保留清理记录" end
+    local route=spawnRoutes[pawn]
+    if route~='npc' and route~='actor' then return false,'生成路径未登记，保留清理记录' end
+    if route=='npc' and arenaActivity then arenaActivity:prepare(pawn) end
+    local lib=route=='npc' and GetAILib() or StaticFindObject('/Script/Engine.Default__GameplayStatics')
+    if not safeValid(lib) then return false,"FinishSpawn函数库不可用，保留清理记录" end
+    if not spawnAudit:record("finish_spawn_begin",objectName(pawn),"所有权已登记；"..objectName(world)) then
+        return false,"FinishSpawn阶段日志写入失败；未继续初始化"
+    end
+    if not safeValid(pawn) or not safeValid(lib) or not safeValid(world) then return false,"FinishSpawn前对象失效" end
+    local ok2, err2 = pcall(function()
+        if route=='npc' then lib:FinishSpawnAIDefered(pawn,t,world)
+        else lib:FinishSpawningActor(pawn,t,1) end
+    end)
+    local audited=spawnAudit:record("finish_spawn_return",objectName(pawn),"call="..tostring(ok2).." valid="..tostring(safeValid(pawn)))
+    if not ok2 or not audited then return false,"FinishSpawn未确认: "..tostring(err2).."；保留对象供F4清理" end
+    return safeValid(pawn),nil
+end
+
+-- 请求原生登场并读回可见状态；不移除游戏效果。
 local function FinishEntrance(pawn)
     local before = ListSuspectGEs(pawn)
     local activated = false
     local lib = GetAILib()
-    if lib then
-        activated = pcall(function() lib:ActivateAI(pawn, UEHelpers.GetWorld()) end)
+    local world = UEHelpers.GetWorld()
+    if lib and safeValid(pawn) and safeValid(world) then
+        if not spawnAudit:record("activate_begin",objectName(pawn),objectName(world)) then return false end
+        activated = pcall(function() lib:ActivateAI(pawn, world) end)
+        spawnAudit:record("activate_return",objectName(pawn),"call="..tostring(activated).." valid="..tostring(safeValid(pawn)))
     end
-    StripSpawnStateGEs(pawn)
+    -- 先观察原生登场状态，不再自动移除效果。
     local after = ListSuspectGEs(pawn)
-    log(string.format("  登场处理: ActivateAI=%s | 可疑效果 前[%s] 后[%s] | %s",
+    log(string.format("  登场处理: ActivateAI调用=%s（行为未验收） | 可疑效果 前[%s] 后[%s] | %s",
         lib and tostring(activated) or "找不到函数库", before, after, DescribeCollision(pawn)))
+    return activated
 end
 
-local function ClearAllFactionOverrides()
-    local n = 0
-    for _, pair in ipairs(factionOverrides) do
-        pcall(function()
-            local fa, fb = GetFactionComp(pair.a), GetFactionComp(pair.b)
-            if fa and pair.b:IsValid() then fa:ClearFactionRelationOverride(pair.b) end
-            if fb and pair.a:IsValid() then fb:ClearFactionRelationOverride(pair.a) end
-            n = n + 1
-        end)
-    end
-    factionOverrides = {}
-    return n
-end
-
--- ---------- 战况监视 + 锁敌续命 ----------
+-- ---------- 战况只读采样 ----------
 
 local function GetHP(pawn)
+    if not safeValid(pawn) then return nil end
+    -- APBZCharacter.AttributeSetBase 已由本地头文件确认；优先直接读，避免每秒全局扫描。
+    local okDirect, direct = pcall(function()
+        local attributes = pawn.AttributeSetBase
+        if not safeValid(attributes) then return nil end
+        return attributes.Health.CurrentValue
+    end)
+    if okDirect and type(direct) == "number" then return direct end
     local hp = nil
     pcall(function()
         local ok, sets = pcall(FindAllOf, "BasicAttributeSet")
@@ -548,7 +543,10 @@ local function GetHP(pawn)
             if asc and asc:IsValid() then ascAddr = asc:GetAddress() end
         end)
         for _, s in ipairs(sets) do
-            local okO, outer = pcall(function() return s:GetOuter() end)
+            local okO, outer = pcall(function()
+                if not safeValid(s) then return nil end
+                return s:GetOuter()
+            end)
             if okO and outer and outer:IsValid() then
                 local oa = outer:GetAddress()
                 if oa == pawnAddr or oa == ascAddr then
@@ -561,286 +559,87 @@ local function GetHP(pawn)
     return hp
 end
 
-local watchGen = 0  -- 新配对会使旧监视循环自然退出
-
--- 受击反馈：裁判扣血时让受害者播放自己的受击蒙太奇（它身上现成的资产）
-local hitMontageCache = {}  -- pawnAddr -> montage or false(找过没有)
-
-local function PlayHitReact(victim)
-    pcall(function()
-        local addr = victim:GetAddress()
-        local cached = hitMontageCache[addr]
-        if cached == false then return end
-        if not cached then
-            cached = false
-            local ok, montages = pcall(FindAllOf, "AnimMontage")
-            if ok and montages then
-                -- 轻受击优先；排除倒地/死亡/击飞/重击类（不然会反复表演躺下）
-                -- 受害者的种族关键词（BP_Monster_FemaleThug_Dart_C → FemaleThug），
-                -- 蒙太奇必须来自它自己的动画目录，否则骨架不匹配播不出来
-                local species = nil
-                pcall(function()
-                    species = victim:GetClass():GetFullName()
-                        :match("BP_Monster_([A-Za-z]+)")
-                end)
-                local best, bestScore = nil, -1
-                for _, m in ipairs(montages) do
-                    local okN, n = pcall(function() return m:GetFullName() end)
-                    if okN and n and (n:find("[Hh]it") or n:find("[Hh]urt"))
-                        and (not species or n:find(species)) then
-                        if not n:find("[Dd]own") and not n:find("[Dd]ie")
-                            and not n:find("[Dd]ead") and not n:find("[Kk]nock")
-                            and not n:find("[Ll]ie") and not n:find("[Ff]all")
-                            and not n:find("[Aa]ir") and not n:find("[Hh]eavy")
-                            and not n:find("[Ee]xecut") then
-                            local score = 0
-                            if n:find("[Ll]ight") then score = score + 2 end
-                            if n:find("[Ss]mall") then score = score + 2 end
-                            if n:find("[Ff]ront") then score = score + 1 end
-                            if score > bestScore then
-                                best, bestScore = m, score
-                            end
-                        end
-                    end
-                end
-                cached = best or false
-                if best then
-                    pcall(function()
-                        log("受击动画选用: " .. best:GetFullName())
-                    end)
-                else
-                    log("没找到合适的轻受击蒙太奇（本区已加载的全是倒地类）")
-                end
-            end
-            hitMontageCache[addr] = cached
-        end
-        if cached and cached ~= false and cached:IsValid() then
-            victim:PlayAnimMontage(cached, 1.0, FName(""))
-        end
-    end)
-end
-
--- 裁判判伤实验：怪物互殴的刀互相"穿模"（命中判定不认非玩家目标），
--- 所以轮流试两种判伤手段，观察哪种能移动 HP / 触发受击与死亡：
---   A: UE 通用 ApplyDamage（走引擎伤害事件）
---   B: 直接写 Health 属性（绕开一切管线）
-local function JudgeDamage(victim, attacker, amount, method)
-    if method == "A" then
-        local gps = GetGameplayStatics()
-        if not gps then return false end
-        local dmgType = StaticFindObject("/Script/Engine.DamageType")
-        return pcall(function()
-            gps:ApplyDamage(victim, amount, attacker.Controller, attacker, dmgType)
-        end)
-    else
-        return pcall(function()
-            local ok, sets = pcall(FindAllOf, "BasicAttributeSet")
-            if not ok or not sets then error("no sets") end
-            local vAddr = victim:GetAddress()
-            local ascAddr = nil
-            pcall(function()
-                local asc = victim.AbilitySystemComponent
-                if asc and asc:IsValid() then ascAddr = asc:GetAddress() end
-            end)
-            for _, s in ipairs(sets) do
-                local okO, outer = pcall(function() return s:GetOuter() end)
-                if okO and outer and outer:IsValid() then
-                    local oa = outer:GetAddress()
-                    if oa == vAddr or oa == ascAddr then
-                        s.Health.CurrentValue = s.Health.CurrentValue - amount
-                        return
-                    end
-                end
-            end
-            error("attr set not found")
-        end)
+local function StartDuelWatch(a,b)
+    local token=battle:begin("两只NPC对照")
+    attackProfile=AttackProfile.new({log=log,valid=safeValid})
+    local ticks,handle=0,nil
+    local function cancel()
+        if handle then pcall(CancelDelayedAction,handle); handle=nil end
     end
-end
-
-local function StartDuelWatch(a, b)
-    watchGen = watchGen + 1
-    local myGen = watchGen
-    local ticks = 0
-    local lastForceTick = -10
-    local forceCount = 0
-    LoopAsync(2500, function()
-        if myGen ~= watchGen then return true end
-        ticks = ticks + 1
-        local stop = ticks >= 240  -- 最长 10 分钟，或分出胜负为止
-        ExecuteInGameThread(function()
-            local okA = pcall(function() return a:IsValid() end) and a:IsValid()
-            local okB = pcall(function() return b:IsValid() end) and b:IsValid()
-            if not okA or not okB then
-                log(string.format("🏆 决斗结束：%s 存活",
-                    okA and "蓝方" or (okB and "红方" or "无人")))
-                watchGen = watchGen + 1
-                return
-            end
-            local hpA, hpB = GetHP(a), GetHP(b)
-            local judging = Config.JudgeDamagePerTick and Config.JudgeDamagePerTick > 0
-            if not judging then
-                -- 不判伤：只观察原生战斗，血打空就是游戏自己判的死
-                local deadA = hpA and hpA <= 0
-                local deadB = hpB and hpB <= 0
-                if deadA or deadB then
-                    local verdict = (deadA and deadB) and "同归于尽"
-                        or (deadA and "红方获胜" or "蓝方获胜")
-                    log(string.format("🏆 决斗结束（原生伤害）：%s（蓝 HP=%s 红 HP=%s）",
-                        verdict, tostring(hpA), tostring(hpB)))
-                    watchGen = watchGen + 1
-                    return
-                end
-            end
-            -- 判伤模式：血降到阈值就执行 Kill
-            local KT = Config.KillThreshold or 25
-            local lowA = judging and hpA and hpA <= KT
-            local lowB = judging and hpB and hpB <= KT
-            if lowA or lowB then
-                -- 编导式死亡：Kill() 是瞬间清场（实测无动画），所以先播
-                -- 败者自己的死亡蒙太奇，演完再清场——观感=被打死倒下
-                local function stageDeath(victim)
-                    local played = false
-                    pcall(function()
-                        local species = victim:GetClass():GetFullName()
-                            :match("BP_Monster_([A-Za-z]+)")
-                        local ok, montages = pcall(FindAllOf, "AnimMontage")
-                        if ok and montages then
-                            for _, m in ipairs(montages) do
-                                local okN, n = pcall(function() return m:GetFullName() end)
-                                if okN and n and (not species or n:find(species))
-                                    and (n:find("[Dd]ie") or n:find("[Dd]eath")
-                                         or n:find("[Dd]ead")) then
-                                    victim:PlayAnimMontage(m, 1.0, FName(""))
-                                    played = true
-                                    log("死亡演出: " .. n)
-                                    break
-                                end
-                            end
-                        end
-                    end)
-                    ExecuteWithDelay(played and 2800 or 200, function()
-                        ExecuteInGameThread(function()
-                            pcall(function()
-                                if victim:IsValid() then victim:Kill(1) end
-                            end)
-                        end)
-                    end)
-                end
-                if lowA then stageDeath(a) end
-                if lowB then stageDeath(b) end
-                local verdict = (lowA and lowB) and "同归于尽"
-                    or (lowA and "红方获胜" or "蓝方获胜")
-                log(string.format("🏆 决斗结束：%s（蓝 HP=%s 红 HP=%s）",
-                    verdict, tostring(hpA), tostring(hpB)))
-                watchGen = watchGen + 1
-                return
-            end
-            -- 判伤：属性直写（实测唯一有效），伤害随机浮动让比赛有真胜负
-            if Config.JudgeDamagePerTick and Config.JudgeDamagePerTick > 0 then
-                local base = Config.JudgeDamagePerTick
-                JudgeDamage(a, b, base * (0.5 + math.random()), "B")
-                JudgeDamage(b, a, base * (0.5 + math.random()), "B")
-                -- 受击动画低频随机播放：每次都播会把 AI 的出招不停打断，
-                -- 变成全程抽搐（实测教训）。只偶尔给一侧一个踉跄
-                local roll = math.random()
-                if roll < 0.35 then
-                    PlayHitReact(roll < 0.175 and a or b)
-                end
-            end
-            -- 读当前 AI 状态（诊断"站桩"用）
-            local function stateOf(p)
-                local s = "?"
-                pcall(function()
-                    local sg = GetAIComp(p)
-                    if sg then s = FNameToString(sg.CurrentStateTag.TagName) end
-                end)
-                return s
-            end
-            log(string.format("战况[%d]: 蓝 HP=%s(%s) | 红 HP=%s(%s) | 关系 蓝→红=%s 红→蓝=%s",
-                ticks, tostring(hpA), stateOf(a), tostring(hpB), stateOf(b),
-                RelationName(ReadRelation(a, b)), RelationName(ReadRelation(b, a))))
-            -- Astra 方案：脱战检测式恢复——只有仇恨列表真的丢了对方才
-            -- 修复 + 单次补发作战指令（≥10 秒冷却、全场最多 3 次），
-            -- 其余时间完全不打扰 AI
-            local hmA, hmB = GetHatredComp(a), GetHatredComp(b)
-            local lostA = hmA and not HatredListContains(hmA, b)
-            local lostB = hmB and not HatredListContains(hmB, a)
-            if lostA or lostB then
-                -- 阵营覆盖可能被游戏重置，先补阵营再补仇恨
-                if ReadRelation(a, b) ~= HOSTILE then
-                    SetFactionRelation(a, b, HOSTILE, true)
-                end
-                AddHatred(a, b)
-                AddHatred(b, a)
-                if (ticks - lastForceTick) >= 4 and forceCount < 3 then
-                    lastForceTick = ticks
-                    forceCount = forceCount + 1
-                    local sgA2, sgB2 = GetAIComp(a), GetAIComp(b)
-                    if lostA and sgA2 then
-                        pcall(function() sgA2:ForceIntoCombat(b) end)
-                    end
-                    if lostB and sgB2 then
-                        pcall(function() sgB2:ForceIntoCombat(a) end)
-                    end
-                    log(string.format("脱战恢复 #%d（蓝丢失=%s 红丢失=%s）",
-                        forceCount, tostring(lostA), tostring(lostB)))
-                end
-            end
-        end)
-        return stop
-    end)
+    local function sample()
+        if not battle:isCurrent(token) then cancel(); return end
+        if not safeValid(a) or not safeValid(b) then
+            log("对象失效，停止采样；无法据此判定死亡/胜负")
+            battle:cancel("对象失效"); cancel(); return
+        end
+        ticks=ticks+1
+        attackProfile:sample({a,b},"duel_sample_"..ticks,GetPlayerPawn())
+        if ticks==1 or ticks==20 or ticks==80 then
+            local ok,err=pcall(function()
+                spawnInspector:combat(a,b,'tick'..ticks)
+                spawnInspector:combat(b,a,'tick'..ticks)
+            end)
+            if not ok then log('[SpawnInspect] 战斗状态读取失败: '..tostring(err)) end
+        end
+        if ticks%8~=0 then return end
+        local hpA,hpB=GetHP(a),GetHP(b)
+        log(string.format("战况[%d] HP=%s/%s 关系=%s/%s；只读",ticks,tostring(hpA),tostring(hpB),RelationName(ReadRelation(a,b)),RelationName(ReadRelation(b,a))))
+        if ticks>=240 or (hpA and hpA<=0) or (hpB and hpB<=0) then
+            battle:cancel("采样结束；F4恢复当前账本"); cancel()
+        end
+    end
+    handle=LoopInGameThreadWithDelay(250,sample)
 end
 
 local function ForceAttack(attacker, victim)
-    -- 先走阵营正门：关系覆盖为敌对后，官方 AddActorToHatredList 的门禁应当放行
-    local okF, before, after = SetFactionRelation(attacker, victim, HOSTILE)
-    local okHate, how = AddHatred(attacker, victim)
-    log(string.format("  阵营关系 %s→%s（覆盖%s） | 拉仇恨 %s",
-        RelationName(before), RelationName(after), okF and "成功" or "失败",
-        okHate and ("成功(" .. how .. ")") or ("失败: " .. tostring(how))))
+    if not safeValid(attacker) or not safeValid(victim) then return false end
+    local okF = SetFactionRelation(attacker, victim, HOSTILE)
+    local okH, how = AddHatred(attacker, victim)
     local sg = GetAIComp(attacker)
-    if not sg then return okHate end
-    local okForce = pcall(function() sg:ForceIntoCombat(victim) end)
-    okForce = okForce or okHate
-    -- 黑板目标键直写（键名从 AI 的 TargetingHandler 实例上现读）
-    pcall(function()
-        local bb = sg.BlackboardComponent
-        if not bb or not bb:IsValid() then return end
-        local okH, handlers = pcall(FindAllOf, "PBZ_TargetingHandler_AI_C")
-        if not okH or not handlers then return end
-        for _, h in ipairs(handlers) do
-            local okM, match = pcall(function()
-                return h:IsValid() and h.Blackboard ~= nil and h.Blackboard:IsValid()
-                    and h.Blackboard:GetAddress() == bb:GetAddress()
-            end)
-            if okM and match then
-                local okK, keyName = pcall(function() return h["Target Key"] end)
-                if okK and keyName then
-                    bb:SetValueAsObject(keyName, victim)
+    local okForce = false
+    if sg then okForce = pcall(function() sg:ForceIntoCombat(victim) end) end
+    -- 只写实际绑定该控制器的黑板键，并保留原目标供F4恢复。
+    if sg then pcall(function()
+        local bb=sg.BlackboardComponent
+        if not safeValid(bb) then return end
+        local okHandlers,handlers=pcall(FindAllOf,"PBZ_TargetingHandler_AI_C")
+        if not okHandlers or not handlers then return end
+        for _,handler in ipairs(handlers) do
+            if safeValid(handler) then
+                local bound=handler.Blackboard
+                if safeValid(bound) and bound:GetAddress()==bb:GetAddress() then
+                    local key=handler["Target Key"]
+                    local original=bb:GetValueAsObject(key)
+                    local originalValid=safeValid(original)
+                    local owned=arenaOwned[attacker]
+                    battle:remember("blackboard:" .. bb:GetAddress() .. ":" .. FNameToString(key),function()
+                        if owned and not engineValid(bb) then
+                            return true,"参赛黑板有效性读回=false，目标已不存在；丢弃过期记录"
+                        end
+                        checked(bb)
+                        if originalValid then checked(original); bb:SetValueAsObject(key,original)
+                        else bb:ClearValue(key) end
+                        local actual=bb:GetValueAsObject(key)
+                        local restored=originalValid and safeValid(actual) and actual:GetAddress()==original:GetAddress()
+                            or (not originalValid and not safeValid(actual))
+                        return restored,"目标读回=" .. objectName(actual)
+                    end)
+                    checked(victim)
+                    bb:SetValueAsObject(key,victim)
+                    log("参赛目标写入=" .. objectName(victim) .. "；黑板读回=" .. objectName(bb:GetValueAsObject(key)))
+                    break
                 end
-                break
             end
         end
-    end)
-    return okForce
+    end) end
+    local state = "UNKNOWN"
+    if sg then pcall(function() state = FNameToString(sg.CurrentStateTag.TagName) end) end
+    log("作战请求=" .. tostring(okForce) .. "；状态读回=" .. state
+        .. "；仇恨=" .. tostring(okH) .. "/" .. tostring(how) .. "；实际出招待观察")
+    return okF and okH and okForce
 end
 
--- ---------- 种仇恨：互相打 1 点伤害，触发 AI 的受击感知 ----------
-
-local function SeedHatred(a, b)
-    local gps = GetGameplayStatics()
-    if not gps then return false end
-    local dmgType = StaticFindObject("/Script/Engine.DamageType")
-    local function hit(victim, attacker)
-        return pcall(function()
-            local instigator = attacker.Controller
-            gps:ApplyDamage(victim, Config.SeedDamage, instigator, attacker, dmgType)
-        end)
-    end
-    local ok1 = hit(b, a)
-    local ok2 = hit(a, b)
-    return ok1 and ok2
-end
+-- 不再调用通用ApplyDamage种仇恨；本版不执行假伤害或假死亡。
 
 -- ---------- 扫描 ----------
 
@@ -852,7 +651,7 @@ local function CollectNPCs()
         local ok, found = pcall(FindAllOf, className)
         if ok and found then
             for _, pawn in ipairs(found) do
-                if pawn:IsValid() then
+                if safeValid(pawn) then
                     local addr = pawn:GetAddress()
                     if addr ~= playerAddr and not seen[addr] and not IsExcluded(pawn) then
                         seen[addr] = true
@@ -865,297 +664,9 @@ local function CollectNPCs()
     return result
 end
 
-local function ScanNPCs()
-    ExecuteInGameThread(function()
-        local npcs = CollectNPCs()
-        local player = GetPlayerPawn()
-        local pLoc = player and GetLocation(player)
-        local ctrlSeen = {}
-        log(string.format("扫描到 %d 个候选 NPC:", #npcs))
-        for i, pawn in ipairs(npcs) do
-            RegisterInCatalog(pawn)
-            local dist = -1
-            local loc = GetLocation(pawn)
-            if loc and pLoc then dist = math.sqrt(DistSq(loc, pLoc)) / 100 end
-            log(string.format("  [%d] %s  距离 %.1fm", i, pawn:GetFullName(), dist))
-        end
-        log(string.format("召唤图鉴共 %d 种（Shift+%s 切换 / %s 召唤）",
-            #catalog, Config.Keybinds.Summon, Config.Keybinds.Summon))
-        if #npcs == 0 then
-            log("没扫到 NPC。请调整 config.EnemyClasses")
-        end
-    end)
-end
-
--- ---------- 全场互殴 / 决斗 / 恢复 ----------
-
-local function GlobalInfight()
-    ExecuteInGameThread(function()
-        EnsureAttitudeHooks()
-        local npcs = CollectNPCs()
-        local okCount = 0
-        local teamIdx = {}
-        for i, pawn in ipairs(npcs) do
-            teamIdx[i] = i % Config.TeamCount
-            ApplyTeamTracked(pawn, Config.TeamIdBase + teamIdx[i])
-            CopyHurtChannels(pawn)
-        end
-        -- 不同队的每一对都用原生阵营接口设为敌对
-        local pairCount, pairsOk = 0, 0
-        for i = 1, #npcs do
-            for j = i + 1, #npcs do
-                if teamIdx[i] ~= teamIdx[j] then
-                    pairCount = pairCount + 1
-                    local ok, _, after = SetFactionRelation(npcs[i], npcs[j], HOSTILE)
-                    if ok and after == HOSTILE then pairsOk = pairsOk + 1 end
-                end
-            end
-        end
-        okCount = #npcs
-        log(string.format("全场互殴！%d 个 NPC 分成 %d 队，敌对关系 %d/%d 对生效",
-            okCount, Config.TeamCount, pairsOk, pairCount))
-    end)
-end
-
-local function DuelNearest()
-    ExecuteInGameThread(function()
-        EnsureAttitudeHooks()
-        local player = GetPlayerPawn()
-        local pLoc = player and GetLocation(player)
-        if not pLoc then
-            log("找不到玩家位置")
-            return
-        end
-        local npcs = CollectNPCs()
-        table.sort(npcs, function(a, b)
-            local la, lb = GetLocation(a), GetLocation(b)
-            if not la then return false end
-            if not lb then return true end
-            return DistSq(la, pLoc) < DistSq(lb, pLoc)
-        end)
-        if #npcs < 2 then
-            log("场上不足两个 NPC，无法决斗")
-            return
-        end
-        log(string.format("  决斗双方可疑效果: [%s] vs [%s]",
-            ListSuspectGEs(npcs[1]), ListSuspectGEs(npcs[2])))
-        log(string.format("  决斗双方碰撞: [%s] vs [%s]",
-            DescribeCollision(npcs[1]), DescribeCollision(npcs[2])))
-        log("  受击通道(第一方): " .. CopyHurtChannels(npcs[1]))
-        log("  受击通道(第二方): " .. CopyHurtChannels(npcs[2]))
-        ApplyTeamTracked(npcs[1], Config.TeamIdBase)
-        ApplyTeamTracked(npcs[2], Config.TeamIdBase + 1)
-        if Config.SwitchFactionTo ~= "" then
-            local okT = SetFactionTag(npcs[1], Config.SwitchFactionTo)
-            log(string.format("  决斗第一方阵营 → %s：%s", Config.SwitchFactionTo,
-                okT and "成功" or "失败"))
-        end
-        local f1 = ForceAttack(npcs[1], npcs[2])
-        local f2 = ForceAttack(npcs[2], npcs[1])
-        SeedHatred(npcs[1], npcs[2])
-        log(string.format("决斗开始: %s VS %s（强制锁敌 %s/%s，战况监视已启动）",
-            npcs[1]:GetFullName(), npcs[2]:GetFullName(),
-            f1 and "OK" or "失败", f2 and "OK" or "失败"))
-        StartDuelWatch(npcs[1], npcs[2])
-    end)
-end
-
-local function ResetTeams()
-    ExecuteInGameThread(function()
-        local npcs = CollectNPCs()
-        local okCount = 0
-        for _, pawn in ipairs(npcs) do
-            local addr = pawn:GetAddress()
-            local orig = originalTeams[addr]
-            if orig ~= nil then
-                if Teams.ApplyTeam(pawn, orig) then okCount = okCount + 1 end
-            end
-        end
-        originalTeams = {}
-        teamOf = {}
-        Hatred.Reset()
-        local cleared = ClearAllFactionOverrides()
-        local restored = RestoreFactionTags()
-        log(string.format("已把 %d 个 NPC 恢复到原始阵营，清除 %d 组阵营关系覆盖，改回 %d 个阵营标签",
-            okCount, cleared, restored))
-    end)
-end
-
--- ---------- 玩家中立化开关 ----------
-
-local playerOrigTeam = nil
-local neutralNPCs = {}  -- 已对玩家覆盖为中立的 NPC
-
--- 让一只 NPC 对玩家中立：原生阵营覆盖 + 从它的仇恨列表里除名
-local function NeutralizeAgainstPlayer(npc, player)
-    local ok, _, after = SetFactionRelation(npc, player, NEUTRAL, true)
-    pcall(function()
-        local hm = GetHatredComp(npc)
-        if hm then hm:RemoveActorFromHatredList(player) end
-    end)
-    if ok then table.insert(neutralNPCs, npc) end
-    return ok and after == NEUTRAL
-end
-
-local function TogglePlayerNeutral()
-    ExecuteInGameThread(function()
-        local pawn = GetPlayerPawn()
-        if not pawn then
-            log("找不到玩家 Pawn")
-            return
-        end
-        EnsureAttitudeHooks()
-        playerPawnAddr = pawn:GetAddress()
-        if not playerNeutral then
-            playerOrigTeam = Teams.ReadTeam(pawn)
-            Teams.ApplyTeam(pawn, Config.NeutralTeamId)
-            local npcs = CollectNPCs()
-            local okN = 0
-            for _, npc in ipairs(npcs) do
-                if NeutralizeAgainstPlayer(npc, pawn) then okN = okN + 1 end
-            end
-            playerNeutral = true
-            log(string.format("玩家已中立化：%d/%d 个怪对你的阵营关系已覆盖为中立；再按一次恢复",
-                okN, #npcs))
-        else
-            local cleared = 0
-            for _, npc in ipairs(neutralNPCs) do
-                pcall(function()
-                    if npc:IsValid() then
-                        local fc = GetFactionComp(npc)
-                        if fc then
-                            fc:ClearFactionRelationOverride(pawn)
-                            cleared = cleared + 1
-                        end
-                    end
-                end)
-            end
-            neutralNPCs = {}
-            Teams.ApplyTeam(pawn, playerOrigTeam or 0)
-            playerNeutral = false
-            log(string.format("玩家中立已解除（清除 %d 只怪的中立覆盖）", cleared))
-        end
-    end)
-end
-
--- ---------- 召唤 ----------
-
-local function CycleSummonClass()
-    if #catalog == 0 then
-        log("图鉴是空的：先按 " .. Config.Keybinds.Scan .. " 扫描一次")
-        return
-    end
-    catalogIndex = catalogIndex % #catalog + 1
-    log(string.format("已选中 [%d/%d] %s", catalogIndex, #catalog,
-        catalog[catalogIndex].name))
-end
-
-local function SummonSelected()
-    ExecuteInGameThread(function()
-        if #catalog == 0 then
-            -- 图鉴空了（热重载会清空）就自动扫一遍
-            for _, pawn in ipairs(CollectNPCs()) do RegisterInCatalog(pawn) end
-            if #catalog > 0 then
-                log(string.format("图鉴自动重建：%d 种", #catalog))
-            end
-        end
-        if #catalog == 0 or catalogIndex == 0 then
-            log("附近没有可登记的怪，图鉴为空")
-            return
-        end
-        local entry = catalog[catalogIndex]
-        local player = GetPlayerPawn()
-        local loc = player and GetLocation(player)
-        if not loc then
-            log("找不到玩家位置")
-            return
-        end
-        local okF, fwd = pcall(function() return player:GetActorForwardVector() end)
-        if not okF or not fwd then fwd = { X = 1, Y = 0, Z = 0 } end
-        local t = {
-            Rotation = { X = 0, Y = 0, Z = 0, W = 1 },
-            Translation = {
-                X = loc.X + fwd.X * Config.SummonDistance,
-                Y = loc.Y + fwd.Y * Config.SummonDistance,
-                Z = loc.Z + Config.SummonHeightOffset,
-            },
-            Scale3D = { X = 1, Y = 1, Z = 1 },
-        }
-        local gps = GetGameplayStatics()
-        local world = UEHelpers.GetWorld()
-        if not gps or not world or not world:IsValid() then
-            log("召唤失败：GameplayStatics/World 不可用")
-            return
-        end
-        -- 优先走游戏官方刷怪函数；失败再退回引擎通用生成
-        local actor, why = SpawnViaAILib(entry.class, t, world)
-        local okFin, errFin = actor ~= nil, nil
-        if actor then
-            log("  召唤途径: 官方刷怪函数")
-        else
-            log("  召唤途径: 引擎通用生成（官方刷怪失败: " .. tostring(why) .. "）")
-            -- UE5 不同小版本参数个数不同，两种签名都试
-            local ok = pcall(function()
-                actor = gps:BeginDeferredActorSpawnFromClass(world, entry.class, t, 1, nil, 1)
-            end)
-            if not ok or not actor or not actor:IsValid() then
-                ok = pcall(function()
-                    actor = gps:BeginDeferredActorSpawnFromClass(world, entry.class, t, 1, nil)
-                end)
-            end
-            if not ok or not actor or not actor:IsValid() then
-                log("召唤失败：BeginDeferredActorSpawnFromClass 未返回实例")
-                return
-            end
-            -- 5.4+ 多了 TransformScaleMethod 参数，反射调用可能必填：两种签名都试
-            okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t, 1) end)
-            if not okFin then
-                okFin, errFin = pcall(function() gps:FinishSpawningActor(actor, t) end)
-            end
-        end
-        if okFin then
-            -- 擂台模式：召唤物交替分蓝/红队，并与上一只互种仇恨，落地即开打
-            EnsureAttitudeHooks()
-            FinishEntrance(actor)
-            log("  受击通道: " .. CopyHurtChannels(actor))
-            if playerNeutral then NeutralizeAgainstPlayer(actor, player) end
-            summonCount = summonCount + 1
-            local teamId = Config.TeamIdBase + (summonCount % 2)
-            ApplyTeamTracked(actor, teamId)
-            -- 蓝方（单数）改到另一个原生阵营，让双方按游戏阵营表天然敌对
-            if summonCount % 2 == 1 and Config.SwitchFactionTo ~= "" then
-                local okT = SetFactionTag(actor, Config.SwitchFactionTo)
-                log(string.format("  蓝方阵营 → %s：%s（现为 %s）", Config.SwitchFactionTo,
-                    okT and "成功" or "失败", ReadFactionTag(actor)))
-            end
-            local fightNote = ""
-            if lastSummoned and lastSummoned:IsValid() then
-                local fA = ForceAttack(actor, lastSummoned)
-                local fB = ForceAttack(lastSummoned, actor)
-                SeedHatred(actor, lastSummoned)
-                StartDuelWatch(actor, lastSummoned)
-                fightNote = (fA and fB) and "，已强制互相锁敌（战况监视启动）"
-                    or "，强制锁敌部分失败（可再按决斗键补）"
-            end
-            lastSummoned = actor
-            log(string.format("已在面前召唤: %s（%s队%s）", entry.name,
-                summonCount % 2 == 0 and "红" or "蓝", fightNote))
-        else
-            -- 清理半成品，别留一只不会动的"雕像"在场上
-            pcall(function() actor:K2_DestroyActor() end)
-            log("召唤失败（半成品已清理）：FinishSpawningActor: " .. tostring(errFin))
-        end
-    end)
-end
-
 -- ---------- 解剖：把最近一只怪的 AI 大脑结构写到文件（Shift+扫描键） ----------
 -- 注意：UE4SS 对象的空指针链式调用会原生崩溃，pcall 拦不住，
 -- 所以每一步都先取引用、IsValid 之后再往下走。
-
-local function safeValid(obj)
-    local ok, v = pcall(function() return obj ~= nil and obj:IsValid() end)
-    return ok and v
-end
 
 local function DumpBrain()
     ExecuteInGameThread(function()
@@ -1191,6 +702,7 @@ local function DumpBrain()
         local function dumpClassChain(obj, label)
             emit("")
             emit("######## " .. label)
+            if not safeValid(obj) then emit("UNKNOWN(invalid)"); return end
             local okCls, cls = pcall(function() return obj:GetClass() end)
             while okCls and safeValid(cls) do
                 local okN, clsName = pcall(function() return cls:GetFullName() end)
@@ -1273,6 +785,7 @@ end
 -- ---------- 目标系统诊断（Shift+互殴键）：读出双方的目标类型标签 ----------
 
 local function ReadTargetTypes(pawn, label)
+    if not safeValid(pawn) then log(label .. " 目标类型=UNKNOWN(invalid)"); return end
     local ok, err = pcall(function()
         local out = {}
         pawn:GetTargetTypes(out)
@@ -1291,47 +804,8 @@ local function ReadTargetTypes(pawn, label)
 end
 
 local function ReadActorTags(pawn, label)
-    local ok, err = pcall(function()
-        local asc = nil
-        pcall(function() asc = pawn.AbilitySystemComponent end)
-        if not asc or not pcall(function() return asc:IsValid() end) or not asc:IsValid() then
-            pcall(function() asc = pawn.AbilitySystem end)
-        end
-        if not asc or not asc:IsValid() then
-            log(label .. " 没有 AbilitySystemComponent")
-            return
-        end
-        local container = {}
-        asc:GetOwnedGameplayTags(container)
-        local names = {}
-        local okBreak = pcall(function()
-            local lib = StaticFindObject(
-                "/Script/GameplayTags.Default__BlueprintGameplayTagLibrary")
-            local arr = {}
-            lib:BreakGameplayTagContainer(container, arr)
-            for i = 1, #arr do
-                pcall(function()
-                    table.insert(names, FNameToString(arr[i].TagName))
-                end)
-            end
-        end)
-        if not okBreak then
-            -- 退路：直接遍历容器的 GameplayTags 数组
-            pcall(function()
-                local tags = container.GameplayTags or container
-                for i = 1, #tags do
-                    pcall(function()
-                        table.insert(names, FNameToString(tags[i].TagName))
-                    end)
-                end
-            end)
-        end
-        log(string.format("%s 身上标签 [%d]: %s", label, #names,
-            table.concat(names, ", ")))
-    end)
-    if not ok then
-        log(string.format("%s 标签读取报错: %s", label, tostring(err)))
-    end
+    -- 已知本构建没有 GetOwnedGameplayTags 反射入口，不重复失败调用。
+    log(label .. " 身份标签=UNKNOWN（GetOwnedGameplayTags非反射函数；不据此推断无标签）")
 end
 
 local function TargetDiag()
@@ -1350,7 +824,7 @@ local function TargetDiag()
         for i = 1, math.min(#npcs, 8) do
             local rel = player and RelationName(ReadRelation(npcs[i], player)) or "?"
             local okN, n = pcall(function()
-                return npcs[i]:GetClass():GetFullName():match("([%w_]+)$")
+                return objectName(npcs[i]):match("([%w_]+)$")
             end)
             log(string.format("  NPC[%d] %s 阵营=%s 对玩家=%s 可疑效果=[%s] %s", i,
                 okN and n or "?", ReadFactionTag(npcs[i]), rel, ListSuspectGEs(npcs[i]),
@@ -1385,7 +859,7 @@ local function TargetDiag()
                     log(string.format("  仇恨列表 %d 个:", #hl))
                     for i = 1, math.min(#hl, 5) do
                         pcall(function()
-                            log("    " .. hl[i]:GetFullName())
+                            log("    " .. objectName(hl[i]))
                         end)
                     end
                 else
@@ -1404,9 +878,9 @@ local function TargetDiag()
                         for i = 1, math.min(#seen, 5) do
                             local okE, nameE = pcall(function()
                                 local a = seen[i]
-                                if a.GetFullName then return a:GetFullName() end
-                                if a.get then return a:get():GetFullName() end
-                                return tostring(a)
+                                if safeValid(a) then return objectName(a) end
+                                local okGet,resolved=pcall(function() return a:get() end)
+                                return okGet and objectName(resolved) or "UNKNOWN"
                             end)
                             log("    " .. (okE and nameE or "?"))
                         end
@@ -1442,8 +916,9 @@ local function DumpCollisionMatrix()
         end
         local function ownedBy(c, actorAddr)
             local ok, hit = pcall(function()
+                if not safeValid(c) then return false end
                 local o = c:GetOwner()
-                if not o or not o:IsValid() then return false end
+                if not safeValid(o) then return false end
                 if o:GetAddress() == actorAddr then return true end
                 local o2 = o:GetOwner()
                 return o2 ~= nil and o2:IsValid() and o2:GetAddress() == actorAddr
@@ -1451,6 +926,7 @@ local function DumpCollisionMatrix()
             return ok and hit
         end
         local function dumpActor(actor, label)
+            if not safeValid(actor) then return end
             emit("######## " .. label .. " " .. actor:GetFullName())
             local actorAddr = actor:GetAddress()
             local comps = {}
@@ -1465,6 +941,7 @@ local function DumpCollisionMatrix()
                     local name = c:GetFullName():match("([%w_]+)$") or "?"
                     pcall(function()
                         local o = c:GetOwner()
+                        if not safeValid(o) then return end
                         if o:GetAddress() ~= actor:GetAddress() then
                             name = (o:GetFullName():match("([%w_]+)$") or "?") .. "." .. name
                         end
@@ -1510,7 +987,6 @@ end
 
 -- ---------- 慢动作 ----------
 
-local dilationIndex = 1
 local function CycleSlowMo()
     ExecuteInGameThread(function()
         dilationIndex = dilationIndex % #Config.TimeDilationSteps + 1
@@ -1519,8 +995,12 @@ local function CycleSlowMo()
         local ok, list = pcall(FindAllOf, "WorldSettings")
         if ok and list then
             for _, ws in ipairs(list) do
-                if pcall(function() ws.TimeDilation = target end) then
-                    count = count + 1
+                if safeValid(ws) then
+                    local okChange=battle:change("time:" .. ws:GetAddress(),
+                        function() checked(ws); return ws.TimeDilation end,
+                        function(value) checked(ws); ws.TimeDilation=value end,target,
+                        function(a,b) return type(a)=="number" and math.abs(a-b)<0.0001 end)
+                    if okChange then count=count+1 end
                 end
             end
         end
@@ -1537,6 +1017,7 @@ end
 -- Shipping 版的 DebugCameraController 没有自己的 CheatManager（被编译剔除），
 -- 而原生退出流程恰恰依赖它：现场构造一个再调 DisableDebugCamera。实测有效。
 local function ExitFreeCam(dcc)
+    checked(dcc)
     local cm = dcc.CheatManager
     if not cm or not cm:IsValid() then
         local cmClass = StaticFindObject("/Script/Engine.CheatManager")
@@ -1566,93 +1047,302 @@ local function FindActiveDebugCam()
     return nil
 end
 
+local observerGuard=ObserverGuard.new({log=log,getSpectator=function()return spectator end})
+local freeCamera=FreeCamera.new({path=Config.RuntimePath,log=log,getController=GetRealPlayerController,guard=observerGuard,
+    getWorld=UEHelpers.GetWorld,moveSpeed=Config.FreeCamera.MoveSpeed,mouseSensitivity=Config.FreeCamera.MouseSensitivity})
+
 local function ToggleFreeCam()
-    ExecuteInGameThread(function()
-        local dcc = FindActiveDebugCam()
-        if dcc then
-            local ok, err = pcall(ExitFreeCam, dcc)
-            log(ok and "自由镜头：已退出" or ("退出失败: " .. tostring(err)))
-            return
-        end
-        -- 必须用"真玩家控制器自己"的 CheatManager：FindFirstOf 会抓到
-        -- 我们之前在报废调试相机上构造的孤儿实例，指令会发给死对象
-        local ok, err = pcall(function()
-            local pc = GetRealPlayerController()
-            if not pc then error("real PlayerController not found") end
-            local cm = pc.CheatManager
-            if not cm or not cm:IsValid() then
-                local cmClass = StaticFindObject("/Script/Engine.CheatManager")
-                cm = StaticConstructObject(cmClass, pc)
-                if not cm or not cm:IsValid() then
-                    error("construct CheatManager failed")
-                end
-                pc.CheatManager = cm
-            end
-            cm:ToggleDebugCamera()
-        end)
-        log(ok and "自由镜头：已进入（再按一次退出）"
-               or ("自由镜头进入失败: " .. tostring(err)))
-    end)
+    local dcc=FindActiveDebugCam()
+    if dcc then local ok,why=pcall(ExitFreeCam,dcc);return {ok=ok,message=ok and '已退出原生调试镜头' or tostring(why),spawned_count=0}end
+    local ok,result=pcall(function()return freeCamera:toggle()end)
+    local confirmed=ok and result==true
+    local protection=observerGuard:status()
+    return {ok=confirmed,message=confirmed and (freeCamera:isActive() and (protection.health_verified and '自由观战已开启：无仇恨、隐身、无敌锁血；声音跟随镜头' or '自由观战已开启；锁血状态待确认，请查看面板保护状态') or '已退出自由观战并恢复')
+        or ('相机操作未确认，可点击退出观战重试：'..tostring(result)),spawned_count=0}
 end
 
 local function ForceExitFreeCam()
+    local ok,restored=pcall(function()return freeCamera:stop('面板/自定义退出键')end)
+    local dcc=FindActiveDebugCam();local legacyOK=true
+    if dcc then legacyOK=pcall(ExitFreeCam,dcc)end
+    return {ok=ok and restored==true and legacyOK,message=ok and restored==true and legacyOK and '已退出自由观战并恢复原状态' or '退出恢复待确认，可再次点击退出观战',spawned_count=0}
+end
+
+-- ---------- 只读攻击追踪 ----------
+local function LogProbeScene(label)
+    local player=GetPlayerPawn()
+    log("[Scene] " .. label .. " 玩家=" .. objectName(player) .. " HP=" .. tostring(GetHP(player)))
+    local origin=player and GetLocation(player)
+    local npcs=CollectNPCs()
+    if origin then
+        table.sort(npcs,function(a,b)
+            local la,lb=GetLocation(a),GetLocation(b)
+            return (la and DistSq(la,origin) or math.huge)<(lb and DistSq(lb,origin) or math.huge)
+        end)
+    end
+    local subjects = {}
+    if safeValid(player) then subjects[#subjects+1]=player end
+    for i=1,math.min(#npcs,4) do
+        local npc=npcs[i]
+        subjects[#subjects+1]=npc
+        log("[Scene] NPC=" .. objectName(npc) .. " HP=" .. tostring(GetHP(npc))
+            .. " 阵营=" .. ReadFactionTag(npc) .. " 对玩家=" .. RelationName(ReadRelation(npc,player)))
+    end
+    return subjects
+end
+local healthSubjects = {}
+probeFinished = function(state)
+    probeSampleGen=probeSampleGen+1
+    for _,entry in ipairs(healthSubjects) do
+        local hp=GetHP(entry.actor)
+        log("[HPWatch] 结束 " .. objectName(entry.actor) .. " start=" .. tostring(entry.initial)
+            .. " final=" .. tostring(hp) .. " reason=" .. tostring(state.reason))
+    end
+    healthSubjects={}
+end
+local function StartHealthWatch(subjects,token)
+    healthSubjects={}
+    for _,actor in ipairs(subjects) do
+        local hp=GetHP(actor)
+        healthSubjects[#healthSubjects+1]={actor=actor,initial=hp,last=hp}
+    end
+    local ticks,lines,handle=0,0,nil
+    local function cancel()
+        if handle then pcall(CancelDelayedAction,handle); handle=nil end
+    end
+    local function sample()
+        if token~=probeSampleGen or not probe:status().active then cancel(); return end
+        ticks=ticks+1
+        for _,entry in ipairs(healthSubjects) do
+            local hp=GetHP(entry.actor)
+            if hp~=entry.last and lines<40 then
+                log("[HPWatch] sample="..ticks.." "..objectName(entry.actor)
+                    .." HP="..tostring(entry.last).."→"..tostring(hp).."（只读，不据此判断伤害来源）")
+                lines=lines+1
+            end
+            entry.last=hp
+        end
+        if ticks>=60 then cancel() end
+    end
+    handle=LoopInGameThreadWithDelay(1000,sample)
+end
+BeginArenaObservation=function(a,b)
+    probe:stop("开始参赛者对照")
+    local subjects={a,b}
+    local player=GetPlayerPawn()
+    if safeValid(player) then subjects[#subjects+1]=player end
+    probeSampleGen=probeSampleGen+1
+    if probe:start("arena_duel",subjects) then StartHealthWatch(subjects,probeSampleGen) end
+end
+local function ToggleProbe()
     ExecuteInGameThread(function()
-        local dcc = FindActiveDebugCam()
-        if not dcc then
-            log("没有激活的 DebugCameraController，无需退出")
-            return
+        local state=probe:status()
+        probeSampleGen=probeSampleGen+1
+        if state.active or state.stopPending then
+            probe:stop("F11手动结束"); LogProbeScene("结束"); return
         end
-        local ok, err = pcall(ExitFreeCam, dcc)
-        if ok then
-            log("强制退出自由镜头：控制权已交还")
-        else
-            log("强制退出失败: " .. tostring(err) .. "（只能重启游戏了）")
-        end
+        local subjects=LogProbeScene("开始；只读阳性对照")
+        local ok=probe:start("native_baseline",subjects)
+        if not ok then return end
+        local token=probeSampleGen
+        StartHealthWatch(subjects,token)
+        ExecuteInGameThreadWithDelay(60050,function()
+            if token~=probeSampleGen then return end
+            LogProbeScene("60秒窗口结束")
+        end)
     end)
 end
+-- ---------- 单位控制器：按钮与快捷键共用，只有本Mod的参赛者受管理 ----------
+local runtimeSession=RuntimeSession.new({valid=safeValid,getWorld=UEHelpers.GetWorld,
+    getPlayer=GetPlayerPawn,isDestroying=actorIsDestroying,hp=GetHP})
+local spectatorTargets=SpectatorTargets.new({log=log})
+local spectatorExcluded={}
+spectator=SpectatorMode.new({log=log,valid=engineValid,getPlayer=GetPlayerPawn,path=Config.RuntimePath,
+    isActorDestroying=actorIsDestroying,
+    isObserverActive=function()return freeCamera:isActive()end,
+    releasePlayerTarget=function(npc,player)return spectatorTargets:release(npc,player)end,
+    getNPCs=function()
+        spectatorTargets:refresh()
+        local out={}
+        local world=UEHelpers.GetWorld()
+        for _,npc in ipairs(CollectNPCs()) do
+            if UEObserve.inWorld(npc,world) then
+                local ok,destroying=pcall(function() checked(npc); return npc:IsActorBeingDestroyed() end)
+                if not (ok and destroying==true) then out[#out+1]=npc end
+            else
+                local key=UEObserve.key(npc)
+                if key and not spectatorExcluded[key] then
+                    spectatorExcluded[key]=true;log('[Spectator] 跳过非当前世界对象：'..objectName(npc))
+                end
+            end
+        end
+        return out
+    end})
+arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=objectName,
+    actorKey=function(actor) checked(actor);return actor:GetAddress() end,
+    hp=function(actor) if spawnRoutes[actor]=='actor' then return nil end;return GetHP(actor) end,
+    hasCombatHealth=function(actor) return spawnRoutes[actor]~='actor' end,
+    canSpawn=SpawnPolicy.check,maxUnits=0,
+    spawnLimits=SpawnPolicy.limits,canBattle=SpawnPolicy.canBattle,
+    spawnGuard=spawnGuard,
+    combatReady=function(actor) return safeValid(actor) and spawnRoutes[actor]~='actor' and GetAIComp(actor)~=nil end,
+    getPlayer=GetPlayerPawn,getWorld=UEHelpers.GetWorld,getLocation=GetLocation,
+    getForward=function(actor) checked(actor); return actor:GetActorForwardVector() end,
+    spawnClass=SpawnViaAILib,
+    finishSpawn=FinishSpawnViaAILib,
+    activate=function(actor,unitPath)
+        if spawnRoutes[actor]=='actor' then return safeValid(actor),'通用Actor初始化完成；未调用PBZ战斗AI，不保证具有血量或战斗能力' end
+        spectator:applyTo(actor)
+        local activationRequested=FinishEntrance(actor)
+        if spectator:status().enabled_requested then spectatorTargets:refresh(true) end
+        spectator:applyTo(actor)
+        local ai=GetAIComp(actor)
+        local hp=GetHP(actor)
+        log("召唤激活读回 ControllerAI="..tostring(ai~=nil).." HP="..tostring(hp))
+        if activationRequested==true and ai~=nil and type(hp)=='number' and hp>0 then
+            local result=statMatch:onSpawn(actor,unitPath)
+            if not result.ok then
+                if result.rollback_verified then return true,'初始化通过；数值统一失败已回滚',result.message..'；单位保留原生数值，可正常交战' end
+                return false,'单位已生成；'..result.message..'；保留对象供清理'
+            end
+        end
+        if activationRequested and safeValid(actor) then
+            local inspected,inspectError=pcall(function() return spawnInspector:inspect(actor,UEHelpers.GetWorld()) end)
+            if not inspected then log('[SpawnInspect] 只读检查失败: '..tostring(inspectError)) end
+        end
+        return activationRequested==true and ai~=nil and type(hp)=="number" and hp>0,"仅确认初始化调用、AI组件和正HP；行为待验收"
+    end,
+    setRelation=SetFactionRelation,forceAttack=ForceAttack,
+    prepareBattle=function(members)return arenaGrabs:sync(members,Config.EnableNPCGrabs,true) end,
+    destroy=function(actor) checked(actor); actor:K2_DestroyActor() end,
+    isDestroying=actorIsDestroying,
+    restore=function()
+        probeSampleGen=probeSampleGen+1
+        probe:stop("停止参赛者")
+        if bossHUD then bossHUD:clear(true) end
+        local grabRestored=not arenaGrabs or arenaGrabs:restore()
+        local battleRestored=battle:reset("停止参赛者")
+        return grabRestored and battleRestored
+    end,
+    onUnitsChanged=function(units)
+        if statMatch then statMatch:roster(units) end
+        arenaActors={}
+        local routes={}
+        for _,entry in ipairs(units) do
+            arenaActors[#arenaActors+1]=entry.actor
+            arenaOwned[entry.actor]=true
+            routes[entry.actor]=spawnRoutes[entry.actor]
+        end
+        spawnRoutes=routes
+        if #arenaActors==0 and battle:pendingCount()==0 then arenaOwned={} end
+    end,
+    onBattleStarted=function(a,b)
+        StartDuelWatch(a,b)
+        BeginArenaObservation(a,b)
+    end})
 
--- ---------- 按键注册（映射见 config.lua 的 Keybinds） ----------
-
-local actions = {
-    Scan = ScanNPCs,
-    Infight = GlobalInfight,
-    Duel = DuelNearest,
-    Reset = ResetTeams,
-    SlowMo = CycleSlowMo,
-    FreeCam = ToggleFreeCam,
-    ForceExitCam = ForceExitFreeCam,
-    PlayerNeutral = TogglePlayerNeutral,
-    Summon = SummonSelected,
-}
-
-local bound = {}
-for name, keyName in pairs(Config.Keybinds) do
-    local key = Key[keyName]
-    if key and actions[name] then
-        RegisterKeyBind(key, actions[name])
-        table.insert(bound, string.format("%s=%s", keyName, name))
-    else
-        log(string.format("按键配置无效: %s = %s", name, tostring(keyName)))
+local summonLinks=SummonLinks.new({getWorld=UEHelpers.GetWorld,getNPCs=CollectNPCs,log=log})
+arenaActivity=ArenaActivity.new({log=log,isNPC=function(actor)return spawnRoutes[actor]~='actor' end,
+    freeCam=function()return freeCamera:isActive() or safeValid(FindActiveDebugCam()) end,
+    context=function()
+        local debugCamera=FindActiveDebugCam()
+        local original=UEObserve.field(debugCamera,'OriginalControllerRef')
+        local originalPawn=UEObserve.field(original,'Pawn')
+        local world=UEHelpers.GetWorld()
+        local level=UEObserve.field(world,'PersistentLevel')
+        local settings=UEObserve.field(level,'WorldSettings')
+        return 'mod_player='..tostring(UEObserve.key(GetPlayerPawn()))
+            ..' debug_original_pawn='..tostring(UEObserve.key(originalPawn))
+            ..' world_time='..tostring(UEObserve.field(settings,'TimeDilation'))
+            ..' cinematic_time='..tostring(UEObserve.field(settings,'CinematicTimeDilation'))
+    end})
+bossHUD=BossHUD.new({getController=GetRealPlayerController,getWorld=UEHelpers.GetWorld,hp=GetHP,
+    maxHP=function(actor)
+        if not engineValid(actor) then return nil end
+        local attributes=actor.AttributeSetBase
+        if not engineValid(attributes) then return nil end
+        return attributes.Health_Max.CurrentValue
+    end,
+    codexPath=Config.RuntimePath..'/codex.tsv',log=log})
+local arenaSupport={}
+statMatch=StatMatch.new({path=Config.RuntimePath,log=log})
+local grabStudy=Config.EnableGrabStudy and GrabStudy.new({path=Config.RuntimePath,log=log,ready=function()return runtimeSession:status().game_ready==true end}) or nil
+arenaGrabs=ArenaGrabs.new({path=Config.RuntimePath,log=log,hp=GetHP,ready=function()return runtimeSession:status().game_ready==true end})
+function arenaSupport:discover()
+    for _,link in ipairs(summonLinks:scan(arena:members())) do
+        local result=arena:adoptSummon(link.actor,link.parent,link.class_path,link.evidence)
+        if not result.ok then log('[SummonLinks] 接管未确认：'..tostring(result.message)) end
     end
 end
-if Key[Config.Keybinds.Summon] then
-    RegisterKeyBind(Key[Config.Keybinds.Summon], { ModifierKey.SHIFT }, CycleSummonClass)
+function arenaSupport:tick()
+    freeCamera:recover()
+    if grabStudy then grabStudy:tick() end
+    self:discover()
+    arenaActivity:sync(arena:members())
+    arenaGrabs:sync(arena:members(),Config.EnableNPCGrabs and arena:status().battle_active)
+    arena:tickReinforcements()
+    local state=arena:status().state
+    if state=='cleanup_pending' or state=='restore_pending' or state=='spawn_uncertain' then bossHUD:clear()
+    else bossHUD:sync(arena:members()) end
 end
-if Key[Config.Keybinds.Scan] then
-    RegisterKeyBind(Key[Config.Keybinds.Scan], { ModifierKey.SHIFT }, DumpBrain)
-end
-if Key[Config.Keybinds.Infight] then
-    RegisterKeyBind(Key[Config.Keybinds.Infight], { ModifierKey.SHIFT }, TargetDiag)
-end
-if Key[Config.Keybinds.Duel] then
-    RegisterKeyBind(Key[Config.Keybinds.Duel], { ModifierKey.SHIFT }, DumpCollisionMatrix)
+function arenaSupport:status()
+    local result=bossHUD:status();local activity=arenaActivity:status()
+    result.full_update_count=activity.full_update_count;result.bone_refresh_count=activity.bone_refresh_count;result.free_camera=activity.free_camera
+    local grabs=arenaGrabs:status()
+    result.grab_events=grabs.events;result.grab_pairs=grabs.observed_pairs;result.grab_restore_pending=grabs.restore_pending
+    local observer=observerGuard:status()
+    result.observer_health_verified=observer.health_verified;result.observer_message=observer.message
+    return result
 end
 
--- ---------- V2 仇恨矩阵（可选） ----------
+local keyRouter=KeyRouter.new({log=log})
+local unitKeys=UnitKeys.new({path=Config.RuntimePath,log=log,router=keyRouter,
+    reserved=function(vk)return panelRuntime and panelRuntime:unitKeyReserved(vk) end,
+    shared=function(vk)return panelRuntime and panelRuntime:unitKeyShared(vk) end,
+    ready=function()local status=runtimeSession:status();return status.game_ready,status.game_ready_reason end,
+    spawn=function(path)
+        local current=arena:status()
+        return arena:spawn(path,current.current_team,current.current_count)
+    end})
 
-if Config.EnableHatred then
-    Hatred.TryInstallHook(log)
+-- Developer probes are opt-in, never hidden default key reservations.
+if Config.EnableDeveloperKeybinds then
+RegisterKeyBind(Key.F1,{ModifierKey.SHIFT},DumpBrain)
+RegisterKeyBind(Key.F2,{ModifierKey.SHIFT},TargetDiag)
+RegisterKeyBind(Key.F3,{ModifierKey.SHIFT},DumpCollisionMatrix)
+RegisterKeyBind(Key.F9,{ModifierKey.SHIFT},function()
+    ExecuteInGameThread(function()
+        for _,path in ipairs(SpawnPolicy.knownPaths()) do
+            local result=arena:select(path,"blue",1)
+            log("验证目录切换="..tostring(result.ok).."；"..tostring(result.message))
+            break
+        end
+    end)
+end)
 end
+panelRuntime=PanelRuntime.new({arena=arena,exporter=exporter,path=Config.RuntimePath,
+    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
+    router=keyRouter,camera={status=function()return {active=freeCamera:isActive(),pending=freeCamera:hasPending()}end,
+        toggle=ToggleFreeCam,exit=ForceExitFreeCam},
+    spawnCatalog=SpawnCatalog.new({log=log,path=Config.RuntimePath,getWorld=UEHelpers.GetWorld}),
+    tableCatalog=TableCatalog.new({log=log,path=Config.RuntimePath,maps=worldMaps}),
+    references=ReferenceAudit.new({log=log,path=Config.RuntimePath})})
+panelRuntime:start()
 
-log("loaded ✓ 按键: " .. table.concat(bound, " / ")
-    .. " / Shift+" .. Config.Keybinds.Summon .. "=换怪")
+if ModRef then
+    ModRef.OnUnload=function()
+        freeCamera:silence()
+        panelRuntime:silence()
+        probeSampleGen=probeSampleGen+1
+        probe:silence("Mod卸载")
+        battle:cancel("Mod卸载")
+        if battle:pendingCount()>0 or #arenaActors>0 then
+            log("卸载时仍有参赛者或恢复记录；重载不会替代停止清理")
+        end
+        local spectatorState=spectator:status()
+        if spectatorState.pending_relations>0 or spectatorState.pending_flags>0 then
+            log("无仇恨快照尚未恢复；热重载前必须先关闭无仇恨并等待恢复读回")
+        end
+    end
+end
+log("loaded ✓ "..BUILD.."；全部功能键默认未绑定，可在面板自定义；自由观战包含无仇恨、隐身、无敌锁血及镜头收音。")
