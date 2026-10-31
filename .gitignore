@@ -7,6 +7,16 @@
 Dumps/
 Output/
 FModel/
+CXXHeaderDump/
+*.dmp
+Runtime/
+asset-key.bin
+*.decoded.bin
+decrypted-directory.tsv
+decrypted-directory-report.json
+directory-package-differences.json
+panel/static/disk_unit_index.js
+panel/static/disk_unit_index.js.tmp
 
 # UE4SS 运行产物
 UE4SS.log
@@ -16,3 +26,17 @@ UE4SS.log
 Thumbs.db
 desktop.ini
 .vs/
+__pycache__/
+*.py[cod]
+
+# 打包产物
+dist/
+
+# 本机编辑器/助手配置
+.claude/
+
+# 游戏资源包目录解密工具与方法：只留本地，不公开
+tools/decrypt_asset_directory.py
+tools/test_decrypt_directory.py
+tools/publish_disk_unit_index.py
+docs/DISK_DIRECTORY.md
