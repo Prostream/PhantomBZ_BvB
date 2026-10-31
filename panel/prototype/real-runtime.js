@@ -26,6 +26,8 @@ const RealRuntime = (() => {
     spectator: false,
     spectatorPhase: "",
     statMatch: { enabled: false, baseline: null, matched: 0, failures: 0, reset: false },
+    // spawn_difficulty_*: the level new units take (FOLLOW = the game's), the game's own level, counts.
+    difficulty: { level: "FOLLOW", game: "", supported: false, failures: 0, skipped: 0, aiFailed: 0 },
     fight: "idle",
     winner: "",
     // arena_state after a cleanup the mod could not confirm: cleanup_pending / restore_pending need
@@ -87,7 +89,7 @@ const RealRuntime = (() => {
       if (!game.has(name)) game.set(name, u.id);
       short.set(u.id, name);
       const k = u.unit_shortcut;
-      if (k && k.key_code) unitKeys[name] = { code: k.key_code, mods: k.modifiers || 0 };
+      if (k && k.key_code) unitKeys[name] = { code: k.key_code, mods: k.modifiers || 0, team: k.team || null, count: k.count || null };
     }
     toGame = game;
     toShort = short;
@@ -158,11 +160,20 @@ const RealRuntime = (() => {
       // stat_match.lua drops the baseline once the app holds no units; say so until something is summoned.
       if (base || !m.enabled) m.reset = false;
       else if (was.base && owned === 0) m.reset = true;
+      const d = s.difficulty;
+      d.supported = yes("spawn_difficulty_supported");
+      if (DIFFICULTIES.includes(v.spawn_difficulty)) d.level = v.spawn_difficulty;
+      d.game = v.spawn_difficulty_game || "";
+      d.failures = num("spawn_difficulty_failures");
+      d.skipped = num("spawn_difficulty_skipped");
+      // ai_difficulty.lua reads its override back on every unit; a failure means stats changed but the AI did not.
+      d.aiFailed = num("spawn_difficulty_ai_failed");
       s.scan = v.catalog_state === "scanning" ? { done: num("catalog_paths_done"), total: Math.max(1, num("catalog_paths_total")) } : null;
     } else {
       // Closing the game removes everything the mod spawned.
       Object.assign(s, { blue: 0, red: 0, neutral: 0, down: { blue: 0, red: 0, neutral: 0 }, unreadable: 0, freeCam: false, spectator: false, fight: "idle", winner: "", cleanup: "", synced: null, scan: null });
       Object.assign(s.statMatch, { baseline: null, matched: 0, failures: 0, reset: false });
+      s.difficulty.game = "";
       owned = 0;
     }
     const toggling = jobs.some(j => j.action === "toggle_spectator" && j.status === "pending");
@@ -202,6 +213,7 @@ const RealRuntime = (() => {
       sel: [s.game, s.cleanup, s.team, JSON.stringify(s.synced), s.spectator, s.statMatch.enabled, s.statMatch.baseline?.id, s.keys.spawn?.code, s.keys.spawn?.mods],
       solo: [s.game, s.neutral, s.down.neutral, s.spectator, s.spectatorPhase, s.freeCam],
       match: [s.game, JSON.stringify(s.statMatch)],
+      diff: [s.game, JSON.stringify(s.difficulty)],
       battle: [s.game, s.cleanup, s.blue, s.red, s.neutral, s.down.blue, s.down.neutral, s.unreadable, s.fight, owned, JSON.stringify([s.keys.start, s.keys.stop])],
       view: [s.game, s.spectator, s.spectatorPhase, s.freeCam, JSON.stringify([s.keys.toggle_camera, s.keys.toggle_spectator])],
       keys: [s.game, JSON.stringify(s.keys)],
@@ -228,6 +240,7 @@ const RealRuntime = (() => {
   // ---------- Commands ----------
   const online = () => ["notInMap", "ready", "mismatch"].includes(s.game);
   const ready = () => s.game === "ready" || s.game === "mismatch";
+  const DIFFICULTIES = ["FOLLOW", "EASY", "NORMAL", "HARD", "NIGHTMARE"];
   const wireKey = b => (b ? { key_code: b.code, modifiers: b.mods || 0 } : { key_code: 0, modifiers: 0 });
 
   async function command(action, payload = {}) {
@@ -236,7 +249,11 @@ const RealRuntime = (() => {
     if (action === "toggle_camera" && !s.freeCam && !ready()) throw fail("notInMap");
     let path = "/api/command", body;
     if (action === "spawn" || action === "select_unit") body = { action, unit_id: gameId(payload.unit_id), team: payload.team, count: payload.count };
-    else if (action === "configure_unit_key") body = { action, unit_id: gameId(payload.unit_id), key_code: payload.code || 0, modifiers: payload.code ? payload.mods || 0 : 0 };
+    else if (action === "configure_unit_key") {
+      body = { action, unit_id: gameId(payload.unit_id), key_code: payload.code || 0, modifiers: payload.code ? payload.mods || 0 : 0 };
+      if (payload.code && payload.team) Object.assign(body, { team: payload.team, count: payload.count });
+    }
+    else if (action === "set_spawn_difficulty") body = { action, difficulty: payload.difficulty };
     else if (action === "configure_keys") { path = "/api/keybinds"; body = Object.fromEntries(KEY_NAMES.map(k => [k, wireKey(payload.bindings[k])])); }
     else body = { action };
     const held = action === "stop" ? owned : action === "clear_neutral" ? s.neutral + s.down.neutral : 0;
@@ -255,6 +272,8 @@ const RealRuntime = (() => {
     });
     if (!done) return { ...job, status: "uncertain", code: "noAck" };
     if (held) done.cleared = Math.max(0, held - owned);
+    // The mod saved and read the choice back; show it before the next poll does.
+    if (action === "set_spawn_difficulty" && done.status === "succeeded") s.difficulty.level = payload.difficulty;
     return done;
   }
 

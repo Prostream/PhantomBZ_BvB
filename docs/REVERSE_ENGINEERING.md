@@ -392,3 +392,170 @@ v0.28.2改为实例原生Health_Min基础值写入，沿用已经核对的原位
 用户确认八项功能全部默认空白，原F6/F7/F2/F8接入面板，保存过的自定义配置保留；观战文案写明无仇恨、隐身和无敌锁血。实现统一宿主路由、八项配置与V2保存协议、原子替换/备份/回读、按主键跨功能和单位的占用检查、改绑与旧排队事件失效；关闭隐藏的开发按键。单独无仇恨语义保持，完整保护属于自由观战，并增加面板进入/退出按钮。
 
 功能键10项、runtime20项、桥接21项、后端53项、共享路由/单位/前端/main等检查通过。41Lua部署hash一致；用户手动重启两端，11:34:53游戏确认v0.30，API八项key_code均0、errors为空，旧单位键文件哈希不变。IAB原页面仍是旧四项下拉，助手刷新后确认新八项未绑定并展开设置。截图与原脚本保存在v030-custom-keys-20261031-113403。没有替用户选键或保存测试键，实际新绑定的游戏按键触发尚未由用户验收，不以离线检查代替。
+
+## v0.31.1：难度只读探查（2026-10-31，已实机读回）
+
+用户问召唤单位是否只按当前难度，能否切换难度。头文件与资产注册表的离线证据：
+
+- `EDifficultMode`：Handicapped=0、Easy=1、Normal=2、Hard=3、NightMare=4（ProjectPBZ_enums.hpp）。
+- 注册表有5个 `/PBZCombatAsset/Config/GlobalConfig_Combat_<难度>`（PDA_GlobalCombatConfig_C）和5个 `GlobalConfig_Combined_<难度>`。结构含 `Global Mob Level Offset`、`Global Mob Attribute Modifiers`、`Difficulty Settings By Mob Type`（按怪物类型标签给 `FPBZCharacterDifficultySettings`：AttributeModifiers + SkillTypeDataSetMultipliers）。`FGenericValueModifyData` 为 Type(枚举)+Value(float)。
+- `PDA_ActorConfig` 有 `Difficulty Tag`；`UPBZBlueprintFunctionLibrary` 有 `GetDifficulty`/`GetDiffcultMode`；伤害计算器有按难度的杀气比例表；BOSS召唤阈值按难度；AI行为树有 `BTDecorator_SwitchDifficulty`。推测：难度选择哪套全局配置，单位初始化时按自身难度标签取修正。行为树与伤害公式读全局难度，单只单位无法只靠属性修改完全换难度。以上为推测，待读回。
+
+新增 `difficulty_probe.lua`：游戏就绪后一次性记录 `GetDiffcultMode`/`GetDifficulty` 返回值、5套配置的标量与修正表（非常驻的4套用 LoadAsset 只读加载），以及首批登记单位类上含 Config/Difficult 的字段名和 `Difficulty Tag`。不写任何游戏对象。离线测试 `tools/test_difficulty_probe.lua` 使用拒绝写入的夹具通过；main启动、panel_runtime、单位键测试通过。42个Lua部署哈希一致，BUILD=v0.31.1-difficulty-probe。等待用户重载Mod后读取日志 `[DifficultyProbe]`。
+
+**实机读回（14:33:33，UE4SS.log 1633–1751）**：用户重载后探查一次跑完，`配置探查完成=true`、`单位字段探查完成=true`，没有写游戏对象。
+
+- 当前难度：`GetDiffcultMode` 和 `GetDifficulty` 都读回 1，即 **Easy**。
+- 5套 GlobalConfig_Combat 全部常驻（`已在内存=true 本次加载=false`），没有触发 LoadAsset。
+- 标量：Handicapped 的 Global Mob Level Offset=-1，Player Break Damage Multiplier=1.5，其余四档分别为0和1.0。Mob Break Duration 在 Handicapped/Easy 为3，Normal/Hard/Nightmare 为4。Mob Break Damage Multiplier 五档都是1.5。
+- Global Mob Attribute Modifiers（Type:Value，Type 1 看起来是乘数，Type 0 看起来是加值，未验证）：
+  - Easy：Health_Max 1:1.0、Shachi_Max 1:0.5、Attack 1:0.7、ShachiAttack 1:0.33、Resistance_ReflectShachi 0:-1.0，另有对应的 _Lv1 项。
+  - Normal：只有 ShachiAttack(_Lv1) 1:0.66。
+  - Handicapped/Hard/Nightmare：空。
+  - Global Player Attribute Modifiers 五档都为空。
+- Difficulty Settings By Mob Type（标签 `CharacterType.Difficulty.*`）：
+  - Easy/Normal/Hard/Nightmare 各7类，SkillTypeDataSetMultipliers 全为0条。
+  - Mob/Standard：Health_Max 在 Easy/Normal 为0.8，Hard/Nightmare 为1.0；Shachi_Max 0.4；ExecutionTargetBreakHealthThreshold 为0.4（Mob）或0.3（Standard）。
+  - Elite：Shachi_Max 0.6 和处决阈值，四档相同。
+  - MiniBoss/NormalBoss/GreatBoss/UltimateBoss：Shachi_Max 0.8、处决阈值、Resistance_ShachiWeaponShachi 0:0.5；Hard/Nightmare 另加 Resistance_ReflectShachi 0:0.2。
+  - Handicapped 只有4个BOSS类，各一项 Resistance_ShachiWeaponShachi 0:0.5。
+- **Hard 与 Nightmare 两张表逐项相同**。两者的差别不在这份配置里，候选位置是 `BTDecorator_SwitchDifficulty` 的AI分支、`AIScript_LevelOffset`/`GroupScript_Level*`/`PBZ_MobDomain` 的 `Offset By Difficulty` 等级偏移，以及 PBZCombatAsset 里按难度的杀气比例和召唤阈值表（未读）。
+- 单位字段：魔渊（BP_Monster_MoTian_C）有 `Actor Config`（Difficulty Tag=CharacterType.Difficulty.UltimateBoss）、`Sense Config Key Override`，以及 `Global Config Handicapped/Easy/Normal/Hard/Nightmare` 五个对象引用。推测每个角色自带5套配置引用，初始化时按当前难度取一套，再按自己的 Difficulty Tag 取类型修正。这是推测，没有验证生效时机。
+
+切换入口（头文件，未调用）：
+- 游戏设置菜单有 `UDemoSetting_Difficulty`（TryToApply、SetReallyDifficulty、ApplyInternal(Current,Target)）。
+- `UPBZGameSystem`（WorldSubsystem）有 `SetDifficultMode`/`SetDifficultMode_Setting` 和 `DifficultModeByte`。
+- `UPBZGameInstance.DifficultMode`；`UPBZSettingsShared` 有 `SetPendingDifficultMode`/`SetDifficultMode`。
+- `UPBZSaveLoadSubsystem.SetSaveGameDifficultyMode`；存档还记录 `GetCycleEndingDifficulty`/`CycleRecord`。
+
+所以由Mod直接改全局难度会写进玩家存档和周目记录，风险高于只改召唤单位。
+
+结论：
+- 召唤出来的单位确实按当前全局难度（现在是 Easy）取数值。斗蛐蛐双方都是怪物，全局修正对两边同比例生效。难度主要改变战斗节奏（Easy 攻击×0.7、杀气攻击×0.33）和杂兵与BOSS的相对血量（Easy/Normal 杂兵血×0.8）。
+- 按单位或按队伍换难度时，属性部分可以沿用数值统一已验证的属性写入路径：按两套配置的比值缩放 Health_Max/Shachi_Max/Attack/ShachiAttack。AI分支和伤害公式读的是全局难度，单只单位改不了。
+- 尚未验证：游戏自带菜单能否在游戏中途切换难度，以及切换后已在场和新召唤的单位是否更新。
+
+## v0.32.0：召唤难度下拉菜单（2026-10-31，数值已实机验证）
+
+用户看了游戏难度菜单（入阵者/破局者/逆天者/六十六天；六十六天与逆天者难度相同，只是死亡上限66次），要求做一个下拉菜单：选哪档，召唤出来的就是哪档数值。四档对应 EDifficultMode 的 Easy/Normal/Hard/NightMare，探查读回当前1=Easy与“入阵者”一致；Handicapped 未在菜单出现。英文官方名 Wayfarer/Pathbreaker/Hellwalker/Sixty-Six Days（外部攻略网站，非游戏内读取），其他语言界面沿用英文名。
+
+头文件新证据：`Global Config <难度>` 是蓝图变量（名字带空格），类型 `PDA_GlobalConfig_Combined_C`，定义在 `BP_RenewalNPC_C`（也在 BP_RenewalPlayer、BP_DamageInstigatorActor）。同一蓝图实现 GetGlobalCombatConfig、GetAttributeGlobalConfig、GetExecutionGlobalConfig、Get Global Combat Abilities Config、`Get Global Config` 等接口。推测原生组件通过这些接口按游戏难度从Actor自己的5个槽位取配置。
+
+做法（`spawn_difficulty.lua`）：
+- 不改全局难度、存档、类默认对象和配置资产。
+- 延迟生成后、FinishSpawn前，把这只新Actor自己的5个 `Global Config` 槽位都指向所选难度的那份配置（取自它自己原来的对应槽位），逐个读回地址。读回不全就恢复原值，按游戏难度继续生成，不阻止召唤。
+- 生成激活后再读回槽位，并记录 Health_Max/Shachi_Max/Attack/ShachiAttack 当前值。“跟随游戏”时也记录，便于同一单位跨难度对比。
+- 选择存 `Runtime/spawn-difficulty.tsv`（SpawnDifficultyV1，写入后读回）。面板命令 `set_spawn_difficulty`，令牌放在 key_spawn 列。状态行 `spawn_difficulty_*` 带游戏当前难度。
+- 移除了只读探查在 main 中的挂载（文件和测试保留）。
+
+验收方法：同一单位（魔渊）分别用“跟随游戏(入阵者)”和“逆天者”各召一只，比较日志 `[SpawnDifficulty] 出生属性`。按配置表，攻击应约为1/0.7，杀气攻击约为1/0.33。如果数值不变，说明属性不走这些槽位，改用按配置比值缩放的方案。离线测试：spawn_difficulty 5项、panel_runtime 21项、bridge 21项、main_boot（npc/actor）、后端55项通过。43个Lua部署哈希一致，BUILD=v0.32.0-spawn-difficulty。备份在 `影之刃0-backups/v032-spawn-difficulty-20261031-145425`。
+
+**实机读回（14:55–14:57，UE4SS.log 2987–3097）**：v0.32.0 加载后，用户在助手里选了六十六天（`设置读回 level=NIGHTMARE 游戏难度=Easy`），召唤了魔渊和阿花。两只的槽位写入读回都是5/5，生成后槽位读回也是5/5。对比同两类单位此前在 Easy 下的实机读数（StatMatch 基准日志，魔渊2次、阿花9次，数值一致）：
+
+| 单位 | 难度 | Health_Max | Shachi_Max | Attack | ShachiAttack |
+|---|---|---|---|---|---|
+| 魔渊 | Easy（游戏） | 12000 | 1200 | 84 | 39.6 |
+| 魔渊 | Nightmare（本Mod） | 12000 | 2400 | 120 | 120 |
+| 阿花 | Easy（游戏） | 9000 | 800 | 70 | 33 |
+| 阿花 | Nightmare（本Mod） | 9000 | 1600 | 100 | 100 |
+
+比值和配置表吻合：Attack ×1/0.7、ShachiAttack ×1/0.33、Shachi_Max ×2，血量不变。Shachi_Max ×2 = (1×0.8)/(0.5×0.8)，说明全局修正和类型修正是**相乘**的；如果按 GAS 的加法累计，比值会是 0.8/0.3≈2.67。两只都是BOSS类，BOSS的 Health_Max 在各难度都是1.0，所以血条不变。用户看血条以为没生效，其实是预期结果。杂兵类（Mob/Standard）的血量在 Easy 是0.8，在 Hard/Nightmare 是1.0，才会看出血量差别。
+
+结论：按单位切换难度的方法有效，游戏全局难度保持 Easy。AI 是否随之改变还没有证据。
+
+## v0.32.1：AI难度只读探查（2026-10-31，已实机读回）
+
+新证据：`PDA_GlobalConfig_Combined_C` 由 Combat/Mechanic/Technical 三个子配置组成，并提供 GetDecisionTreeOverride、GetAdditionalDecisionTrees、GetAbilityPool、GetStrategyConfig、GetDefaultAIScripts、GetDefaultParameterCollection(Pawn) 等AI相关取值函数。Combat 配置还有 `OverrideAIParameters`（FSGameAIParameterCollection：Bool/Int/Float/…/Name 共11张参数表）。行为树里的难度节点 `BTDecorator_SwitchDifficulty_C` 是**蓝图**装饰器（PerformConditionCheckAI(OwnerController, ControlledPawn)，字段 Difficulty），路径在 `/PBZCombatAsset/Prototypes/AI/`。
+
+`ai_difficulty_probe.lua`（只读）：
+- 游戏就绪后对比5档 Combined 的三个子配置引用、逐字段差异（结构体字段标为“未比较”），并列出每档的 OverrideAIParameters。
+- 开战后开150秒窗口，挂钩难度装饰器（蓝图单回调）以及 GetDiffcultMode/GetDifficulty（原生pre/post），按调用者类、节点难度、是否本Mod单位（队伍/难度）计数并各记一次首见。时间到注销挂钩，并输出计数汇总。不返回值，不写字段。
+- 离线测试用拒绝写入的夹具通过；main_boot（npc/actor）及全部Lua测试通过。44个Lua部署哈希一致（游戏目录与应用安装包），BUILD=v0.32.1-ai-difficulty-probe。
+
+**实机读回（UE4SS.log 自3701行 v0.32.1 加载起）**：用户重载后，用六十六天召了魔渊（蓝）和阿花（红），然后开战。
+
+- 数值再次读回：魔渊 12000/2400/120/120，阿花 9000/1600/100/100，与上一轮一致。
+- 配置对比只跑完 Combat Config 的前几个字段就中断：`attempt to compare number with boolean`。原因是 `U.field` 返回 (值, 读取标志)，第二个返回值被当成了 depth。已修复，并在测试里补了数组字段。已读到的差异：
+  - Mob Break Duration：3/3/4/4/4。
+  - Mob SimpleExe Break Duration：4/5.5/4/4/4。
+  - Player Break Duration：3/2/3/3/3。
+  - DynamicBreakAdditionalDuration：17/16/11/11/11。
+  - DynamicBreakReductionRate：0.012/0.01/0.014/0.014/0.014。
+  - **Deflect Perfect Window Frames：8/10/8/8/6**（Nightmare 的玩家完美格挡窗口比 Hard 更短，这是 Hard 和 Nightmare 第一处读到的差别）。
+  - Deflect Perfect Window Frames On Break：12/14/12/6/6。
+  - 以上顺序为 Handicapped/Easy/Normal/Hard/Nightmare。Mechanic/Technical 与 OverrideAIParameters 未读到。
+- 行为树装饰器 `BTDecorator_SwitchDifficulty_C` 在这两只单位上**未加载**（挂钩暂不可用）。它们实际用的是另外两个蓝图节点，头文件导出里都没有：
+  - `BTDecorator_AboveDifficulty_C`：实例在单位自己的AI控制器下，路径 `BP_PBZAIController_C_…​.SGameBehaviorTreeComponent.BTDecorator_AboveDifficulty_C_0`。
+  - `AICondition_AboveDifficulty_C`：在共享的技能池资产里，路径 `/PBZCombatAsset/ActorData/Mobs/042_AHua/AIConfig/AbilityPool_AHua_GuiTouDao_Normal…:AICondition_AboveDifficulty_C_8`。
+- 两者都调用 `UPBZBlueprintFunctionLibrary.GetDifficulty(ContextObject)`，调用会经过 Lua 挂钩。150秒窗口内共有 GetDifficulty 366 次、GetDiffcultMode 70 次，按上下文分：
+  - 阿花本体 159 次，魔渊本体 111 次（上下文就是本Mod单位，已识别为 red/Nightmare、blue/Nightmare）。
+  - AboveDifficulty 行为树节点 35 次（通过外层链识别为阿花）。
+  - 技能池条件 60 次（上下文是共享资产对象，无法归属到单位）。
+  - World 70 次（GetDiffcultMode）。
+  - 地图原生 BP_Renewal_Hun_C 1 次。
+- 推论：AI 的“难度高于X才做”判断走的是 GetDifficulty 这一个函数库入口。它返回的是全局难度（此前读回1=Easy），所以本Mod单位现在是 Nightmare 数值、Easy 的 AI 分支。要让它们使用逆天者的AI，可以只对归属本Mod单位的调用改写 GetDifficulty 的返回值。尚未验证的有两点：UE4SS 能否改写这个原生函数的返回值；技能池条件这类共享上下文的调用，怎样知道正在评估哪只单位。
+
+## v0.33.0：按单位改写AI难度查询（2026-10-31，后回调改写失败）
+
+用户确认要让召唤单位的AI也按所选难度行动。UE4SS 开发版文档（docs.ue4ss.com/dev，RegisterHook）写明：回调返回非nil值时，会转换成UE值并替换原函数的返回值；返回nil保持原值。`/Script/` 路径有前后两个回调。本机 UE4SS 是 v3.0.1-1185-gdff435dd 实验版，这个行为是否已包含要靠读回确认。
+
+`ai_difficulty.lua`：
+- 第一只带难度的单位出现后，才对 `PBZBlueprintFunctionLibrary:GetDifficulty` 和 `GetDiffcultMode` 注册前后回调。前回调为空，后回调只在上下文属于本Mod选了难度的单位时返回该单位的难度值（Easy=1…Nightmare=4）。
+- 归属判断：沿外层链最多8级查找，是本单位，或某级是控制器且 `K2_GetPawn` 是本单位。结果按地址缓存，每个tick清空。单位离场后，`spawn_difficulty:prune` 会删掉它的难度记录，避免地址复用后被误判。
+- 地图怪、玩家、World 一律返回nil，即保持游戏难度。共享技能池里的 `AICondition_AboveDifficulty_C` 无法归属到单位，不猜，只计数为“未归属”。
+- 读回：每只新单位在 Lua 中调用一次 `GetDifficulty(单位)`（期望为所选值）和 `GetDifficulty(World)`（期望为游戏值）。只读记录两个 AboveDifficulty 类的字段、函数及参数，以及首个实例的字段值，为后面处理共享条件做准备。每分钟输出一次计数汇总。
+- 只读探查的战斗窗口关闭，保留配置对比（已修复两返回值的bug）。
+- 离线：ai_difficulty 测试模拟 UE4SS 的后回调返回值，覆盖：未选难度不挂钩、读回、单位/控制器/行为树节点归属、地图怪与World不变、共享条件不猜、silence。全部Lua测试和后端55项通过。45个Lua部署哈希一致，BUILD=v0.33.0-ai-difficulty。
+
+**v0.33.0 实机读回（UE4SS.log 自800行加载）**：
+- 配置对比完整跑通。三个子配置中，Mechanic、Technical 五档共用同一个资产（`GlobalConfig_Mechanic`/`GlobalConfig_Technical`），只有 Combat 按难度分开，共16个字段不同。
+- **OverrideAIParameters 按难度不同**：
+  - Easy/Normal：autocombo权重=200、套路权重=100、非autocombo权重=200、非套路权重=600。
+  - Hard/Nightmare：autocombo权重=100、套路权重=100、非autocombo权重=400、非套路权重=400，另加 MetaAI-自动切换Leader最小/最大时间=2/4。
+  - Handicapped：空。
+  - 这张表在角色自己的 Combat 配置里，按单位换槽位后理论上会一起换。是否被AI读取尚未读回。
+- 其他差异：Player/Mob 破防时长、动态破防、格挡完美窗口（Nightmare 6帧，比 Hard 的8帧更短）、格挡快速点击惩罚、终极技充能倍率（Handicapped 特殊）、怪物等级偏移，以及已知的属性修正表。
+- 改写失败：两只单位（魔渊、阿花，均 Nightmare）的 Lua 读回 `GetDifficulty(单位)` 都返回1（期望4），World 返回1。一分钟汇总为改写=0、未归属=0。说明后回调（第三参数）对这个原生函数**从未执行**；v0.32.1 用前回调能观察到调用。不能据此断定返回值改写本身不可用。
+- 新证据：两个检查节点的类结构。
+  - `AICondition_AboveDifficulty_C.EvaluateCondition(AIController) → bool`。
+  - `BTDecorator_AboveDifficulty_C.PerformConditionCheckAI(OwnerController, ControlledPawn) → bool`。
+  - 两者的局部变量都是 GetDifficulty → ByteToInt ×2 → GreaterEqual_IntInt，即 `GetDifficulty(self) >= Difficulty字段`。共享技能池条件带有 AIController 参数，因此可以按参数归属到具体单位。
+
+## v0.33.1：前回调改写 + 直接改写两个检查节点（2026-10-31，已实机验证）
+
+- GetDifficulty/GetDiffcultMode 的前、后回调用同一套判断，都返回本单位的难度值，并分别计数哪个回调真的执行。
+- 两个蓝图检查节点在类加载后挂钩（非 /Script/ 路径，单回调在函数执行后运行）。按参数（共享条件用 AIController，行为树节点用 ControlledPawn）归属到本Mod单位，返回 `单位难度值 >= 节点Difficulty`。非本Mod单位返回nil。首次调用时记录全部参数的类型。
+- 读回：
+  - 每只单位在 Lua 中调用 `GetDifficulty(单位)` 和 `GetDifficulty(World)`，并附上前、后回调的计数。
+  - 每类检查节点记下第一次改写时的节点和参数，再用 Lua 用同样参数调用一次。日志给出期望值、返回值，以及游戏难度下应得的答案，并注明“可区分/不能区分”（门槛不高于游戏难度时两者相同）。
+- 离线：模拟 UE4SS 前后回调和蓝图单回调的返回值覆盖，测试覆盖：共享条件按控制器归属、地图怪用同一技能池仍按游戏、行为树节点、离场后恢复。全部Lua测试通过。45个Lua部署哈希一致，BUILD=v0.33.1-ai-difficulty-checks。
+
+**v0.33.1 实机读回（UE4SS.log 自800行加载）**：六十六天下召唤魔渊（蓝）、阿花（红），开战约两分钟。
+- **GetDifficulty 前回调改写生效**：Lua 读回 `GetDifficulty(魔渊)=4`、`GetDifficulty(阿花)=4`，`GetDifficulty(World)=1`，结果均为 true。
+- 前、后回调都会执行（各162次/370次），但后回调从未把上下文归属到单位，只有前回调的“改写”日志。结论：本机 UE4SS 采用的是**前回调的返回值**；后回调里拿不到可用的上下文参数。
+- 被改写的上下文：魔渊本体、阿花本体、`BTDecorator_AboveDifficulty_C`（经控制器归属到阿花）。
+- 检查节点：
+  - 行为树节点参数为 (BP_PBZAIController_C, 阿花)，共享技能池条件参数为 (BP_PBZAIController_C)，都能归属。两类节点的门槛都是 **3（Hard）**。
+  - Lua 用同样参数调用读回：期望 true、返回 true；按游戏难度应为 false，因此**可区分**，两类都通过。
+  - 两分钟累计：EvaluateCondition 61 次、PerformConditionCheckAI 36 次，全部改写为 true。改写共402次，读回成功4、失败0。
+- `GetDiffcultMode` 56次全部以 World 为上下文，无法归属，保持游戏难度。
+- 结论：召唤单位的“难度≥逆天者”判断（行为树分支和技能池条件）已按单位回答六十六天，游戏全局与地图怪保持入阵者。剩余未覆盖：以 World 为上下文的难度查询，以及原生 C++ 直接读取难度的代码（伤害计算器的难度表、BOSS召唤阈值、AIScript 等级偏移等）。用户是否看到逆天者新招式，尚未有画面确认。
+
+## v0.34.0：召唤难度含AI（2026-10-31）
+
+- 收尾：GetDifficulty 只在前回调返回难度值，后回调为空函数；读回日志改为“前回调计数”。只读探查 `ai_difficulty_probe.lua` 从 main 移除（文件和测试保留），避免每次加载都输出配置对比。
+- 状态行新增 `spawn_difficulty_ai`、`spawn_difficulty_ai_verified`、`spawn_difficulty_ai_failed`。读回失败时，界面在召唤难度下显示警告，说明只换了数值、出招仍按游戏难度。
+- 界面文案（六语）：选中难度时提示“之后召唤的单位按「X」生成”；说明改为“数值和AI的难度判断都按所选难度生效，不改存档难度”。
+- 全部Lua测试、panel_runtime 21项、后端55项通过。45个Lua部署哈希一致；应用的 ui/backend/payload 已同步，modBuild=v0.34.0-difficulty-ai。
+
+**v0.34.0 实机读回（15:41 加载，UE4SS.log 自1783行）**：用户在助手里选逆天者（`设置读回 level=HARD`），召唤魔渊、阿花并开战约三分钟。
+- 数值：两只的槽位都是5/5。魔渊 12000/2400/120/120，阿花 9000/1600/100/100，与六十六天一致（两档的数值表相同）。
+- AI：`GetDifficulty(魔渊)=3`、`GetDifficulty(阿花)=3`、`GetDifficulty(World)=1`。行为树节点和技能池条件的读回都是“门槛3，期望true，返回true，游戏难度下应为false（可区分）”。三分钟累计改写534次，读回成功4、失败0。后回调已改为空函数，日志里只有前回调计数，改写照常生效。
+- 结论：收尾版行为与 v0.33.1 一致，可作为 0.34.0 发布。
+
+发布前顺带修正了升级提示：老用户从 v0.30.0 更新助手后，游戏里的模组仍是旧版。原来的“版本不一致”横幅只给“检查更新”按钮（只能更新助手本身），提示文字还会显示成“vv0.30…”。现在改为：
+- 游戏未启动时，如果组件检查发现模组已装但版本旧，就显示“模组需要更新”。
+- 游戏运行中版本不一致时，按钮改为“更新模组”，跳到“设置 → 游戏”，那里的“一键安装”会整体替换模组。
+- 组件列表里旧版模组显示“需要更新”，不再显示“未安装”。
+- 六种语言同步更新，原型演示已核对。
+

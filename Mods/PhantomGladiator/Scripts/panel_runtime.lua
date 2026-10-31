@@ -51,6 +51,11 @@ function Runtime.new(options)
             if not options.statMatch then return {ok=false,message='数值统一模块未加载',spawned_count=0} end
             return options.statMatch:toggle()
         end,
+        -- The difficulty token travels in the key_spawn column (FOLLOW, EASY, NORMAL, HARD, NIGHTMARE).
+        set_spawn_difficulty=function(command)
+            if not options.spawnDifficulty then return {ok=false,message='召唤难度模块未加载',spawned_count=0} end
+            return options.spawnDifficulty:set(command.key_spawn)
+        end,
         start=function()
             local why=readyError(); if why then return {ok=false,message=why,spawned_count=0} end
             return options.arena:start()
@@ -94,6 +99,8 @@ function Runtime.new(options)
             if not options.unitKeys then return {ok=false,message='单位快捷键模块未加载',spawned_count=0} end
             local key=command.key_spawn=='UNBOUND' and 0 or tonumber((command.key_spawn or ''):match('^VK_(%d+)$'))
             local mask=tonumber((command.key_start or ''):match('^MOD_(%d+)$'))
+            -- FIXED in the key_stop column: the row's team and count belong to this unit's key.
+            if command.key_stop=='FIXED' then return options.unitKeys:configure(command.unit_id,key,mask,command.team,command.count) end
             return options.unitKeys:configure(command.unit_id,key,mask)
         end,
     }
@@ -150,6 +157,19 @@ function Runtime.new(options)
         out.stat_match_failures=matching.failures or 0
         out.stat_match_message=matching.message or ''
         out.stat_match_fields=matching.field_count or 0
+        local difficulty=options.spawnDifficulty and options.spawnDifficulty:status() or {}
+        out.spawn_difficulty_supported=not not options.spawnDifficulty
+        out.spawn_difficulty=difficulty.level or ''
+        out.spawn_difficulty_game=difficulty.game or ''
+        out.spawn_difficulty_applied=difficulty.applied or 0
+        out.spawn_difficulty_skipped=difficulty.skipped or 0
+        out.spawn_difficulty_failures=difficulty.failures or 0
+        out.spawn_difficulty_message=difficulty.message or ''
+        -- ai_difficulty.lua: whether the summoned units' AI checks answered their own level on readback.
+        local ai=options.aiDifficulty and options.aiDifficulty:status() or {}
+        out.spawn_difficulty_ai=ai.state or ''
+        out.spawn_difficulty_ai_verified=ai.verified or 0
+        out.spawn_difficulty_ai_failed=ai.failed or 0
         local unitKeys=options.unitKeys and options.unitKeys:status() or {}
         out.unit_keys_epoch=unitKeys.epoch or ''
         out.unit_keys_revision=unitKeys.revision or 0

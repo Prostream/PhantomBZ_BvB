@@ -1,8 +1,13 @@
 -- Per-unit keys. Saved data contains class paths and numeric keys, never Lua code.
+-- V2 rows also keep the unit's own team and count; a V1 row (or an empty field) follows the
+-- current panel selection, as every key did before.
 local Keys={}
 local KeyRouter=require('key_router')
 local RESERVED={[121]=true,[192]=true,[91]=true,[92]=true}
+local TEAMS={blue=true,red=true,neutral=true}
 local function integer(v,min,max)return type(v)=='number' and v==v and v%1==0 and v>=min and v<=max end
+local function teamOK(t)return t==nil or TEAMS[t]==true end
+local function countOK(c)return c==nil or integer(c,1,8) end
 local function pathOK(p)return type(p)=='string' and #p<=512 and p:match('^/[%w_/%-%.]+%.[%w_%-]+_C$') and not p:find('..',1,true) and not p:find('//',1,true) end
 local function clean(s)return tostring(s or ''):gsub('[\t\r\n]',' ')end
 local function read(path)
@@ -49,9 +54,11 @@ function Keys.new(options)
             self.event=self.event+1;self.lastUnit=unit
             local ok,ready,reason=pcall(options.ready)
             if not ok or ready~=true then self.message='未召唤：'..tostring(reason or '游戏未就绪');log('[UnitKeys] '..self.message);return end
-            local called,result=pcall(options.spawn,unit)
+            local current=self.active[vk]
+            local called,result=pcall(options.spawn,unit,current.team,current.count)
             self.message=called and type(result)=='table' and tostring(result.message) or '召唤返回未确认'
-            log('[UnitKeys] 单位快捷键 vk='..vk..' modifiers='..mask..' unit='..unit..'；读回='..self.message)
+            log('[UnitKeys] 单位快捷键 vk='..vk..' modifiers='..mask..' unit='..unit..' team='..tostring(current.team or '跟随当前')
+                ..' count='..tostring(current.count or '跟随当前')..'；读回='..self.message)
         end)
     end
     local function ensure(binding)
@@ -100,7 +107,7 @@ function Keys.new(options)
         self.active,self.errors={},{}
         for unit,entry in pairs(self.entries)do
             local ok,reason=ensure(entry)
-            if ok then self.active[entry.key_code]={unit_id=unit,key_code=entry.key_code,modifiers=entry.modifiers}
+            if ok then self.active[entry.key_code]={unit_id=unit,key_code=entry.key_code,modifiers=entry.modifiers,team=entry.team,count=entry.count}
             else self.errors[unit]=reason end
         end
         publish()
@@ -109,13 +116,19 @@ function Keys.new(options)
     function self:start()
         local data=read(filename)
         if data then
-            local rev=data:match('^UnitKeysV1\t(%d+)\r?\n');local parsed,seen={},{}
+            local version,rev=data:match('^UnitKeysV([12])\t(%d+)\r?\n');local parsed,seen={},{}
             local valid=integer(tonumber(rev),0,2147483646)
             for line in data:gmatch('[^\r\n]+')do
-                if not line:match('^UnitKeysV1\t')then
-                    local unit,key,mask=line:match('^([^\t]+)\t(%d+)\t(%d+)$');key,mask=tonumber(key),tonumber(mask)
-                    if not pathOK(unit) or not integer(key,1,255) or not integer(mask,0,7) or parsed[unit] or seen[key] then valid=false;break end
-                    parsed[unit]={key_code=key,modifiers=mask};seen[key]=true
+                if not line:match('^UnitKeysV[12]\t')then
+                    local unit,key,mask,team,count
+                    if version=='2' then unit,key,mask,team,count=line:match('^([^\t]+)\t(%d+)\t(%d+)\t(%a*)\t(%d*)$')
+                    else unit,key,mask=line:match('^([^\t]+)\t(%d+)\t(%d+)$') end
+                    key,mask=tonumber(key),tonumber(mask)
+                    if team=='' then team=nil end
+                    count=tonumber(count)
+                    if not pathOK(unit) or not integer(key,1,255) or not integer(mask,0,7) or not teamOK(team) or not countOK(count)
+                        or parsed[unit] or seen[key] then valid=false;break end
+                    parsed[unit]={key_code=key,modifiers=mask,team=team,count=count};seen[key]=true
                 end
             end
             if valid then self.entries=parsed;self.revision=tonumber(rev)
@@ -124,8 +137,9 @@ function Keys.new(options)
         rebuild();local total=0;for _ in pairs(supported)do total=total+1 end
         log('[UnitKeys] 已读取独立单位快捷键；默认无绑定；revision='..self.revision..' supported_keys='..total)
     end
-    function self:configure(unit,vk,mask)
+    function self:configure(unit,vk,mask,team,count)
         if not pathOK(unit) or not integer(vk,0,255) or not integer(mask,0,7) then return {ok=false,message='单位路径或按键格式无效',spawned_count=0} end
+        if not teamOK(team) or not countOK(count) then return {ok=false,message='单位快捷键的队伍或数量无效',spawned_count=0} end
         local proposal={};for path,entry in pairs(self.entries)do proposal[path]=entry end
         proposal[unit]=nil
         if vk>0 then
@@ -135,17 +149,21 @@ function Keys.new(options)
                     return {ok=false,message='这个主键已被单位「'..name..'」占用，请先解除该单位的绑定',spawned_count=0}
                 end
             end
-            local entry={key_code=vk,modifiers=mask};local ok,reason=ensure(entry)
+            local entry={key_code=vk,modifiers=mask,team=team,count=count};local ok,reason=ensure(entry)
             if not ok then return {ok=false,message=reason,spawned_count=0} end
             proposal[unit]=entry
         end
-        local revision=self.revision+1;local lines={'UnitKeysV1\t'..revision};local paths={}
+        local revision=self.revision+1;local lines={'UnitKeysV2\t'..revision};local paths={}
         for path in pairs(proposal)do paths[#paths+1]=path end;table.sort(paths)
-        for _,path in ipairs(paths)do local e=proposal[path];lines[#lines+1]=path..'\t'..e.key_code..'\t'..e.modifiers end
+        for _,path in ipairs(paths)do
+            local e=proposal[path]
+            lines[#lines+1]=path..'\t'..e.key_code..'\t'..e.modifiers..'\t'..(e.team or '')..'\t'..(e.count and tostring(e.count) or '')
+        end
         local saved=write(filename,table.concat(lines,'\n')..'\n')
         if not saved then return {ok=false,message='快捷键保存未读回，旧绑定保留',spawned_count=0} end
         self.entries,self.revision=proposal,revision;rebuild()
-        log('[UnitKeys] 保存并读回 unit='..unit..' key='..vk..' modifiers='..mask..' revision='..revision)
+        log('[UnitKeys] 保存并读回 unit='..unit..' key='..vk..' modifiers='..mask..' team='..tostring(team or '跟随当前')
+            ..' count='..tostring(count or '跟随当前')..' revision='..revision)
         return {ok=true,message=vk==0 and '已解除该单位快捷键' or '单位快捷键已注册并保存；在游戏内生效',spawned_count=0}
     end
     function self:status()return {epoch=self.epoch,revision=self.revision,event=self.event,unit=self.lastUnit,message=self.message}end

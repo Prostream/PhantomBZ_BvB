@@ -5,7 +5,7 @@ Bridge.__index = Bridge
 local MAX_INBOX, MAX_JOURNAL, MAX_MESSAGE = 2048, 2097152, 512
 local ACTIONS = { spawn = true, start = true, stop = true, refresh_catalog = true,
     configure_keys = true,configure_unit_key=true, select_unit = true, toggle_spectator = true,clear_neutral=true,toggle_stat_match=true,
-    toggle_camera=true,exit_camera=true,cycle_team=true }
+    toggle_camera=true,exit_camera=true,cycle_team=true,set_spawn_difficulty=true }
 local ACK_STATUS = { ok = true, error = true, uncertain = true }
 
 local function clean(value, limit)

@@ -31,7 +31,9 @@ _taxonomy_module = importlib.util.module_from_spec(_taxonomy_spec)
 _taxonomy_spec.loader.exec_module(_taxonomy_module)
 
 DEFAULT_RUNTIME = Path(r"D:\steam\steamapps\common\PBZ\platform\steam\ue4ss\Mods\PhantomGladiator\Runtime")
-ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team"}
+ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty"}
+# FOLLOW keeps the game difficulty; the others are the game's own four levels (spawn_difficulty.lua).
+SPAWN_DIFFICULTIES = ("FOLLOW", "EASY", "NORMAL", "HARD", "NIGHTMARE")
 LEGACY_BINDING_NAMES = ("spawn", "start", "stop", "refresh_catalog")
 BINDING_NAMES = LEGACY_BINDING_NAMES + ("toggle_camera", "exit_camera", "cycle_team", "toggle_spectator")
 BINDING_LABELS = dict(zip(BINDING_NAMES, ("召唤所选单位", "开始交战", "停止并清理", "刷新单位目录", "自由观战（无仇恨＋隐身＋无敌锁血）", "退出自由观战并恢复", "切换召唤队伍", "单独切换无仇恨")))
@@ -342,15 +344,19 @@ class Bridge:
             source=bounded_read(self._path('unit-keybinds.tsv'),2*1024*1024)
             if source is None:return {},[]
             rows=tsv_rows(source);header=next(rows,[])
-            if len(header)!=2 or header[0]!='UnitKeysV1' or not header[1].isdigit():raise ValidationError('invalid unit key header')
+            if len(header)!=2 or header[0] not in ('UnitKeysV1','UnitKeysV2') or not header[1].isdigit():raise ValidationError('invalid unit key header')
+            # V2 rows add the unit's own team and count; empty fields (and V1 rows) follow the current selection.
+            columns=5 if header[0]=='UnitKeysV2' else 3
             revision=header[1];result={};seen=set()
             for row in rows:
                 if not row:continue
-                if len(row)!=3:raise ValidationError('invalid unit key row')
-                unit,key,mask=row;clean_field(unit,'unit key path',512)
+                if len(row)!=columns:raise ValidationError('invalid unit key row')
+                unit,key,mask=row[:3];clean_field(unit,'unit key path',512)
                 vk,mod=int(key),int(mask)
+                team,count=(row[3] or None,int(row[4]) if row[4] else None) if columns==5 else (None,None)
+                if team not in (None,'blue','red','neutral') or not (count is None or 1<=count<=8):raise ValidationError('invalid unit key team or count')
                 if not 1<=vk<=255 or not 0<=mod<=7 or unit in result or vk in seen:raise ValidationError('invalid or duplicated unit key')
-                seen.add(vk);result[unit]={'key_code':vk,'modifiers':mod,'active':False,'message':'等待游戏确认'}
+                seen.add(vk);result[unit]={'key_code':vk,'modifiers':mod,'team':team,'count':count,'active':False,'message':'等待游戏确认'}
             status=bounded_read(self._path('unit-keybinds-state.tsv'),2*1024*1024)
             if status:
                 states=tsv_rows(status);meta=next(states,[])
@@ -623,10 +629,17 @@ class Bridge:
                 raise ValidationError("该单位处于单只测试阶段，数量必须为 1")
             payload.update(unit_id=unit_id, team=team, count=count)
         elif action == 'configure_unit_key':
-            allowed|={'unit_id','key_code','modifiers'}
+            allowed|={'unit_id','key_code','modifiers','team','count'}
             unit_id=clean_field(request.get('unit_id'),'unit_id',512)
             if len(unit_id.encode('utf-8'))>MAX_UNIT_ID_BYTES:raise ValidationError('unit_id exceeds byte limit')
-            if not any(u['id']==unit_id for u in self.catalog()['units']):raise ValidationError('unit is not in the catalogue')
+            unit=next((u for u in self.catalog()['units'] if u['id']==unit_id),None)
+            if unit is None:raise ValidationError('unit is not in the catalogue')
+            # Team and count come together: the key then summons this unit there, whatever the panel shows.
+            if 'team' in request or 'count' in request:
+                team,count=request.get('team'),request.get('count')
+                if team not in {'blue','red','neutral'}:raise ValidationError('team must be blue, red or neutral')
+                if type(count) is not int or not 1<=count<=min(8,unit.get('max_count',8)):raise ValidationError('count must be an integer from 1 to 8')
+                payload.update(team=team,count=count)
             vk=request.get('key_code');mods=request.get('modifiers',0)
             if type(vk) is not int or not 0<=vk<=255 or type(mods) is not int or not 0<=mods<=7:raise ValidationError('invalid key or modifiers')
             entry=parse_binding({'key_code':vk,'modifiers':mods})
@@ -636,6 +649,12 @@ class Bridge:
                 for name,binding in self.function_keybinds()['bindings'].items():
                     if binding['key_code']==vk:raise ValidationError('该键已被功能「'+BINDING_LABELS[name]+'」占用')
             payload.update(unit_id=unit_id,key_code=vk,modifiers=mods if vk else 0)
+        elif action == 'set_spawn_difficulty':
+            allowed.add('difficulty')
+            difficulty = request.get('difficulty')
+            if difficulty not in SPAWN_DIFFICULTIES:
+                raise ValidationError('difficulty must be one of ' + ', '.join(SPAWN_DIFFICULTIES))
+            payload['difficulty'] = difficulty
         elif action == "configure_keys":
             allowed.add("bindings")
             bindings = request.get("bindings")
@@ -694,6 +713,9 @@ class Bridge:
         if payload['action']=='configure_unit_key':
             bindings={'spawn':'VK_'+str(payload['key_code']) if payload['key_code'] else 'UNBOUND',
                       'start':'MOD_'+str(payload['modifiers'])}
+            if 'team' in payload:bindings['stop']='FIXED'
+        elif payload['action']=='set_spawn_difficulty':
+            bindings={'spawn':payload['difficulty']}
         fields = [str(row["id"]), payload["action"], payload.get("unit_id", ""),
                   payload.get("team", "blue"), str(payload.get("count", 1))]
         if payload['action']=='configure_keys':

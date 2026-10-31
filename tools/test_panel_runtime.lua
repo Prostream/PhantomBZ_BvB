@@ -349,6 +349,20 @@ test("stat matching toggle uses native settings and status; missing module fails
     local missing=harness();missing.runtime:start();missing.inbox={action='toggle_stat_match'};missing:tick()
     assert(not missing.result.ok and missing.reported.stat_match_supported==false)
 end)
+test("spawn difficulty takes its token from the key_spawn column and reports the game difficulty",function()
+    local h=harness();local level='FOLLOW'
+    local difficulty={set=function(_,token)
+        assert(h.inGame);level=token;return {ok=true,message='fixture difficulty',spawned_count=0}
+    end,status=function()return {level=level,game='Easy',applied=1,skipped=0,failures=0,message='m'}end}
+    local ai={status=function()return {state='running',verified=4,failed=0}end}
+    h.runtime=h.new({spawnDifficulty=difficulty,aiDifficulty=ai});h.runtime:start()
+    h.inbox={action='set_spawn_difficulty',key_spawn='HARD'};h:tick()
+    assert(h.result.ok and level=='HARD' and h.reported.spawn_difficulty=='HARD' and h.reported.spawn_difficulty_game=='Easy')
+    assert(h.reported.spawn_difficulty_ai=='running' and h.reported.spawn_difficulty_ai_verified==4 and h.reported.spawn_difficulty_ai_failed==0)
+    assert(h.reported.spawn_difficulty_supported and h.reported.spawn_difficulty_applied==1)
+    local missing=harness();missing.runtime:start();missing.inbox={action='set_spawn_difficulty',key_spawn='HARD'};missing:tick()
+    assert(not missing.result.ok and missing.reported.spawn_difficulty_supported==false)
+end)
 
 test('camera buttons and configured keys use synchronous game-thread handlers; exit survives loading',function()
     local h=harness();local active=false;local toggles,exits=0,0

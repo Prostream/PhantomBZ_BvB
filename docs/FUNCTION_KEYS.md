@@ -17,3 +17,13 @@
 IAB一度保留旧页面，刷新后已展开新版八项，均显示“未绑定”。截图保存于`D:\Claude CODE\影之刃0-backups\v030-custom-keys-20261031-113403\function-keys-empty.jpg`。没有替用户选择或保存按键，没有操作游戏。用户对耗时提出意见，已停止扩大验证范围。
 
 备份：`D:\Claude CODE\影之刃0-backups\v030-custom-keys-20261031-113403`。后台重启仍由用户执行，未重启游戏或发布仓库。
+
+## v0.31 单位键记住自己的阵营和数量
+
+用户要求：每张卡片的单位键各自召唤到自己的阵营，在面板上选中该单位、切换上面的阵营（或数量）后，再按它的键就召唤到新阵营。
+
+- `unit_keybinds.lua`：保存格式升到 `UnitKeysV2`，每行 `路径\t键\t修饰\t阵营\t数量`；阵营/数量为空，或读到旧的 `UnitKeysV1`，就沿用面板当前选择（与 v0.30 行为一致）。按键回调把该键自己的阵营和数量交给 `main.lua` 的 spawn，空值才回退到 `arena:status()` 的当前选择。
+- 指令仍是 10 列 schema1：`configure_unit_key` 借用已有的 team、count 列，`key_stop` 列写 `FIXED` 表示这两列属于该单位键；旧面板不带阵营时 `key_stop` 为空，保持跟随当前选择。`panel_bridge.lua` 未改。
+- `backend.py`：`configure_unit_key` 可带 `team`+`count`（必须同时出现）；解析 V1/V2 文件并在目录的 `unit_shortcut` 里返回 team/count。
+- 界面：绑定时记下当前阵营和数量；选中有单位键的单位时面板切到它的阵营；在面板上切换阵营或数量会在 0.4 秒后重存该单位键。
+- 检查：`tools/test_unit_keybinds.lua`（新增阵营/数量、改队重存、非法值拒绝、V2 重载、V1 兼容）、panel_runtime 20 项、bridge 22 项、arena、共享按键路由、功能键、main 启动、后端 54 项全部通过。41 个 Lua 已部署，哈希一致；部署前备份在 `D:\Claude CODE\影之刃0-backups\v031-unit-teams-20261031-142336`。尚未实机按键验收。

@@ -169,6 +169,18 @@ class BridgeTests(unittest.TestCase):
             self.assertEqual(len(columns), 14 if action=='configure_keys' else 10)
             self.assertEqual(columns[3:5], ["blue", "1"])
 
+    def test_spawn_difficulty_travels_in_the_spawn_key_column(self):
+        for difficulty in backend.SPAWN_DIFFICULTIES:
+            command = self.bridge.enqueue({"action": "set_spawn_difficulty", "difficulty": difficulty})
+            columns = self.bridge._wire({"id": command["id"], "payload": json.dumps(command["payload"])}).rstrip("\n").split("\t")
+            self.assertEqual(columns[1:6], ["set_spawn_difficulty", "", "blue", "1", difficulty])
+            self.assertEqual(len(columns), 10)
+        for bad in ({"action": "set_spawn_difficulty"}, {"action": "set_spawn_difficulty", "difficulty": "hard"},
+                    {"action": "set_spawn_difficulty", "difficulty": "HANDICAPPED"},
+                    {"action": "set_spawn_difficulty", "difficulty": "HARD", "unit_id": UNIT}):
+            with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
+                self.bridge.enqueue(bad)
+
     def test_invalid_ack_keeps_command_pending_and_preserves_inbox(self):
         command = self.spawn()
         self.bridge.tick()
@@ -496,6 +508,24 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(errors,[]);self.assertFalse(bindings[UNIT]['active'])
         bindings,errors=self.bridge._unit_shortcuts('new-epoch')
         self.assertTrue(bindings[UNIT]['active'])
+
+    def test_unit_key_can_carry_its_own_team_and_count(self):
+        request={'action':'configure_unit_key','unit_id':UNIT,'key_code':81,'modifiers':0,'team':'red','count':2}
+        job=self.bridge.enqueue(request)
+        wire=self.bridge._wire({'id':job['id'],'payload':json.dumps(job['payload'])}).strip().split('\t')
+        self.assertEqual(wire[3:8],['red','2','VK_81','MOD_0','FIXED']);self.assertEqual(len(wire),10)
+        legacy=self.bridge.enqueue({'action':'configure_unit_key','unit_id':UNIT,'key_code':69,'modifiers':0})
+        self.assertEqual(self.bridge._wire({'id':legacy['id'],'payload':json.dumps(legacy['payload'])}).split('\t')[7],'',
+                         'a key without a team keeps following the panel selection')
+        for bad in ({'team':'green','count':1},{'team':'red','count':9},{'team':'red'},{'count':2}):
+            with self.assertRaises(backend.ValidationError):
+                self.bridge.enqueue({'action':'configure_unit_key','unit_id':UNIT,'key_code':81,'modifiers':0,**bad})
+        self.write('unit-keybinds.tsv','UnitKeysV2\t3\n'+UNIT+'\t81\t0\tneutral\t3\n')
+        bindings,errors=self.bridge._unit_shortcuts('')
+        self.assertEqual(errors,[]);self.assertEqual((bindings[UNIT]['team'],bindings[UNIT]['count']),('neutral',3))
+        self.write('unit-keybinds.tsv','UnitKeysV2\t4\n'+UNIT+'\t81\t0\t\t\n')
+        bindings,errors=self.bridge._unit_shortcuts('')
+        self.assertEqual(errors,[]);self.assertEqual((bindings[UNIT]['team'],bindings[UNIT]['count']),(None,None))
 
     def test_missing_codex_uses_explicit_working_translation_and_keeps_identifiers(self):
         result = self.bridge.catalog()

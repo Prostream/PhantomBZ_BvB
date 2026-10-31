@@ -28,6 +28,10 @@ const MockRuntime = (() => {
   }
   let savedMatch = false;
   try { savedMatch = localStorage.getItem(MATCH_KEY) === "true"; } catch { /* storage may be unavailable */ }
+  // Summon difficulty mirrors spawn_difficulty.lua: saved like Runtime/spawn-difficulty.tsv; the game plays on Easy.
+  const DIFF_KEY = "pg-proto.difficulty";
+  let savedDiff = "FOLLOW";
+  try { savedDiff = localStorage.getItem(DIFF_KEY) || "FOLLOW"; } catch { /* storage may be unavailable */ }
   const s = {
     game: "ready",              // offline | connecting | notInMap | ready | mismatch
     gameRunning: true,          // the updater refuses to replace mod files while the game runs
@@ -43,6 +47,8 @@ const MockRuntime = (() => {
     spectatorPhase: "",         // "" | "switching" | "restoring"
     // baseline: { id, hp, shachi, atk, satk } spawn stats; reset: cleared because the field emptied
     statMatch: { enabled: savedMatch, baseline: null, matched: 0, failures: 0, reset: false },
+    // level: FOLLOW | EASY | NORMAL | HARD | NIGHTMARE for new units; game: the game's own level
+    difficulty: { level: savedDiff, game: "Easy", supported: true, failures: 0, skipped: 0, aiFailed: 0 },
     fight: "idle",              // idle | fighting | ended
     winner: "",                 // blue | red | draw
     cleanup: "",                // "" | restore_pending (one more cleanup) | spawn_uncertain (restart the game)
@@ -136,6 +142,10 @@ const MockRuntime = (() => {
         s.down.neutral = 0;
         releaseBaseline();
         return;
+      case "set_spawn_difficulty":
+        s.difficulty.level = p.difficulty;
+        try { localStorage.setItem(DIFF_KEY, p.difficulty); } catch { /* ignore */ }
+        return;
       case "toggle_stat_match":
         // Either direction re-picks the baseline; units already on the field keep their numbers.
         Object.assign(s.statMatch, { enabled: !s.statMatch.enabled, baseline: null, matched: 0, failures: 0, reset: false });
@@ -160,7 +170,7 @@ const MockRuntime = (() => {
         setFreeCam(false);
         return;
       case "configure_unit_key":
-        if (p.code) s.unitKeys[p.unit_id] = { code: p.code, mods: p.mods };
+        if (p.code) s.unitKeys[p.unit_id] = { code: p.code, mods: p.mods, team: p.team || null, count: p.count || null };
         else delete s.unitKeys[p.unit_id];
         return;
       case "refresh_catalog":

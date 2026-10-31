@@ -36,6 +36,8 @@ local StatMatch = require('stat_match')
 local ObserverGuard = require('observer_guard')
 local SpectatorTargets = require('spectator_targets')
 local KeyRouter = require('key_router')
+local SpawnDifficulty=require('spawn_difficulty')
+local AIDifficulty=require('ai_difficulty')
 
 local MOD = "[PhantomGladiator]"
 local runLogPath=Config.RuntimePath..'/run-'..os.date('%Y%m%d-%H%M%S')..'.log'
@@ -58,7 +60,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.30-custom-keys"
+local BUILD = "v0.34.0-difficulty-ai"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -101,6 +103,7 @@ local bossHUD
 local arenaActivity
 local arenaGrabs
 local statMatch
+local spawnDifficulty
 local BeginArenaObservation
 local spawnAudit=SpawnAudit.new(Config.RuntimePath.."/spawn-attempts.tsv",log)
 local spawnGuard=SpawnGuard.new()
@@ -488,6 +491,8 @@ local function FinishSpawnViaAILib(pawn,t,world)
     local route=spawnRoutes[pawn]
     if route~='npc' and route~='actor' then return false,'生成路径未登记，保留清理记录' end
     if route=='npc' and arenaActivity then arenaActivity:prepare(pawn) end
+    -- The app's chosen difficulty goes into this actor's own config slots before it initialises.
+    if route=='npc' and spawnDifficulty then spawnDifficulty:prepare(pawn,objectName(pawn)) end
     local lib=route=='npc' and GetAILib() or StaticFindObject('/Script/Engine.Default__GameplayStatics')
     if not safeValid(lib) then return false,"FinishSpawn函数库不可用，保留清理记录" end
     if not spawnAudit:record("finish_spawn_begin",objectName(pawn),"所有权已登记；"..objectName(world)) then
@@ -1199,6 +1204,8 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
         local ai=GetAIComp(actor)
         local hp=GetHP(actor)
         log("召唤激活读回 ControllerAI="..tostring(ai~=nil).." HP="..tostring(hp))
+        local verified,verifyError=pcall(function()spawnDifficulty:verify(actor,unitPath)end)
+        if not verified then log('[SpawnDifficulty] 生成后读回失败: '..tostring(verifyError)) end
         if activationRequested==true and ai~=nil and type(hp)=='number' and hp>0 then
             local result=statMatch:onSpawn(actor,unitPath)
             if not result.ok then
@@ -1266,6 +1273,8 @@ bossHUD=BossHUD.new({getController=GetRealPlayerController,getWorld=UEHelpers.Ge
     codexPath=Config.RuntimePath..'/codex.tsv',log=log})
 local arenaSupport={}
 statMatch=StatMatch.new({path=Config.RuntimePath,log=log})
+spawnDifficulty=SpawnDifficulty.new({path=Config.RuntimePath,log=log,getWorld=UEHelpers.GetWorld,
+    ready=function()return runtimeSession:status().game_ready==true end})
 local grabStudy=Config.EnableGrabStudy and GrabStudy.new({path=Config.RuntimePath,log=log,ready=function()return runtimeSession:status().game_ready==true end}) or nil
 arenaGrabs=ArenaGrabs.new({path=Config.RuntimePath,log=log,hp=GetHP,ready=function()return runtimeSession:status().game_ready==true end})
 function arenaSupport:discover()
@@ -1274,7 +1283,15 @@ function arenaSupport:discover()
         if not result.ok then log('[SummonLinks] 接管未确认：'..tostring(result.message)) end
     end
 end
+-- Units summoned at a chosen difficulty also get that difficulty when their AI asks for it.
+local aiDifficulty=AIDifficulty.new({log=log,getWorld=UEHelpers.GetWorld,
+    ready=function()return runtimeSession:status().game_ready==true end,members=function()return arena:members()end,
+    levelOf=function(actor)return spawnDifficulty:levelOf(actor)end,levelOfKey=function(key)return spawnDifficulty:levelOfKey(key)end})
 function arenaSupport:tick()
+    local memberKeys={}
+    for _,entry in ipairs(arena:members())do local key=UEObserve.key(entry.actor);if key then memberKeys[key]=true end end
+    spawnDifficulty:prune(memberKeys)
+    aiDifficulty:tick()
     freeCamera:recover()
     if grabStudy then grabStudy:tick() end
     self:discover()
@@ -1300,9 +1317,10 @@ local unitKeys=UnitKeys.new({path=Config.RuntimePath,log=log,router=keyRouter,
     reserved=function(vk)return panelRuntime and panelRuntime:unitKeyReserved(vk) end,
     shared=function(vk)return panelRuntime and panelRuntime:unitKeyShared(vk) end,
     ready=function()local status=runtimeSession:status();return status.game_ready,status.game_ready_reason end,
-    spawn=function(path)
+    -- A unit key carries its own team and count; a key saved before that follows the panel selection.
+    spawn=function(path,team,count)
         local current=arena:status()
-        return arena:spawn(path,current.current_team,current.current_count)
+        return arena:spawn(path,team or current.current_team,count or current.current_count)
     end})
 
 -- Developer probes are opt-in, never hidden default key reservations.
@@ -1321,7 +1339,7 @@ RegisterKeyBind(Key.F9,{ModifierKey.SHIFT},function()
 end)
 end
 panelRuntime=PanelRuntime.new({arena=arena,exporter=exporter,path=Config.RuntimePath,
-    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
+    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,spawnDifficulty=spawnDifficulty,aiDifficulty=aiDifficulty,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
     router=keyRouter,camera={status=function()return {active=freeCamera:isActive(),pending=freeCamera:hasPending()}end,
         toggle=ToggleFreeCam,exit=ForceExitFreeCam},
     spawnCatalog=SpawnCatalog.new({log=log,path=Config.RuntimePath,getWorld=UEHelpers.GetWorld}),
@@ -1335,6 +1353,7 @@ if ModRef then
         panelRuntime:silence()
         probeSampleGen=probeSampleGen+1
         probe:silence("Mod卸载")
+        aiDifficulty:silence("Mod卸载")
         battle:cancel("Mod卸载")
         if battle:pendingCount()>0 or #arenaActors>0 then
             log("卸载时仍有参赛者或恢复记录；重载不会替代停止清理")

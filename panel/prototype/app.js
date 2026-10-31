@@ -116,6 +116,8 @@
     return [(mods & 1) && "Ctrl", (mods & 2) && "Alt", (mods & 4) && "Shift", base].filter(Boolean).join("+");
   }
   const keyLabel = b => (b ? vkLabel(b.code, b.mods) : "");
+  // What a unit key summons: its own team and count, or (keys saved before that) the current selection.
+  const unitKeyUses = k => (!k.team ? t("keys.unit.follow") : k.team === "neutral" ? t("keys.unit.usesNeutral", { n: k.count || 1 }) : t("keys.unit.uses", { team: teamName(k.team), n: k.count || 1 }));
   const keyCap = (b, cls = "") => (b ? kbd(keyLabel(b), cls) : "");
   // Combos the game or Windows already own: the same list as binding_system_owner() in backend.py.
   function systemOwner(code, mods) {
@@ -361,6 +363,7 @@
           <div id="dock-banner"></div>
           <section class="dock-section" id="dock-sel"></section>
           <section class="dock-section" id="dock-solo" aria-labelledby="solo-title"></section>
+          <section class="dock-section" id="dock-diff" aria-labelledby="diff-title"></section>
           <section class="dock-section" id="dock-match" aria-labelledby="match-title"></section>
           <section class="dock-section" id="dock-view"></section>
         </div>
@@ -408,7 +411,7 @@
         <span class="avatar sp-${u.species}${u.boss ? " is-boss" : ""}">
           <span class="avatar-initial" aria-hidden="true">${esc(u.initial)}</span>
           ${u.boss ? `<span class="avatar-tag">${icon("crown")}BOSS</span>` : ""}
-          ${key ? `<span class="avatar-key">${kbd(vkLabel(key.code, key.mods))}</span>` : ""}
+          ${key ? `<span class="avatar-key${key.team ? " key-" + key.team : ""}">${kbd(vkLabel(key.code, key.mods))}</span>` : ""}
           ${sel ? `<span class="avatar-check">${icon("check")}</span>` : ""}
         </span>
         <span class="unit-body">
@@ -457,6 +460,8 @@
   function selectUnit(id, { scroll = false } = {}) {
     ui.selectedId = id;
     ui.unitKeyError = "";
+    const own = S.unitKeys[id];
+    if (own?.team) { ui.team = own.team; ui.count = own.count || ui.count; }
     store.set("selected", id);
     markSelection();
     renderSelection();
@@ -490,6 +495,7 @@
     renderBanner();
     renderSelection();
     renderSolo();
+    renderDifficulty();
     renderMatch();
     renderBattle();
     renderView();
@@ -501,11 +507,12 @@
       offline: ["amber", "gamepad", "banner.offline.title", "banner.offline.body", `<button class="btn btn-secondary btn-sm" type="button" data-action="launch-game">${icon("gamepad", "icon-sm")}${esc(t("conn.launch"))}</button>`],
       connecting: ["blue", "", "banner.connecting.title", "banner.connecting.body", ""],
       notInMap: ["amber", "monitor", "banner.notInMap.title", "banner.notInMap.body", ""],
-      mismatch: ["red", "alert", "banner.mismatch.title", "", `<button class="btn btn-secondary btn-sm" type="button" data-action="open-update">${icon("download", "icon-sm")}${esc(t("header.update"))}</button>`],
-    }[S.game];
+      mismatch: ["red", "alert", "banner.mismatch.title", "", `<button class="btn btn-secondary btn-sm" type="button" data-action="nav" data-page="settings">${icon("download", "icon-sm")}${esc(t("conn.updateMod"))}</button>`],
+      modUpdate: ["amber", "download", "conn.mismatch", "banner.modUpdate.body", `<button class="btn btn-secondary btn-sm" type="button" data-action="nav" data-page="settings">${icon("download", "icon-sm")}${esc(t("conn.updateMod"))}</button>`],
+    }[modOutdated() && S.game === "offline" ? "modUpdate" : S.game];
     if (!map) { el.innerHTML = ""; return; }
     const [tone, ic, title, body, action] = map;
-    const text = S.game === "mismatch" ? t("conn.hint.mismatch", { mod: S.modVersion, app: S.appVersion }) : t(body);
+    const text = S.game === "mismatch" ? t("conn.hint.mismatch", { mod: S.modVersion, app: S.expectedBuild || S.appVersion }) : t(body);
     el.innerHTML = `<div class="callout callout-${tone} dock-banner">${ic ? icon(ic) : '<span class="spinner"></span>'}<div class="callout-body"><strong>${esc(t(title))}</strong><span>${esc(text)}</span>${action ? `<div class="callout-actions">${action}</div>` : ""}</div></div>`;
   }
   function statusNote(u) {
@@ -576,7 +583,7 @@
         ${matchLine}${soloLine}
       </div>
       <div class="unitkey-line">
-        <span>${esc(t("sel.unitKey"))}</span>
+        <span class="unitkey-label">${esc(t("sel.unitKey"))}${key && !capturing ? `<small>${esc(unitKeyUses(key))}</small>` : ""}</span>
         <span style="display:flex;gap:4px;align-items:center">
           <button class="unitkey-btn${capturing ? " is-capturing" : ""}" type="button" data-action="unitkey-capture" data-id="${u.id}" ${RT.online() ? "" : "disabled"} title="${esc(t("sel.unitKeyHelp"))}">
             ${capturing ? esc(t("sel.unitKeyCapture")) : key ? `${icon("keyboard", "icon-sm")}${esc(vkLabel(key.code, key.mods))}` : `${icon("plus", "icon-sm")}${esc(t("sel.unitKeyBind"))}`}
@@ -633,6 +640,35 @@
       ui.busy.delete("solo-again");
       renderSolo();
     }
+  }
+  // Summon difficulty (set_spawn_difficulty, spawn_difficulty.lua): units summoned from now on use the
+  // chosen level's numbers through their own per-difficulty configs; FOLLOW keeps the game's level.
+  const DIFFICULTIES = ["FOLLOW", "EASY", "NORMAL", "HARD", "NIGHTMARE"];
+  const GAME_LEVELS = { Handicapped: "HANDICAPPED", Easy: "EASY", Normal: "NORMAL", Hard: "HARD", Nightmare: "NIGHTMARE" };
+  const diffName = level => t("diff." + level);
+  function renderDifficulty() {
+    const el = $("#dock-diff");
+    if (!el) return;
+    const d = S.difficulty, online = RT.online(), busy = ui.busy.has("set_spawn_difficulty");
+    const level = busy ? ui.diffWanted : d.level, game = GAME_LEVELS[d.game];
+    const usable = online && d.supported && !busy;
+    const desc = busy ? t("match.switching") : !online ? t("diff.desc.offline") : !d.supported ? t("diff.desc.old")
+      : level === "FOLLOW" ? t("diff.desc.follow") : t("diff.desc.set", { name: diffName(level) });
+    const label = v => (v === "FOLLOW" && game ? t("diff.followNow", { name: diffName(game) }) : diffName(v));
+    const notes = [];
+    if (usable && level !== "FOLLOW") notes.push(`<div class="match-note">${icon("info", "icon-sm")}<span>${esc(t("diff.note"))}</span></div>`);
+    if (d.failures) notes.push(`<div class="match-warn">${icon("alert", "icon-sm")}<span>${esc(t("diff.failures", { n: d.failures }))}</span><button class="btn-link" type="button" data-action="open-history">${esc(t("history.open"))}</button></div>`);
+    if (d.aiFailed) notes.push(`<div class="match-warn">${icon("alert", "icon-sm")}<span>${esc(t("diff.aiFailed"))}</span></div>`);
+    else if (usable && level !== "FOLLOW" && d.skipped) notes.push(`<div class="match-note">${icon("info", "icon-sm")}<span>${esc(t("diff.skipped", { n: d.skipped }))}</span></div>`);
+    el.innerHTML = `<div class="dock-title"><span id="diff-title">${esc(t("diff.title"))}</span></div>
+      <select class="select diff-select" id="diff-select" aria-labelledby="diff-title" aria-describedby="diff-desc" ${usable ? "" : "disabled"}>${DIFFICULTIES.map(v => `<option value="${v}"${v === level ? " selected" : ""}>${esc(label(v))}</option>`).join("")}</select>
+      <p class="diff-desc" id="diff-desc">${esc(desc)}</p>
+      ${notes.join("")}`;
+  }
+  function setDifficulty(level) {
+    if (!DIFFICULTIES.includes(level) || level === S.difficulty.level) return;
+    ui.diffWanted = level;
+    run("set_spawn_difficulty", { payload: { difficulty: level }, ok: () => ({ title: level === "FOLLOW" ? t("toast.diff.follow") : t("toast.diff.set", { name: diffName(level) }), body: t("toast.diff.body") }) });
   }
   // Equal stats (toggle_stat_match). The switch only needs the game connected, like backend.py;
   // the card mirrors the stat_match_* status: baseline unit, its spawn stats, matched/failed counts.
@@ -967,7 +1003,7 @@
     ui.unitKeyError = "";
     renderSelection();
     try {
-      const job = await RT.command("configure_unit_key", { unit_id: id, code, mods });
+      const job = await RT.command("configure_unit_key", { unit_id: id, code, mods, team: ui.team, count: ui.count });
       if (job.status === "succeeded") toast({ kind: "success", title: t("toast.unitKey.saved", { name: u.name, key: vkLabel(code, mods) }) });
     } catch (error) {
       toast({ kind: "error", title: t("toast.notSent"), body: reasonText(error.code, error.detail) });
@@ -1009,7 +1045,7 @@
       <section class="card"><div class="card-head"><h2 class="card-title">${esc(t("keys.unit"))}</h2><span class="chip">${fmtNum(unitKeys.length)}</span></div><p class="card-desc">${esc(t("keys.unit.desc"))}</p>
         <div class="rows" style="margin-top:10px">${unitKeys.length ? unitKeys.map(([id, k]) => {
           const u = byId.get(id);
-          return `<div class="row unitkey-item"><span class="avatar sp-${u?.species || "GuaiMian"}"><span class="avatar-initial">${esc(u?.initial || "?")}</span></span><div class="row-main"><div class="row-title">${esc(u?.name || id)}</div><div class="row-desc">${esc(t("keys.unit.uses", { team: teamName(ui.team), n: ui.count }))}</div></div><div class="row-side">${kbd(vkLabel(k.code, k.mods), "kbd-lg")}<button class="icon-btn icon-btn-sm" type="button" data-action="unitkey-remove" data-id="${id}" aria-label="${esc(t("keys.unit.remove"))}" title="${esc(t("keys.unit.remove"))}">${icon("x", "icon-sm")}</button></div></div>`;
+          return `<div class="row unitkey-item"><span class="avatar sp-${u?.species || "GuaiMian"}"><span class="avatar-initial">${esc(u?.initial || "?")}</span></span><div class="row-main"><div class="row-title">${esc(u?.name || id)}</div><div class="row-desc">${k.team ? `<span class="team-dot" style="background:var(--${k.team})"></span>` : ""}${esc(unitKeyUses(k))}</div></div><div class="row-side">${kbd(vkLabel(k.code, k.mods), "kbd-lg")}<button class="icon-btn icon-btn-sm" type="button" data-action="unitkey-remove" data-id="${id}" aria-label="${esc(t("keys.unit.remove"))}" title="${esc(t("keys.unit.remove"))}">${icon("x", "icon-sm")}</button></div></div>`;
         }).join("") : `<div class="row"><div class="row-main"><div class="row-desc">${esc(t("keys.unit.empty"))}</div></div><div class="row-side"><button class="btn btn-secondary btn-sm" type="button" data-action="nav" data-page="arena">${icon("swords", "icon-sm")}${esc(t("keys.unit.go"))}</button></div></div>`}</div></section>
       <details class="advanced"><summary><span class="row-icon">${icon("scan")}</span><div class="row-main"><div class="row-title">${esc(t("keys.advanced"))}</div><div class="row-desc">${esc(t("keys.advanced.desc"))}</div></div>${icon("chevron-down", "chev")}</summary>
         <div class="rows">${keyRowHTML("refresh_catalog")}</div></details>
@@ -1018,10 +1054,12 @@
 
   // ---------- Settings page ----------
   function compState(ok) { return ok ? `<span class="state-icon state-ok">${icon("check")}</span>` : `<span class="state-icon state-missing">${icon("alert")}</span>`; }
+  // The mod is installed but is not the build this app ships (after an app update).
+  const modOutdated = () => !!S.components?.some(c => c.id === "mod" && !c.ok && c.detail);
   function componentsHTML() {
     const comps = (S.components || [{ id: "game", ok: true, detail: "build 26266538" }, { id: "loader", ok: S.installed, detail: "UE4SS 3.0.1" }, { id: "mod", ok: S.installed, detail: "v" + S.modVersion }]).map(c => [c.id, c.ok, c.detail, c.warn]);
     const missing = comps.some(c => !c[1]);
-    return `<div class="comp-list">${comps.map(([id, ok, detail, warn]) => `<div class="comp">${compState(ok)}<span class="comp-name">${esc(t("comp." + id))}<small>${esc(detail)}</small></span>${warn ? `<span class="chip chip-amber">${esc(t("comp.untested"))}</span>` : ""}<span class="${ok ? "muted" : ""}" style="font-size:12.5px">${esc(t(ok ? "comp.ok" : "comp.missing"))}</span></div>`).join("")}</div>
+    return `<div class="comp-list">${comps.map(([id, ok, detail, warn]) => `<div class="comp">${compState(ok)}<span class="comp-name">${esc(t("comp." + id))}<small>${esc(detail)}</small></span>${warn ? `<span class="chip chip-amber">${esc(t("comp.untested"))}</span>` : ""}<span class="${ok ? "muted" : ""}" style="font-size:12.5px">${esc(t(ok ? "comp.ok" : id === "mod" && detail ? "comp.outdated" : "comp.missing"))}</span></div>`).join("")}</div>
       ${ui.installing ? `<div style="margin-top:10px"><div class="progress"><i style="width:${Math.round(ui.installing.ratio * 100)}%"></i></div><div class="progress-meta"><span>${esc(t("comp.installing", { step: t("comp." + ui.installing.step) }))}</span><span>${Math.round(ui.installing.ratio * 100)}%</span></div></div>`
         : missing ? `<div class="callout-actions"><button class="btn btn-primary btn-sm" type="button" data-action="install-components">${icon("download", "icon-sm")}${esc(t("comp.install"))}</button></div>` : ""}`;
   }
@@ -1219,6 +1257,7 @@
     switch (job.action) {
       case "spawn": return p.team === "neutral" ? t("action.spawnNeutral", { name: u?.name, n: p.count }) : t("action.spawn", { name: u?.name, n: p.count, team: teamName(p.team) });
       case "configure_unit_key": return t("action.configure_unit_key", { name: u?.name });
+      case "set_spawn_difficulty": return t("action.set_spawn_difficulty", { name: diffName(p.difficulty) });
       default: return t("action." + job.action);
     }
   }
@@ -1255,10 +1294,10 @@
     return `<div class="popover-pad" style="width:320px">
       <div class="row-title">${esc(t("conn.title"))}</div>
       <div class="checklist">${item(true, t("conn.check.app"))}${item(online, t("conn.check.game"))}${item(ready, t("conn.check.map"))}</div>
-      <p class="muted" style="font-size:12.5px">${esc(S.game === "mismatch" ? t("conn.hint.mismatch", { mod: S.modVersion, app: S.appVersion }) : t(hint))}</p>
+      <p class="muted" style="font-size:12.5px">${esc(S.game === "mismatch" ? t("conn.hint.mismatch", { mod: S.modVersion, app: S.expectedBuild || S.appVersion }) : t(hint))}</p>
       <div class="callout-actions">
         ${S.game === "offline" ? `<button class="btn btn-primary btn-sm" type="button" data-action="launch-game">${icon("gamepad", "icon-sm")}${esc(t("conn.launch"))}</button>` : ""}
-        ${S.game === "mismatch" ? `<button class="btn btn-primary btn-sm" type="button" data-action="open-update">${icon("download", "icon-sm")}${esc(t("header.update"))}</button>` : ""}
+        ${S.game === "mismatch" ? `<button class="btn btn-primary btn-sm" type="button" data-action="nav" data-page="settings">${icon("download", "icon-sm")}${esc(t("conn.updateMod"))}</button>` : ""}
         <a class="btn btn-ghost btn-sm" href="${REPO}#readme" target="_blank" rel="noopener noreferrer">${esc(t("conn.help"))}${icon("external", "icon-sm")}</a>
       </div></div>`;
   }
@@ -1484,7 +1523,7 @@
     type: el => { ui.type = el.dataset.type; renderToolbar(); renderGrid({ animate: true }); },
     "clear-search": () => { ui.query = ""; const input = $("#search"); input.value = ""; input.focus(); renderToolbar(); renderGrid(); },
     "clear-filters": () => { Object.assign(ui, { query: "", type: "all", chapter: "all" }); $("#search").value = ""; renderToolbar(); renderGrid({ animate: true }); },
-    team: el => { ui.team = el.dataset.team; renderSelection(); renderSolo(); scheduleSync(); },
+    team: el => { ui.team = el.dataset.team; renderSelection(); renderSolo(); scheduleSync(); followUnitKey(); },
     "count-dec": () => setCount(ui.count - 1),
     "count-inc": () => setCount(ui.count + 1),
     "count-preset": el => setCount(Number(el.dataset.n)),
@@ -1602,6 +1641,25 @@
     ui.count = Math.max(1, Math.min(8, Math.round(n) || 1));
     renderSelection();
     scheduleSync();
+    followUnitKey();
+  }
+  // The selected unit's own key follows the team and count chosen above, so each unit can sit on its
+  // own side and the player switches it back and forth here.
+  function followUnitKey() {
+    const id = ui.selectedId, key = S.unitKeys[id];
+    clearTimeout(ui.unitKeyTimer);
+    if (!key || !RT.online() || (key.team === ui.team && key.count === ui.count)) return;
+    ui.unitKeyTimer = setTimeout(async () => {
+      if (ui.selectedId !== id) return;
+      try {
+        const job = await RT.command("configure_unit_key", { unit_id: id, code: key.code, mods: key.mods, team: ui.team, count: ui.count });
+        ui.unitKeyError = job.status === "succeeded" ? "" : reasonText(job.code, job.message);
+      } catch (error) {
+        ui.unitKeyError = reasonText(error.code, error.detail);
+      }
+      renderSelection();
+      if ($("#grid")) renderGrid();
+    }, 400);
   }
 
   document.addEventListener("click", e => {
@@ -1627,6 +1685,7 @@
   document.addEventListener("change", e => {
     if (e.target.id === "chapter") { ui.chapter = e.target.value; renderToolbar(); renderGrid({ animate: true }); $("#catalog-col").scrollTop = 0; }
     if (e.target.id === "count-input") setCount(Number(e.target.value));
+    if (e.target.id === "diff-select") setDifficulty(e.target.value);
     if (e.target.id === "onb-lang") { setLanguage(e.target.value); }
   });
   const isTyping = el => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
@@ -1733,6 +1792,7 @@
       case "host":
         // Version, game folder and components arrived from the native window.
         renderTopbar();
+        if (ui.page === "arena") renderBanner();
         if (ui.onboarding) renderOnboarding();
         else if (ui.page === "settings" || ui.page === "about") renderPage();
         break;
@@ -1743,6 +1803,7 @@
         if (ui.page === "arena") {
           if (p.has("sel")) { renderBanner(); renderSelection(); }
           if (p.has("solo")) renderSolo();
+          if (p.has("diff")) renderDifficulty();
           if (p.has("match")) renderMatch();
           if (p.has("battle")) renderBattle();
           if (p.has("view")) renderView();
