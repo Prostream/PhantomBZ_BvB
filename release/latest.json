@@ -1,46 +1,58 @@
 {
-  "version": "0.35.2",
-  "date": "2026-11-01T10:24:48+08:00",
-  "size": 20626714,
-  "sha256": "36351a01eac96ce0d4d76c17a759b014ed3d7ab6b42fc4c22b165204746939f5",
+  "version": "0.36.0",
+  "date": "2026-11-01T12:07:47+08:00",
+  "size": 20650920,
+  "sha256": "c818be05d12257d1904a28548e251c187fbf59f67c91e6bd5e5ce0f7991cbf1b",
   "notes": {
     "zh": [
-      "修复部分电脑打开助手后界面全空的问题（系统注册表把脚本文件登记成了纯文本，浏览器拒绝运行界面）",
-      "本来就能正常使用的电脑不受影响；游戏内的模组没有变化，不用重新安装"
+      "召唤的单位改为按所在地区的等级生成，和附近地图怪一样强。以前一律是 0 级，所以召出来的 BOSS 几刀就死",
+      "因此同一只怪在不同地方召唤，数值会不一样：数值 = 基础值 ×（1＋等级曲线）× 难度系数 × 怪物类型系数。例：阿花在 1 级的地方 9000 血，在死镇（19 级）109881 血",
+      "新增「趣味功能」页：无限杀气、自动精准防御、自动闪避红光，只作用在你自己的角色上",
+      "更新后请按助手提示更新游戏内模组"
     ],
     "en": [
-      "Fixed the app window staying empty on some PCs (the Windows registry listed script files as plain text, so the browser refused to run the interface)",
-      "PCs where the app already worked are not affected; the in-game mod is unchanged, so there is no need to reinstall it"
+      "Summoned units now spawn at the level of the map enemies around you, as strong as the local enemies. Before, they were all level 0, so summoned bosses went down in a few hits",
+      "So the same unit has different stats in different places: stat = base × (1 + level curve) × difficulty modifier × unit-type modifier. For example, a boss with 9,000 HP at level 1 has 109,881 HP at level 19",
+      "New Fun features page: Infinite Sha-Chi, Auto perfect deflect and Auto-dodge red attacks, for your own character only",
+      "After updating, follow the prompt in the app to update the in-game mod"
     ],
     "ja": [
-      "一部のPCでアプリの画面が真っ白のままになる問題を修正（Windowsのレジストリでスクリプトがテキスト扱いになっており、ブラウザーが画面の実行を拒否していました）",
-      "正常に使えていたPCには影響ありません。ゲーム内Modは変更なし、再インストールは不要です"
+      "召喚したユニットは、周りにいるマップの敵と同じレベルで出現するようになりました。以前はすべてレベル0だったため、召喚したボスが数回の攻撃で倒れていました",
+      "そのため、同じユニットでも場所によって数値が変わります：数値＝基礎値×（1＋レベル曲線）×難易度係数×敵タイプ係数。例：レベル1で体力9000のボスは、レベル19では109881になります",
+      "「お楽しみ機能」ページを追加：殺気無限、自動ジャスト防御、赤い攻撃を自動回避（自分のキャラクターのみ）",
+      "更新後はアプリの案内に従ってゲーム内Modも更新してください"
     ],
     "fr": [
-      "Correction de la fenêtre de l'application restée vide sur certains PC (le registre Windows déclarait les scripts comme du texte brut, et le navigateur refusait d'exécuter l'interface)",
-      "Rien ne change pour les PC où l'application fonctionnait déjà ; le mod en jeu n'a pas changé, inutile de le réinstaller"
+      "Les unités invoquées apparaissent désormais au niveau des ennemis de la carte autour de vous, aussi fortes que ceux de la zone. Avant, elles étaient toutes au niveau 0, d'où des boss invoqués vaincus en quelques coups",
+      "La même unité n'a donc pas les mêmes valeurs selon l'endroit : valeur = base × (1 + courbe de niveau) × modificateur de difficulté × modificateur de type. Par exemple, un boss à 9 000 PV au niveau 1 en a 109 881 au niveau 19",
+      "Nouvelle page Fonctions bonus : Sha-Chi infini, Parade parfaite auto et Esquive auto des attaques rouges, pour votre personnage uniquement",
+      "Après la mise à jour, suivez l'invite de l'application pour mettre à jour le mod en jeu"
     ],
     "de": [
-      "Behoben: Auf manchen PCs blieb das App-Fenster leer (die Windows-Registry führte Skriptdateien als reinen Text, deshalb verweigerte der Browser die Oberfläche)",
-      "Auf PCs, auf denen die App schon lief, ändert sich nichts; der Mod im Spiel ist unverändert, eine Neuinstallation ist nicht nötig"
+      "Beschworene Einheiten erscheinen jetzt auf der Stufe der Gegner der Karte in deiner Nähe und sind so stark wie die Gegner vor Ort. Vorher hatten alle Stufe 0, deshalb fielen beschworene Bosse nach wenigen Treffern",
+      "Dieselbe Einheit hat darum an verschiedenen Orten andere Werte: Wert = Basiswert × (1 + Stufenkurve) × Schwierigkeitsfaktor × Typfaktor. Beispiel: Ein Boss mit 9.000 LP auf Stufe 1 hat auf Stufe 19 109.881 LP",
+      "Neue Seite Extras: Unendliches Sha-Chi, Automatische perfekte Parade und Roten Angriffen automatisch ausweichen, nur für deine eigene Figur",
+      "Nach dem Update dem Hinweis in der App folgen, um den Mod im Spiel zu aktualisieren"
     ],
     "es": [
-      "Corregida la ventana de la aplicación que quedaba vacía en algunos PC (el registro de Windows marcaba los scripts como texto plano y el navegador se negaba a ejecutar la interfaz)",
-      "No cambia nada en los PC donde ya funcionaba; el mod del juego no cambia, no hace falta reinstalarlo"
+      "Las unidades invocadas ahora aparecen al nivel de los enemigos del mapa que tienes cerca, igual de fuertes que los de la zona. Antes todas eran de nivel 0, por eso los jefes invocados caían en pocos golpes",
+      "Por eso la misma unidad tiene valores distintos según el lugar: valor = base × (1 + curva de nivel) × modificador de dificultad × modificador de tipo. Por ejemplo, un jefe con 9000 PV en el nivel 1 tiene 109 881 en el nivel 19",
+      "Nueva página Extras: Sha-Chi infinito, Desvío perfecto automático y Esquivar ataques rojos automáticamente, solo para tu personaje",
+      "Después de actualizar, sigue el aviso de la aplicación para actualizar el mod del juego"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.36.0/PhantomGladiator-0.36.0-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.36.0/PhantomGladiator-0.36.0-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.36.0/PhantomGladiator-0.36.0-win64.zip"
     }
   ]
 }
