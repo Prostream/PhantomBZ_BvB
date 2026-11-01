@@ -899,3 +899,138 @@ v0.36.3 长局（run-20261101-083501.log，08:35–08:48，魔渊、阿花，召
 - 区域如何给出等级（PBZ_MobDomain、DT_AIAreaLevel、各层偏移）只有头文件依据；"死镇 18～19 级"是地图怪读回。
 
 离线：Lua 47 项（含 main_boot npc/actor）、后端 58 项通过。
+
+## v0.37.1：阵营「不倒下」和战斗用时（2026-11-01，待实机读回）
+
+B 站有人想让杂兵打 BOSS、测要打多久，但杂兵血条撑不住。用户要求做成不冗余的形式：不新开页面，给已有的阵营加开关，给已有的胜负结果加用时。
+
+修改：
+- immortal_teams.lua：蓝方、红方、随从各一个「不倒下」开关，保存在 `Runtime/immortal-teams.tsv`（`ImmortalTeamsV1\tblue=0\tred=0\tcompanion=0`）。支持循环每 0.5 s：开着的阵营里还没锁的单位，把 `Health_Min` 基础值写成当时的 HP 并读回（和自由观战给玩家锁血是同一条写法，observer_guard.lua，v0.28.2 实机 HP 80 s 不变）；读回不到就恢复原下限，最多试 3 次，算一次失败。已锁的单位每次检查：下限被游戏改低就重写（计"重新锁定"），HP 仍低于下限就把 HP 补回去（计"血量低于下限"，用来判断下限挡不挡得住真实伤害）。关掉开关恢复每个单位原来的下限；单位离场就不再跟踪。暂不配队不提供（那是玩家自己打的）。
+- 锁住的单位和原下限记在 `Runtime/immortal-floors.tsv`。Mod 重载后新实例在游戏就绪的第一轮，按记录从地图 NPC 里找回旧单位，下限仍等于当时写入值的才恢复原值，然后清空记录。卸载时不写游戏对象。
+- 放在支持循环的召唤关系接管之后、增援之前：新加入的单位先锁血，再被派去打敌人。
+- arena_controller.lua 战斗计时：开战后第一次读到双方都有存活单位时开始，某一方存活和读不到的都为 0 时结束；被打光的一方补了新单位就重新开始；停止并清理时清零。时间用游戏时间（GameplayStatics.GetTimeSeconds，暂停不计、跟随慢动作）。状态行 `battle_clock`（running/ended/空）、`battle_seconds`。
+- 后台新动作 `set_team_immortal`（team=blue/red/companion，enabled），线上格式 team 列放阵营、key_start 放 ON/OFF；状态行 `immortal_*`。
+- 助手：战场卡片蓝红两边底部、随从卡片里各一个「不倒下」小开关；两边都开时提示分不出胜负，但允许（可以看无尽对打）；交战中在「交战中」旁显示用时，结束时胜负结果和通知里写「用时 m:ss」；不倒下没生效的次数显示在战场下方。六种语言。
+
+离线：新增 test_immortal_teams（设置读回、锁定、重新锁定、补血、加入/离场、关闭恢复、随从、写不进时三次放弃、未就绪不动、重载后按记录恢复、卸载不写）；test_arena_controller 新增计时（开始、读不到不算结束、结束、补兵重开、停止清零、没有游戏时钟不计时）；test_panel_runtime、后端新增对应用例。界面原型里实测：蓝方开不倒下后红方 BOSS 先倒下、显示「用时」；两边都开时提示并持续计时。Lua 48 项、后端 59 项通过。
+
+待实机确认：NPC 身上 `Health_Min` 能不能挡住真实伤害（尤其是一刀超过当前血量的伤害、投技、处决类）；挡不住时补血能不能保住单位；计时与画面是否一致。
+
+### v0.37.1 实机读回（run-20261101-123247.log）与 v0.37.2
+
+- 不倒下：12:41:58 打开蓝方后，场上 4 只蓝方立即锁定（下限写成各自当时的 HP 5465.2 / 19767.6 / 16976.9 / 2848.9，读回一致）；12:43:03 新召的 8 只出生即锁在 19767.6。12:43:05–12:43:54 蓝 8 打红 8，红方全灭，蓝方一只未倒，`生命读回 team=blue` 在这段时间一条都没有（HP 没变），也没有"重新锁定""血量低于下限"。用户反馈"似乎没问题了"。在这之前的 12:37 两只蓝方被玩家砍死，当时只开过随从的开关（12:35:04 开、12:35:25 关），蓝方没开。
+- 计时：模组侧正确（12:35:52–12:36:54 用时 62.01 s，12:43:05–12:43:54 用时 47.92 s），但助手里看不到。原因：panel_bridge.lua 每次最多写 100 项状态，`pairs` 顺序随 Lua 状态的哈希种子变化，多出的随机丢弃。这次 status.tsv 正好 104 行（100 项 + 4 个协议字段），丢了 battle_clock、fun_supported、current_count、total、arena_unreadable_count、function_keys_revision 等 12 项。按 git 统计：v0.35.0 最多 95 项，v0.36.0 加了趣味功能后最多 107 项（常见约 102 项），**已发布的 v0.36.0 每次进游戏会随机丢 2–6 项**，可能表现为助手显示未连接/未进入地图、趣味功能显示"模组较旧"、计数不对等。用户选择不单独发热修，和新功能一起发 v0.37.0。
+- v0.37.2 修复：上限改为 256 项，超出时记一条日志；test_panel_bridge 新增 150 项全部写入，test_panel_runtime 检查状态项数低于 200。
+- v0.37.2 召唤数量（用户要求去掉数量限制，预设改为 1、5、10、50）：单次上限 8 → 100（arena_controller MAX_BATCH、panel_bridge 数量列与回执、unit_keybinds、backend MAX_SPAWN_COUNT、助手步进器），场上总数仍不限。保留 100 是因为一批召唤在同一次游戏线程调用里完成（每只约 0.1 s），只防手滑输错数字卡死游戏。出生位置改为每排 5 个（随从每排 4 个）、间距 3 m，50 只约在前方 33 m、侧面 16 m 内；单只暂不配队仍在正前方。界面预设 1/5/10/50，输入框超过 100 自动改成 100，六语说明改为 1–100。离线：Lua 48 项、后端 59 项通过；原型里核对了预设、输入上限和召唤按钮文字。
+
+## v0.37.3：脱离战斗后重新迎敌、画面顶部计时（2026-11-01，待实机读回）
+
+v0.37.2 实机（run-20261101-125613.log）：50 只双锄女暴徒召唤用时约 1.4 s（一批召唤期间面板轮询 1439 ms），开战时 51 条开战请求全部读回 true，状态都是 AI.State.Combat。之后魔渊掉血是一阵一阵的：12:58:43 开战到 12:58:59 掉了约 5.3 万，随后多次长时间不掉（12:59:34–13:00:00 共 26 s，13:00:27–13:01:36 共 69 s）。用户截图：小怪"输出完一轮之后会回到原地站着"，站在出生的方阵里。以前日志里见过的状态只有 Idle、Combat、Search，Combat → Idle 的转换在随从身上出现过。推测：AI 打完一轮后退出战斗，回到出生点（SpawnInfo）待机；开战时只下达一次攻击，原来的增援逻辑只在目标死亡时才重新下达。50 只同时在场时支持循环每次 20–50 ms（activity、aiDifficulty 占大头），召唤那一下 109 ms。
+
+修改：
+- arena_controller.lua：交战中，蓝红单位的 AI 状态不是 Combat 时，按之前分配的目标重新迎敌，同一单位至多每秒一次；在 Combat 中的单位不碰（每帧强制会打断出招）。目标死亡后改为找被分配最少的敌人，不再全部挤向第一个。前 20 次逐条记录，之后每 10 s 汇总一次。
+- main.lua：`inCombat` 读 SGameAIComponent.CurrentStateTag；`engage` 先补仇恨（AddHatred）再 ForceIntoCombat，读回状态。阵营关系和黑板目标沿用开战时写的。和随从的"不在战斗时每秒迎敌"是同一做法（companion.lua，v0.35）。
+- battle_clock_hud.lua：助手「观战」里新增「画面顶部显示计时」开关（`Runtime/clock-hud.tsv`）。开着时，交战中在游戏画面正上方显示 m:ss，结束后保留最终用时，清场后移除。控件用和私有 BOSS 血条相同的构造方式：建一个 WB_BossHPBar 私有实例，把它的控件树换成只有一个文本（字号 30、居中、带阴影），不调用 Init，Character 指向玩家；放在视口上方居中（宽 360、距顶 14）。换地图后重建；创建失败就等下一场交战再试；Mod 重载后新实例会移除上次留下的计时（按控件树根名 PG_ClockRoot 识别，不碰 BOSS 血条）。
+- 后台动作 `set_clock_hud`（key_start=ON/OFF），状态行 `clock_hud_*`；六语。
+
+离线：test_arena_controller 新增重新迎敌（在战斗中不动、出战斗后按原目标拉回、每秒至多一次、回到战斗后不再强制、目标死后找被打最少的敌人）；新增 test_battle_clock_hud（格式、设置、显示/更新/保留/移除、换世界、失败重试、重载后清理且不碰 BOSS 血条）；后端、面板运行时各加一项。Lua 49 项、后端 60 项通过。原型里核对了开关、提示和通知。
+
+待实机确认：重新迎敌后 BOSS 是否持续掉血、单位是否还会成片回到原地；50 只时的卡顿是否可以接受；游戏画面上的计时是否出现在正上方、字是否清楚。
+
+## v0.37.4：不死不休、减少多单位时的每轮开销（2026-11-01，待实机读回）
+
+用户问能否改成"不死不休"，不用定时检查。头文件依据：`BP_SGameAIComponent_C`（`/SGameAI/BP_SGameAIComponent`）覆写了 `ShouldExitCombatAfterAction`，另有 `ForceOffCombat`、`ForceIntoCombat`、`Set Current State`、`StateBlockMap`。AI 每打完一个动作调用前者决定是否退出战斗。
+
+修改：
+- combat_lock.lua：交战中（开战且蓝红都有存活）挂钩 `ShouldExitCombatAfterAction`，对本 Mod 蓝红单位的 AI 组件回答 false（不退出），其他 AI 照游戏原答案；用的是 ai_difficulty.lua 已实测的蓝图挂钩方式（回调在函数之后运行，非 nil 返回值即结果）。战斗结束后立即不再改写，10 s 后摘钩；AI 组件地址按单位缓存，每轮只做一次 GetAddress。前 20 次改写逐条记录，摘钩时记合计。
+- 重新迎敌降为保险：每 2 s 检查一次（原来每 0.5 s、每只每秒一次）。
+- 每轮开销：支持循环一轮只取一次单位名单和状态（以前十来个模块各自调用，每次都要逐个单位向引擎确认存活）；不倒下锁住的单位每轮只读一次血量，血量低于锁定值时才做完整属性读写；activity 已稳定的单位每 5 s 才复查一次，F6 只读采样每轮最多 4 只（以前 50 只每 5 s 写 51 行日志）；趣味功能每帧的单位受击探测在场上超过 4 只时停止；场上超过 12 只时，每只单位的血量变化日志至多 5 s 一条（倒下时总会记）。
+
+离线：新增 test_combat_lock（只在交战时挂钩、只改蓝红、其他 AI 不变、战斗结束 10 s 摘钩、再开战重挂、单位离场不再回答、找不到函数时只报一次）；test_immortal_teams 新增"锁住时不做属性读写、跌破才补"；test_arena_activity 改为 10 轮复查一次并新增大批单位采样上限；重新迎敌测试改为 2 s 间隔。Lua 50 项、后端 60 项通过。
+
+待实机确认：挂钩后蓝红单位是否一直留在战斗里（日志"留在战斗中"计数、重新迎敌汇总应很少）；50 只时 `[Perf] 支持循环耗时` 是否明显下降。
+
+### v0.37.4 实机读回（run-20261101-132433.log）与 v0.37.5
+
+- 每轮开销下降：50 只时支持循环 14–24 ms（v0.37.2 是 20–50 ms），activity 平时 0–1 ms，immortal 1 ms。
+- 退出战斗挂钩生效（`留在战斗中` 持续出现），但单位仍然成批掉到 AI.State.Idle：保险的重新迎敌每 10 s 触发 41–96 次，共 880 次；用户描述"经常反方向慢慢走，像没锁定 BOSS，然后突然回头"，截图只有一小撮在打。魔渊 13:26:42 剩 2848 血后 75 s 没再掉血，重新迎敌一直在触发。
+- 关键读回：每次迎敌都要先补仇恨，官方 `AddActorToHatredList` 每次都没把魔渊加进去，于是走数组直写（`参赛者配对数组写入` 一局 1632 次）。即仇恨管理器不接受另一只怪物当目标，直写的条目随后又被去掉，单位没有可仇恨的对象，就退到 Idle 往出生点走；保险每 2 s 拉回一次，于是"走开、回头"反复。ShouldExitCombatAfterAction 只是退出途径之一。
+- v0.37.5：combat_lock.lua 交战中再挂钩 `BP_SGameHatredManagerComponent_C`（`/SGameAI/Tools/Hatred/`；BP_PBZHatredManagerComponent 没有覆写）的 `CheckCanHatredTarget` 和 `CheckActorCanBeHatred`：仇恨管理器属于本 Mod 蓝红单位、被问的是对面阵营的本 Mod 单位时回答 true，其他（同阵营、暂不配队、随从、地图怪、玩家）照游戏原答案。`RemoveActorFromHatredList` 只观察：本 Mod 对阵双方之间的移除计数并记录前 8 条。每 10 s 汇总四项计数，摘钩时记合计。蓝图之间的调用能不能被 UE4SS 挂钩拦到尚未验证，看计数即可判断。
+- 离线：test_combat_lock 改为四个挂钩（只在交战时、只放行对面阵营、移除只计数、10 s 汇总、摘钩、再开战、单位离场、缺函数照常挂其余）。Lua 50 项、后端 60 项通过。
+
+待实机确认：`允许仇恨` 计数是否出现；`参赛者配对数组写入` 和重新迎敌次数是否大幅下降；画面上是否不再成批走开。
+
+### v0.37.5 实机读回（run-20261101-133317.log）与 v0.37.6
+
+- 四个挂钩都注册成功。仇恨检查改写生效：每 10 s `允许仇恨` 65–309 次、`允许被仇恨` 同数；`RemoveActorFromHatredList` 移除对阵双方的次数为 0；退出判断每 10 s 改写 162–369 次。
+- 但单位仍然掉回 AI.State.Idle：重新迎敌每 10 s 34–100 次（共 502 次，和 v0.37.4 相近）；迎敌前官方加仇恨仍多数失败，`参赛者配对数组写入` 491 次。魔渊 24 s 内掉到 6.8 万，之后 40 s 只掉了 1.2 万。
+- 结论：这两条都不是全部原因。仇恨条目不是被 RemoveActorFromHatredList 移掉的（可能是整表清空，或脱战根本不看仇恨表）；官方 AddActorToHatredList 内部的检查很可能不经过我们挂的蓝图入口（蓝图之间的调用拦不到），或另有门槛。
+- v0.37.6（只加观察，不改行为）：交战中再挂 `CallTransition`、`Set Current State`、`ForceOffCombat`（AI 组件）和 `RemoveAllActorsFromHatredList`、`ClearNPCHatredForOwner`（仇恨管理器），只对本 Mod 蓝红单位计数，按标签汇总，每个标签前 3 条逐条记录；重新迎敌记录迎敌前仇恨表长度和离目标距离；保险间隔从 2 s 缩到 1 s。
+- 离线：test_combat_lock 改为 9 个挂钩并验证观察计数与汇总；重新迎敌测试改为 1 s。Lua 50 项、后端 60 项通过。
+
+### v0.37.6 实机读回（run-20261101-134149.log）与 v0.37.7
+
+- 脱战路径找到了：每次都是 AI 组件 `CallTransition(AI.Transition.CombatToIdle)` → `Set Current State(AI.State.Idle)` → 仇恨管理器 `RemoveAllActorsFromHatredList`（整表清空，不是逐个移除）。`ForceOffCombat`、`ClearNPCHatredForOwner` 一次都没有；`RemoveActorFromHatredList` 移除对阵双方只在两段时间各出现几十次。
+- 频率：每 10 s 约 50–98 次 CombatToIdle，50 只蓝方即每只约 10 s 一次，节奏均匀，像计时触发；三场战斗都一样。脱战时距魔渊 1.9–9.0 m、仇恨表已为 0（拉回时测）。所以不是距离或仇恨检查的问题，是 AI 状态机自己在打一阵后切回 Idle；`ShouldExitCombatAfterAction` 改成"不退出"拦不住这条。
+- v0.37.7：转换已经发生后才轮到回调，无法拒绝，因此在 CallTransition 回调里看到本 Mod 交战单位的 CombatToIdle 时，立刻安排在下一个游戏线程 tick 把它按原目标拉回（`arena:reengage`，补仇恨 + ForceIntoCombat），每只每 0.5 s 至多一次以防循环；1 s 一次的保险检查保留。前 20 次逐条记录，10 s 汇总里加"即时拉回累计"。
+- 离线：test_combat_lock 新增 CombatToIdle 触发拉回（只对交战单位、0.5 s 限频、其他转换不触发）；test_arena_controller 新增按单位立即拉回（目标倒下、未知单位、已停止时拒绝）。Lua 50 项、后端 60 项通过。
+
+待实机确认：画面上是否还会走开；"即时重新迎敌"读回是否 Combat；每 10 s 的 CombatToIdle 次数是否不变（预期不变，只是立刻被拉回）。
+
+### v0.37.7 实机读回（run-20261101-135035.log）与 v0.37.8
+
+- 即时拉回生效：每次 CombatToIdle 都在下一帧拉回，累计 408 次，等于 CombatToIdle 总数；读回都是 AI.State.Combat。1 s 保险的触发降到每 10 s 24–30 次（之前 34–100）。
+- 但魔渊 13:51:44 开战后只在前 30 s 掉血（139536 → 99593），13:52:15 之后约 40 s 没再掉血。即时拉回时单位离魔渊 8.5–15.4 m（v0.37.6 在 1 s 保险拉回时是 1.9–9 m）。即单位一直处在战斗状态，却站在外圈不出手，约 10 s 后又超时切回 Idle。
+- 推测：攻击令牌（MetaAI：`BP_MetaAIController_C` 的 `CurrentTokenCount`/`RequestToken`/`HasToken`，行为里用 `Condition_HasAttackToken_C`、`AITask_RequestAttackToken`），同时只有少数单位拿到出手名额，其余在外圈等待。资源里还有 `GE_DisableMetaAI` 和 `GE_DangHuiSummon_NoMetaAI`（荡魂召唤物不进 MetaAI），说明游戏自己也会让某些单位绕开这套名额。
+- v0.37.8：交战中挂钩 `/SGameAI/Core/AICondition/Condition_HasAttackToken.Condition_HasAttackToken_C:EvaluateCondition`（和召唤难度已实测的 AICondition 同一种挂法），参数是单位的 AI 控制器；属于本 Mod 蓝红交战单位时回答 true，其他照游戏原答案。计数进 10 s 汇总（"允许出手"）。
+- 离线：test_combat_lock 改为 10 个挂钩，新增令牌条件只对蓝红放行。Lua 50 项、后端 60 项通过。
+
+待实机确认："允许出手"是否有计数；魔渊是否持续掉血；CombatToIdle 次数是否下降。若令牌条件不是唯一的入口（还有 AITask_RequestAttackToken），下一步再看任务层或给单位上 GE_DisableMetaAI。
+
+### v0.37.8 实机读回（run-20261101-135639.log）与 v0.37.9
+
+- 攻击令牌条件挂钩注册成功（`token pre=10`），但对本 Mod 蓝红单位一次都没被问到（允许出手=0）。这些单位的出手不经过 `Condition_HasAttackToken`，令牌推测没有证据。CombatToIdle 每 10 s 33–77 次，全部即时拉回；1 s 保险每 10 s 36 次；魔渊 30 s 内从 13.9 万到 8.8 万。
+- 用户反馈："好多了"，但"还是有那个情况"（仍有单位走开）。
+- v0.37.9（整理，不改已生效的行为）：combat_lock 只保留四个挂钩——退出判断、两个仇恨检查、CallTransition（CombatToIdle 时即时拉回）。去掉令牌条件（从未触发）和只为找脱战路径加的观察挂钩（Set Current State、ForceOffCombat、RemoveActorFromHatredList、RemoveAllActorsFromHatredList、ClearNPCHatredForOwner），它们对世界上每个 AI 都要进一次 Lua 回调。10 s 汇总改为四项计数。
+- 离线：test_combat_lock 改为四个挂钩；Lua 50 项、后端 60 项通过。
+
+剩下的走开：可能是同一单位 0.5 s 内再次脱战（等 1 s 保险），或在战斗状态里被挤在外圈走位。要再查，需要按距离和移动状态做人群快照。
+
+## v0.37.10：自由观战空格上升、Ctrl 下降（2026-11-01）
+
+用户决定剩下少量小怪走开的情况先不查（"无所谓不重要"），要求自由观战下空格也能上升、Ctrl 下降。free_camera.lua 的升降改为 max(E, SpaceBar) − max(Q, LeftControl, RightControl)，同时按不叠加、上下同时按抵消。观察期间玩家动作输入已被拦截（v0.25.1 实机：空格不会让角色跳），所以空格只控制镜头。助手六语和 README 的操作说明同步。离线：test_free_camera 新增升降一项，Lua 50 项、后端 60 项通过；实机待用户试。
+
+## v0.37.11：数值设定（按游戏 / 统一成第一只 / 自定义），自定义覆盖全部 223 项属性（2026-11-01）
+
+用户转来评论，希望 BOSS 的血量、杀气等"全维度数值"都能自定义，并要求"所有数值都可以操作"。
+
+- 属性表：`CharacterBasics.hpp` 的 `UBasicAttributeSet` 共 223 个 `FGameplayAttributeData`（218 项 + 5 个 `_Lv1` 一级基准值）。数值统一只复制其中 107 项战斗属性（`Stats.fields`，不变）；自定义可以填全部 223 项（`Stats.allFields`，头文件顺序）。
+- 写入路径：`AttributeUtils.ModifyCharacterAttributeValue`（Override=3）依赖 `/PBZCombatAsset/Config/AttributesModifyEffect/GE_MA_<属性>_1_Override`。按 asset-index.tsv 统计，这类资源（`_0_/_1_` × Add/Div/Mul/Override）各 211 个；223 项里 209 项有，14 项没有：`Infliction_Max_Lv1`、杀气防御的 Amplification/DealtVulnerability/DealtReduction 三项、`Resistance_ShachiWeapon*` 七项、`UltimateChargeGainRateMultiplier`、`ExecutionTarget{Normal,Break}HealthThreshold`。另有 `ThunderEnergy`、`WindEnergy` 的效果资源，但不在这个属性集里。
+- 这 14 项改为直接写属性集里该字段的 BaseValue 和 CurrentValue（先原地写，读不回再整体赋值），再从字段读回；它们没有原生描述符，只能读字段本身。是否被游戏的聚合器改回，要看实机隔拍读回。
+- 自定义逐项写入：先写各项上限，再写普通项，再写下限（Health_Min、Shachi_Min），最后写当前值（Health、Shield、Shachi、绝技、魂影、觉醒和各异常积累）。每项写后读回（字段 + 原生取值），游戏不接受的项单独回滚，连带恢复受它限制的当前值，并把字段名报给助手卡片；其余项照常生效。全部不接受才算失败。只设了血量或杀气上限、没设当前值时，仍以满血、满杀气入场。
+- 助手：数值设定卡片三种模式；自定义有四个常用输入框，「全部属性」窗口按 32 组列出 223 项，可搜索，每项显示游戏里的属性名。六语标签齐全（离线脚本核对 97 个标签键）。
+- 实验 `stat_field_probe.lua`（`Config.EnableStatFieldProbe`，测试版开）：载入后召唤的第一只蓝/红方单位，223 项逐项写入测试值（一般为原值 ×1.5，原值为 0 时写 1；当前值写原值 ×0.5，上限不够时临时抬高上限），隔一个支持循环（0.5 s）读回字段和原生取值，再恢复原值。每项一行日志，最后汇总 ok / base_only / reverted / unchanged / error / unreadable 的数量，并把整张属性表和测试前比较，找出被连带改动的项再恢复。
+- 离线：test_character_stats 对 223 项逐项写入读回（209 项走原生效果、14 项写字段，含"拿到的是结构体副本"的情况）；test_stat_match 新增逐项回滚、写入顺序、不可读项；test_stat_field_probe 覆盖抬高上限、隔拍读回、连带改动和单位消失；后端 62 项（223 项按模组顺序写进请求文件）。Lua 49 个测试文件、启动测试两种模式全部通过。
+
+待实机：自检日志里 223 项各是什么结果；14 项直接写字段的会不会被改回；自定义数值在交战里是否生效（血量、攻击、移动速度等）。
+
+### v0.37.11 实机读回（run-20261101-144926.log）与 v0.37.12
+
+- 自检跑在第一只召唤的双镐疯妇（等级 18、难度 Nightmare）上：测试前 223/223 项可读；汇总 ok=223，没有 base_only、reverted、unchanged、error、unreadable。每项写入后立即读回、隔 0.5 s 读回和原生取值都等于写入值。直接写字段的 14 项同样隔拍保持，例如 `Resistance_ShachiWeaponShachi` 0→1、`ExecutionTargetNormalHealthThreshold` 0.15→0.225（处决阈值是比例）、`Infliction_Max_Lv1` 1000→1500。`FinalWalkSpeed` 100→150 也没被游戏在 0.5 s 内改回。
+- 连带改动：改血量上限再改回后，当前血量按比例缩小（19767.6 → 13178.4 = 19767.6 ÷ 1.5），杀气同理。说明游戏改上限时会按比例调整当前值。自定义的写入顺序是先写上限、最后写当前值，只设上限时再补满，所以不受影响。自检结束时的整表对比把这两项恢复了。
+- `Awakening_Max` 从 0 写到 1 后写不回 0（恢复=false，整表对比后仍是 1）。游戏可能把它限制在至少 1。自定义填 0 会被判为没接受，并恢复原值。
+- 召唤失败：从第二只召唤开始全部"激活确认=0"（截图：双镐疯妇召唤失败）。原因在自检模块：测试前快照存在 `self.start`，覆盖了 `start` 方法；之后每次召唤调用 `fieldProbe:start` 都报 "attempt to call a table value"，被 arena 的 pcall 当成激活失败，日志只写 detail=unknown。
+- v0.37.12：快照改名为 `self.before`；main.lua 用 pcall 包住自检启动，失败只写日志，不影响召唤；arena 在激活回调报错时把错误写进 detail（"脚本错误: …"），不再只写 unknown。test_stat_field_probe 增加"自检进行中和结束后再次召唤"两项，用旧代码跑这条测试会失败。自检已达目的，`Config.EnableStatFieldProbe` 改回 false。
+
+### v0.37.12 实机读回（15:01 起）与 v0.37.13
+
+- 召唤恢复正常：14 次召唤全部"激活确认"，含一次 10 只。
+- 自定义数值没有生效，而且没有到达游戏。面板队列里 id=913 `set_stat_mode`（自定义：血量上限 99999、杀气上限 99999、攻击 999、削杀气 999）状态为 failed，消息"投递前资格检查失败，未执行：unknown command fields: revision"。请求文件 stat-custom-request.tsv 已写好（R929B5E4B9DA5），但模组日志里没有这条命令。之后用户切回了"按游戏"（id=916）。
+- 原因：后端入队时给自定义命令生成 revision 存进 payload，投递前会对存储的 payload 再校验一次，而校验的允许字段里没有 revision。之前的测试只调了 `_wire`，没走 `tick()` 的投递前复核。
+- v0.37.13（只改助手，模组不变）：校验接受 revision，格式必须是 R 加 12 位大写十六进制，存在时沿用、不存在才生成，所以请求文件和命令里的 revision 一致。test_backend 新增"入队后投递前复核"：自定义、按游戏、不倒下、画面计时四种命令都要走完 tick → 待回执 → 成功；用旧代码跑，自定义这条失败。test_panel_bridge 新增按后端格式（CUSTOM + revision 列）送达处理函数。
+
+### v0.37.13 实机读回（15:07 起）
+
+- 用户在交战中切到自定义（血量上限 9999、杀气上限 9999、攻击 999、削杀气 999）：命令 id=932 成功，模组设定读回为 custom，保存到 stat-match-settings.tsv。之前召唤的单位不受影响（按设计）。
+- 之后召唤的红方大头娃娃：`自定义应用并读回 verified=6/6 rejected=0`（四项 + 满血、满杀气），出生读回 HP=9999.0（同一单位按游戏是 12790.8）。交战中 9999 → 9453.6 → 4545 → 1272.6，约 3 s 后被 10 只蓝方打倒；血量上限生效，掉血正常。
+- 攻击 999 已由字段和原生取值读回确认；日志没有采样蓝方血量，伤害变化没有单独量化。

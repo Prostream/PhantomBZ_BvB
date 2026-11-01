@@ -7,7 +7,7 @@ local RESERVED={[121]=true,[192]=true,[91]=true,[92]=true}
 local TEAMS={blue=true,red=true,neutral=true,companion=true}
 local function integer(v,min,max)return type(v)=='number' and v==v and v%1==0 and v>=min and v<=max end
 local function teamOK(t)return t==nil or TEAMS[t]==true end
-local function countOK(c)return c==nil or integer(c,1,8) end
+local function countOK(c)return c==nil or integer(c,1,100) end   -- arena_controller.lua MAX_BATCH
 local function pathOK(p)return type(p)=='string' and #p<=512 and p:match('^/[%w_/%-%.]+%.[%w_%-]+_C$') and not p:find('..',1,true) and not p:find('//',1,true) end
 local function clean(s)return tostring(s or ''):gsub('[\t\r\n]',' ')end
 local function read(path)

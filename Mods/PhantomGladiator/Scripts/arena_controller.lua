@@ -1,7 +1,9 @@
 -- 纯 Lua 擂台控制：引擎访问全部由注入回调完成，调用方负责游戏线程。
 -- 只管理本控制器创建的参赛者；不枚举地图、不补伤害、不操作镜头。
 local Arena = {}
-local MAX_UNITS, MAX_BATCH = 24, 8
+-- MAX_BATCH is not a gameplay limit: a batch spawns inside one game-thread call (about 0.1 s per unit),
+-- so this only keeps one mistyped number from freezing the game. The total on the field has no cap.
+local MAX_UNITS, MAX_BATCH = 24, 100
 
 local function finite(n)
     return type(n) == "number" and n == n and n ~= math.huge and n ~= -math.huge
@@ -29,6 +31,10 @@ function Arena.new(options)
     local lastRestoreConfirmed = true
     local unknownSpawn = false
     local battleActive=false
+    -- Battle clock in game seconds (options.now): from the first status after the start in which both
+    -- sides stand, to the first in which one side has nobody alive or unreadable. It starts over when a
+    -- beaten side gets new units; stop clears it.
+    local fight={}
     local teamRevision=0
     local instance = {}
 
@@ -173,7 +179,7 @@ function Arena.new(options)
         local newCount = requestedCount == nil and count or tonumber(requestedCount)
         if not newTeam then return false, "队伍只允许 blue/red/neutral/companion" end
         if not finite(newCount) or newCount % 1 ~= 0 or newCount < 1 or newCount > MAX_BATCH then
-            return false, "单次数量必须是1到8的整数"
+            return false, "单次数量必须是1到" .. MAX_BATCH .. "的整数"
         end
         if path ~= nil then
             if type(path) ~= "string" or path == "" then return false, "单位类路径为空" end
@@ -237,6 +243,50 @@ function Arena.new(options)
         return {ok=synced,adopted=true}
     end
 
+    -- After a round of attacks a unit's AI can leave combat and walk back to where it spawned: 50 against
+    -- one boss (run-20261101-125613.log) left the boss untouched for 26 s and later 69 s while the units
+    -- stood at their spawn slots. combat_lock.lua keeps them in combat during a fight; as a safety net,
+    -- every second a unit found out of combat is sent at its target again. A unit in combat is never forced
+    -- (forcing every tick interrupts its attacks).
+    local REENGAGE_SECONDS,REENGAGE_LINES,SUMMARY_SECONDS=1,20,10
+    local reengage={lines=0,total=0}
+    -- The opponent fewest units are already sent at, so a crowd spreads over several enemies.
+    local function leastAttacked(unit,active)
+        local load={}
+        for _,other in ipairs(active) do
+            if other.assignedKey then load[other.assignedKey]=(load[other.assignedKey] or 0)+1 end
+        end
+        local best,bestLoad
+        for _,other in ipairs(active) do
+            if other.team~=unit.team then
+                local n=load[other.key] or 0
+                if not best or n<bestLoad then best,bestLoad=other,n end
+            end
+        end
+        return best
+    end
+
+    -- The moment a fighting unit's AI drops out of combat (combat_lock.lua sees its CombatToIdle
+    -- transition), send it back at its target, before it walks away. Unit by its address key.
+    local instant={lines=0,total=0}
+    function instance:reengage(key)
+        if not battleActive or busy or not key then return false end
+        for _,unit in ipairs(units) do
+            if unit.key==key and (unit.team=='blue' or unit.team=='red') then
+                if alive_readback(unit)~=true or not unit.assignedTarget or alive_readback({actor=unit.assignedTarget})~=true then return false end
+                local called,engaged,after,detail=invoke('engage',unit.actor,unit.assignedTarget)
+                instant.total=instant.total+1
+                if instant.lines<REENGAGE_LINES then
+                    instant.lines=instant.lines+1
+                    log('即时重新迎敌 '..actor_name(unit.actor)..' -> '..actor_name(unit.assignedTarget)..'；调用='..tostring(called and engaged)
+                        ..' 状态读回='..tostring(after)..' '..tostring(detail or '')..' 累计='..instant.total)
+                end
+                return called and engaged==true
+            end
+        end
+        return false
+    end
+
     function instance:tickReinforcements()
         if not battleActive or busy or state=='cleanup_pending' or state=='restore_pending' or spawn_block() then return end
         prune()
@@ -244,9 +294,13 @@ function Arena.new(options)
         for _,unit in ipairs(units) do
             if (unit.team=='blue' or unit.team=='red') and alive_readback(unit)==true then
                 local ok,ready=invoke('combatReady',unit.actor)
-                if ok and ready==true then active[#active+1]=unit end
+                if ok and ready==true then unit.key=unit.key or actor_key(unit.actor);active[#active+1]=unit end
             end
         end
+        local okNow,now=invoke('now')
+        if not okNow or not finite(now) then now=os.clock() end
+        local scan=not reengage.scanAt or now-reengage.scanAt>=REENGAGE_SECONDS
+        if scan then reengage.scanAt=now end
         for _,unit in ipairs(active) do
             if unit.needsJoin then
                 local verified=true
@@ -263,14 +317,32 @@ function Arena.new(options)
             -- Issue once for a new unit or after its assigned opponent dies.
             -- Never force the same live target every tick and interrupt attacks.
             if not unit.assignedTarget or alive_readback({actor=unit.assignedTarget})==false then
-                local target
-                for _,other in ipairs(active) do if other.team~=unit.team then target=other.actor;break end end
+                local target=leastAttacked(unit,active)
                 if target then
-                    local called,verified=invoke('forceAttack',unit.actor,target)
-                    if called then unit.assignedTarget=target end
-                    log('增援/换敌请求 '..actor_name(unit.actor)..' -> '..actor_name(target)..'；读回='..tostring(called and verified))
+                    local called,verified=invoke('forceAttack',unit.actor,target.actor)
+                    if called then unit.assignedTarget,unit.assignedKey=target.actor,target.key end
+                    log('增援/换敌请求 '..actor_name(unit.actor)..' -> '..actor_name(target.actor)..'；读回='..tostring(called and verified))
+                end
+            elseif scan and options.inCombat and options.engage then
+                local okState,combat,stateName=invoke('inCombat',unit.actor)
+                if okState and combat==false then
+                    local called,engaged,after,detail=invoke('engage',unit.actor,unit.assignedTarget)
+                    reengage.total=reengage.total+1
+                    reengage.window=(reengage.window or 0)+1
+                    if reengage.lines<REENGAGE_LINES then
+                        reengage.lines=reengage.lines+1
+                        log('重新迎敌 '..actor_name(unit.actor)..' 状态='..tostring(stateName)..' -> '..actor_name(unit.assignedTarget)
+                            ..'；调用='..tostring(called and engaged)..' 状态读回='..tostring(after)..' '..tostring(detail or ''))
+                    end
                 end
             end
+        end
+        if not reengage.since then reengage.since=now end
+        if now-reengage.since>=SUMMARY_SECONDS then
+            if (reengage.window or 0)>0 then
+                log(string.format('重新迎敌汇总：近 %.0f 秒 %d 次，累计 %d 次，参战 %d 个',now-reengage.since,reengage.window,reengage.total,#active))
+            end
+            reengage.since,reengage.window=now,0
         end
     end
 
@@ -278,15 +350,17 @@ function Arena.new(options)
         local length = math.sqrt(forward.X * forward.X + forward.Y * forward.Y)
         if length < 0.0001 then return nil end
         local x, y = forward.X / length, forward.Y / length
+        -- Rows of five (companions: four) 3 m apart, so a batch of 50 stays within about 33 m ahead.
         local distance, lateral
+        local row, col = math.floor((slot - 1) / 5), (slot - 1) % 5
         if whichTeam == "neutral" then
-            distance, lateral = 600 + (slot - 1) * 360, 0
+            distance, lateral = 600 + row * 300, ({ 0, -300, 300, -600, 600 })[col + 1]
         elseif whichTeam == "companion" then
-            distance = 150 - math.floor((slot - 1) / 2) * 200
-            lateral = 300 * (slot % 2 == 1 and -1 or 1)
+            row, col = math.floor((slot - 1) / 4), (slot - 1) % 4
+            distance, lateral = 150 - row * 250, ({ -300, 300, -600, 600 })[col + 1]
         else
-            distance = 600 + math.floor((slot - 1) / 3) * 360
-            lateral = (360 + ((slot - 1) % 3) * 360) * (whichTeam == "blue" and -1 or 1)
+            distance = 600 + row * 300
+            lateral = (360 + col * 300) * (whichTeam == "blue" and -1 or 1)
         end
         return { Rotation = { X = 0, Y = 0, Z = 0, W = 1 }, Scale3D = { X = 1, Y = 1, Z = 1 },
             Translation = { X = origin.X + x * distance - y * lateral,
@@ -394,7 +468,7 @@ function Arena.new(options)
                     else failures = failures + 1; cleanupRequired=true end
                     if type(warning)=='string' and warning~='' then spawnWarning=warning end
                     log("召唤读回 actor=" .. actor_name(actor) .. " HP=" .. health(actor)
-                        .. " activate=" .. tostring(okActivate and activation) .. " detail=" .. tostring(detail or "unknown"))
+                        .. " activate=" .. tostring(okActivate and activation) .. " detail=" .. tostring(okActivate and (detail or "unknown") or ("脚本错误: " .. tostring(activation))))
                     if cleanupRequired then break end
                 else
                     failures = failures + 1
@@ -478,7 +552,9 @@ function Arena.new(options)
                         local ok, verified = invoke("forceAttack", attacker, opponent)
                         local attackerKey=actor_key(attacker)
                         for _,unit in ipairs(units) do
-                            if attackerKey and actor_key(unit.actor)==attackerKey then unit.assignedTarget=opponent;unit.needsJoin=false;break end
+                            if attackerKey and actor_key(unit.actor)==attackerKey then
+                                unit.assignedTarget,unit.assignedKey=opponent,actor_key(opponent);unit.needsJoin=false;break
+                            end
                         end
                         requests = requests + 1
                         if not ok or verified ~= true then failures = failures + 1 end
@@ -502,6 +578,7 @@ function Arena.new(options)
     function instance:stop()
         return run(function()
             battleActive=false
+            fight={}
             log("停止阶段=恢复会话；随后仅销毁本控制器登记的参赛者")
             local okRestore, restored = invoke("restore")
             lastRestoreConfirmed=okRestore and restored==true
@@ -559,6 +636,7 @@ function Arena.new(options)
         prune()
         local blue, red, neutral, unreadable, dead,neutralOwned,summons = 0, 0, 0, 0, 0,0,0
         local companions,companionOwned=0,0
+        local unread={}
         for _, unit in ipairs(units) do
             if unit.summoner then summons=summons+1 end
             if unit.team=='neutral' then neutralOwned=neutralOwned+1 end
@@ -568,26 +646,45 @@ function Arena.new(options)
                 if unit.team == "blue" then blue = blue + 1 elseif unit.team == "red" then red = red + 1
                 elseif unit.team == "companion" then companions = companions + 1 else neutral = neutral + 1 end
             elseif alive==false then dead=dead+1
-            else unreadable=unreadable+1 end
+            else unreadable=unreadable+1;unread[unit.team]=(unread[unit.team] or 0)+1 end
             if unit.countedAlive~=alive and (alive==false or unit.countedAlive==false) then
                 log('存活人数更新 team='..unit.team..' actor='..actor_name(unit.actor)..'；读回='..proof..' alive='..tostring(alive)..'；保留所有权供清理')
             end
             unit.countedAlive=alive
         end
+        local okNow,now=invoke('now')
+        if okNow and finite(now) then
+            local over=battleActive and (blue+(unread.blue or 0)==0 or red+(unread.red or 0)==0)
+            if battleActive and blue>0 and red>0 and (not fight.started or fight.ended) then
+                fight={started=now};log('战斗计时开始 蓝='..blue..' 红='..red..' 游戏时间='..string.format('%.2f',now))
+            elseif over and fight.started and not fight.ended then
+                fight.ended=now;log(string.format('战斗计时结束 用时=%.2f秒 蓝=%d 红=%d',now-fight.started,blue,red))
+            end
+            fight.now=now
+        end
         return { blue_count = blue, red_count = red, neutral_count = neutral, total = blue + red + neutral,
             owned_records = #units,neutral_owned=neutralOwned,companion_count=companions,companion_owned=companionOwned,unreadable_count = unreadable, dead_count=dead,max_units=maxUnits,summon_count=summons,battle_active=battleActive,current_unit = selected or "", current_team = team,
-            current_count = count,team_revision=teamRevision, state = state, message = message, busy = busy }
+            current_count = count,team_revision=teamRevision, state = state, message = message, busy = busy,
+            battle_clock=fight.started and (fight.ended and 'ended' or 'running') or '',
+            battle_seconds=fight.started and math.max(0,(fight.ended or fight.now)-fight.started) or 0 }
     end
 
     -- Called by the existing panel loop once a second, including before a duel.
     -- This is observation only; a health change does not identify its attacker.
     function instance:sampleHealth()
+        local okNow,now=invoke('now')
+        if not okNow or not finite(now) then now=os.clock() end
+        -- With a crowd on the field each unit logs at most every 5 s, and always when it falls.
+        local crowded=#units>12
         for _,unit in ipairs(units) do
             if removed(unit.actor)==false then
                 local ok,hp=invoke('hp',unit.actor)
                 if ok and finite(hp) and hp~=unit.lastHP then
-                    log('生命读回 team='..unit.team..' actor='..actor_name(unit.actor)
-                        ..' HP='..tostring(unit.lastHP or 'initial')..' -> '..tostring(hp)..'；只读，伤害来源待画面核对')
+                    if not crowded or hp<=0 or not unit.hpLoggedAt or now-unit.hpLoggedAt>=5 then
+                        log('生命读回 team='..unit.team..' actor='..actor_name(unit.actor)
+                            ..' HP='..tostring(unit.lastHP or 'initial')..' -> '..tostring(hp)..'；只读，伤害来源待画面核对')
+                        unit.hpLoggedAt=now
+                    end
                     unit.lastHP=hp
                 end
             end

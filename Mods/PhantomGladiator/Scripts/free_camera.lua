@@ -192,7 +192,9 @@ function Camera.new(options)
             local mx,my=axis(s.pc,'MouseX'),axis(s.pc,'MouseY')
             local forward=axis(s.pc,'W')-axis(s.pc,'S')
             local right=axis(s.pc,'D')-axis(s.pc,'A')
-            local up=axis(s.pc,'E')-axis(s.pc,'Q')
+            -- Up: E or Space; down: Q or either Ctrl. Player actions are blocked while observing, so
+            -- Space does not make the character jump.
+            local up=math.max(axis(s.pc,'E'),axis(s.pc,'SpaceBar'))-math.max(axis(s.pc,'Q'),axis(s.pc,'LeftControl'),axis(s.pc,'RightControl'))
             local fast=math.max(axis(s.pc,'LeftShift'),axis(s.pc,'RightShift'))>0
             if mx==0 and my==0 and forward==0 and right==0 and up==0 then return end
             local sensitivity=options.mouseSensitivity or 1.0
@@ -293,7 +295,7 @@ function Camera.new(options)
             self.active=true
             self.handle=LoopInGameThreadWithDelay(16,function()self:tick()end)
             assert(self.handle~=nil and self.handle~=false,'camera timer registration not confirmed')
-            log('[FreeCamera] 已进入；原控制器/Player/Pawn关联读回=true；view_target='..record.camera..'；面板或自定义键退出，WASD移动、Q/E升降、Shift加速、鼠标转向')
+            log('[FreeCamera] 已进入；原控制器/Player/Pawn关联读回=true；view_target='..record.camera..'；面板或自定义键退出，WASD移动、E或空格上升、Q或Ctrl下降、Shift加速、鼠标转向')
         end)
         if not ok then
             log('[FreeCamera] 进入未完成：'..tostring(err))

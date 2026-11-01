@@ -350,6 +350,21 @@ test("stat matching toggle uses native settings and status; missing module fails
     local missing=harness();missing.runtime:start();missing.inbox={action='toggle_stat_match'};missing:tick()
     assert(not missing.result.ok and missing.reported.stat_match_supported==false)
 end)
+test("stat mode command passes mode and revision through and reports the custom values",function()
+    local h=harness();local got={}
+    local matching={setMode=function(_,mode,revision)
+        assert(h.inGame);got={mode,revision};return {ok=true,message='fixture mode',spawned_count=0}
+    end,status=function()return {enabled=true,mode='custom',customized=3,custom_count=5,custom={Health_Max=50000,Attack=120},
+        rejected={'Shield','Health','A1','A2','A3','A4','A5','A6','A7','A8','A9','A10','A11'}}end}
+    h.runtime=h.new({statMatch=matching});h.runtime:start()
+    h.inbox={action='set_stat_mode',key_spawn='CUSTOM',key_start='R0A1B2C3D4E5F'};h:tick()
+    assert(h.result.ok and got[1]=='CUSTOM' and got[2]=='R0A1B2C3D4E5F')
+    assert(h.reported.stat_match_mode=='custom' and h.reported.stat_match_customized==3 and h.reported.stat_custom_count==5)
+    assert(h.reported.stat_custom_health==50000 and h.reported.stat_custom_attack==120 and h.reported.stat_custom_shachi=='')
+    assert(h.reported.stat_custom_rejected==13 and h.reported.stat_custom_rejected_fields=='Shield,Health,A1,A2,A3,A4,A5,A6,A7,A8,A9,A10')
+    local missing=harness();missing.runtime:start();missing.inbox={action='set_stat_mode',key_spawn='GAME'};missing:tick()
+    assert(not missing.result.ok)
+end)
 test("companions are dismissed on their own and reported apart from the arena",function()
     local h=harness()
     h.runtime=h.new({companions={status=function()return {follow=2,friendly=2,failures=1,message='m'}end}});h.runtime:start()
@@ -371,6 +386,32 @@ test("spawn difficulty takes its token from the key_spawn column and reports the
     assert(h.reported.spawn_difficulty_supported and h.reported.spawn_difficulty_applied==1)
     local missing=harness();missing.runtime:start();missing.inbox={action='set_spawn_difficulty',key_spawn='HARD'};missing:tick()
     assert(not missing.result.ok and missing.reported.spawn_difficulty_supported==false)
+end)
+test("不倒下 takes its team from the team column and ON/OFF from key_start; the battle clock is reported",function()
+    local h=harness();local on={blue=false,red=false,companion=false}
+    local immortal={set=function(_,team,value)
+        assert(h.inGame);on[team]=value=='ON';return {ok=true,message='fixture immortal',spawned_count=0}
+    end,status=function()return {blue=on.blue,red=on.red,companion=on.companion,locked=3,failures=1,breaches=2,message='m'}end}
+    h.runtime=h.new({immortal=immortal});h.runtime:start()
+    h.inbox={action='set_team_immortal',team='red',key_start='ON'};h:tick()
+    assert(h.result.ok and on.red and h.reported.immortal_red and not h.reported.immortal_blue and h.reported.immortal_supported)
+    assert(h.reported.immortal_locked==3 and h.reported.immortal_failures==1 and h.reported.immortal_breaches==2)
+    assert(h.reported.battle_clock=='' and h.reported.battle_seconds=='0.0','no clock in the arena fixture')
+    -- panel_bridge.lua writes at most 256 entries; v0.36.0 lost random ones past the old cap of 100.
+    local entries=0;for _ in pairs(h.reported)do entries=entries+1 end
+    assert(entries<200,'status entries: '..entries)
+    local missing=harness();missing.runtime:start();missing.inbox={action='set_team_immortal',team='red',key_start='ON'};missing:tick()
+    assert(not missing.result.ok and missing.reported.immortal_supported==false)
+end)
+test("the on-screen clock switch takes ON/OFF from key_start and reports its state",function()
+    local h=harness();local on=false
+    local clock={set=function(_,value)assert(h.inGame);on=value=='ON';return {ok=true,message='fixture clock',spawned_count=0}end,
+        status=function()return {on=on,state=on and 'waiting' or 'off',failures=0,message=''}end}
+    h.runtime=h.new({clockHUD=clock});h.runtime:start()
+    h.inbox={action='set_clock_hud',key_start='ON'};h:tick()
+    assert(h.result.ok and on and h.reported.clock_hud and h.reported.clock_hud_state=='waiting' and h.reported.clock_hud_supported)
+    local missing=harness();missing.runtime:start();missing.inbox={action='set_clock_hud',key_start='ON'};missing:tick()
+    assert(not missing.result.ok and missing.reported.clock_hud_supported==false)
 end)
 
 test('camera buttons and configured keys use synchronous game-thread handlers; exit survives loading',function()

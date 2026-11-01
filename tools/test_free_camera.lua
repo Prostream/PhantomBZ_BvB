@@ -116,6 +116,18 @@ test('observer blocks player actions while raw movement remains available and re
     assert(h.cameraController:stop('F6'));h:pressAction();assert(h.actions==2)
 end)
 
+test('E or Space raises the camera, Q or Ctrl lowers it',function()
+    local h=harness();assert(h.cameraController:enter())
+    local function height(keys)
+        h.input={};for k,v in pairs(keys)do h.input[k]=v end
+        local before=h.camera.position.Z;h.time=h.time+0.05;h:tick();return h.camera.position.Z-before
+    end
+    assert(height({SpaceBar=1})>0 and height({E=1})>0,'Space and E go up')
+    assert(height({LeftControl=1})<0 and height({RightControl=1})<0 and height({Q=1})<0,'either Ctrl and Q go down')
+    assert(height({SpaceBar=1,E=1})==height({SpaceBar=1}),'Space and E together are not faster')
+    assert(height({SpaceBar=1,LeftControl=1})==0,'up and down cancel')
+end)
+
 test('view target changes without replacing PlayerController, Player or Pawn; exit restores',function()
     local h=harness();local c=h.cameraController
     assert(c:enter() and c:isActive())

@@ -26,11 +26,18 @@ const RealRuntime = (() => {
     team: "blue",
     spectator: false,
     spectatorPhase: "",
-    statMatch: { enabled: false, baseline: null, matched: 0, failures: 0, reset: false },
+    // mode: game | match | custom (stat_match_mode); custom values: the core four here, all of them from /api/stat-settings.
+    statMatch: { enabled: false, mode: "game", modeSupported: false, baseline: null, matched: 0, failures: 0, reset: false, customCount: 0, customized: 0, rejected: [], rejectedCount: 0, values: {} },
     // spawn_difficulty_*: the level new units take (FOLLOW = the game's), the game's own level, counts.
     difficulty: { level: "FOLLOW", game: "", supported: false, failures: 0, skipped: 0, aiFailed: 0 },
     // fun_*: the player-only switches saved by fun_features.lua and what each one reads back.
     fun: { supported: false, shachi: false, deflect: false, dodge: false, shachiState: "off", guardState: "off", deflects: 0, dodges: 0 },
+    // immortal_*: the 不倒下 switch of each team (immortal_teams.lua), units locked, locks that did not take.
+    immortal: { supported: false, blue: false, red: false, companion: false, locked: 0, failures: 0 },
+    // battle_clock / battle_seconds: game seconds of the current or last fight (arena_controller.lua).
+    clock: { state: "", seconds: 0 },
+    // clock_hud_*: the on-screen clock switch and whether the game shows it (battle_clock_hud.lua).
+    clockHud: { supported: false, on: false, state: "off" },
     fight: "idle",
     winner: "",
     // arena_state after a cleanup the mod could not confirm: cleanup_pending / restore_pending need
@@ -161,6 +168,13 @@ const RealRuntime = (() => {
       s.cleanup = ["cleanup_pending", "restore_pending", "spawn_uncertain"].includes(v.arena_state) ? v.arena_state : "";
       const m = s.statMatch, base = v.stat_match_baseline_unit;
       m.enabled = yes("stat_match_enabled");
+      m.modeSupported = !!v.stat_match_mode;
+      m.mode = ["game", "match", "custom"].includes(v.stat_match_mode) ? v.stat_match_mode : m.enabled ? "match" : "game";
+      m.customCount = num("stat_custom_count");
+      m.customized = num("stat_match_customized");
+      // The fields the game did not take on the last custom unit (stat_match.lua), first twelve by name.
+      m.rejectedCount = num("stat_custom_rejected");
+      m.rejected = String(v.stat_custom_rejected_fields || "").split(",").filter(Boolean);
       m.baseline = base ? { id: shortOf(base), hp: num("stat_match_health"), shachi: num("stat_match_shachi"), atk: num("stat_match_attack"), satk: num("stat_match_shachi_attack") } : null;
       m.matched = num("stat_match_count");
       m.failures = num("stat_match_failures");
@@ -184,12 +198,20 @@ const RealRuntime = (() => {
       f.guardState = v.fun_guard_state || "off";
       f.deflects = num("fun_deflect_pressed");
       f.dodges = num("fun_dodge_pressed");
+      const im = s.immortal;
+      im.supported = yes("immortal_supported");
+      for (const team of ["blue", "red", "companion"]) im[team] = yes("immortal_" + team);
+      im.locked = num("immortal_locked");
+      im.failures = num("immortal_failures");
+      s.clock = { state: v.battle_clock || "", seconds: num("battle_seconds") };
+      s.clockHud = { supported: yes("clock_hud_supported"), on: yes("clock_hud"), state: v.clock_hud_state || "off" };
       s.scan = v.catalog_state === "scanning" ? { done: num("catalog_paths_done"), total: Math.max(1, num("catalog_paths_total")) } : null;
     } else {
       // Closing the game removes everything the mod spawned.
       Object.assign(s, { blue: 0, red: 0, neutral: 0, companion: 0, down: { blue: 0, red: 0, neutral: 0, companion: 0 }, unreadable: 0, freeCam: false, spectator: false, fight: "idle", winner: "", cleanup: "", synced: null, scan: null });
       Object.assign(s.statMatch, { baseline: null, matched: 0, failures: 0, reset: false });
       s.difficulty.game = "";
+      s.clock = { state: "", seconds: 0 };
       owned = 0;
     }
     const toggling = jobs.some(j => j.action === "toggle_spectator" && j.status === "pending");
@@ -226,14 +248,17 @@ const RealRuntime = (() => {
     // Re-render only the parts whose data moved, so a 500 ms poll never resets what the player is doing.
     const sig = {
       topbar: [s.game, jobs.filter(j => j.status === "failed" || j.status === "uncertain").length],
-      sel: [s.game, s.cleanup, s.team, JSON.stringify(s.synced), s.spectator, s.statMatch.enabled, s.statMatch.baseline?.id, s.keys.spawn?.code, s.keys.spawn?.mods],
+      sel: [s.game, s.cleanup, s.team, JSON.stringify(s.synced), s.spectator, s.statMatch.mode, s.statMatch.customCount, s.statMatch.baseline?.id, s.keys.spawn?.code, s.keys.spawn?.mods],
       solo: [s.game, s.neutral, s.down.neutral, s.spectator, s.spectatorPhase, s.freeCam],
-      companion: [s.game, s.companion, s.down.companion, s.companionFailures],
-      match: [s.game, JSON.stringify(s.statMatch)],
+      companion: [s.game, s.companion, s.down.companion, s.companionFailures, s.immortal.supported, s.immortal.companion],
+      match: [s.game, JSON.stringify({ ...s.statMatch, values: undefined })],
       diff: [s.game, JSON.stringify(s.difficulty)],
       fun: [s.game, JSON.stringify(s.fun)],
-      battle: [s.game, s.cleanup, s.blue, s.red, s.neutral, s.down.blue, s.down.neutral, s.unreadable, s.fight, owned, JSON.stringify([s.keys.start, s.keys.stop])],
-      view: [s.game, s.spectator, s.spectatorPhase, s.freeCam, JSON.stringify([s.keys.toggle_camera, s.keys.toggle_spectator])],
+      battle: [s.game, s.cleanup, s.blue, s.red, s.neutral, s.down.blue, s.down.neutral, s.unreadable, s.fight, owned, JSON.stringify([s.keys.start, s.keys.stop]),
+        s.immortal.supported, s.immortal.blue, s.immortal.red, s.immortal.failures, s.clock.state],
+      // Only the clock text moves every second; the battle card is not rebuilt for it.
+      clock: [s.clock.state, s.clock.seconds],
+      view: [s.game, s.spectator, s.spectatorPhase, s.freeCam, JSON.stringify([s.keys.toggle_camera, s.keys.toggle_spectator]), JSON.stringify(s.clockHud)],
       keys: [s.game, JSON.stringify(s.keys)],
       settings: [s.game, JSON.stringify(s.scan)],
     };
@@ -273,6 +298,9 @@ const RealRuntime = (() => {
     }
     else if (action === "set_spawn_difficulty") body = { action, difficulty: payload.difficulty };
     else if (action === "set_fun_feature") body = { action, feature: payload.feature, enabled: payload.enabled };
+    else if (action === "set_team_immortal") body = { action, team: payload.team, enabled: payload.enabled };
+    else if (action === "set_clock_hud") body = { action, enabled: payload.enabled };
+    else if (action === "set_stat_mode") body = payload.mode === "custom" ? { action, mode: payload.mode, values: payload.values } : { action, mode: payload.mode };
     else if (action === "configure_keys") { path = "/api/keybinds"; body = Object.fromEntries(KEY_NAMES.map(k => [k, wireKey(payload.bindings[k])])); }
     else body = { action };
     const held = action === "stop" ? owned : action === "clear_neutral" ? s.neutral + s.down.neutral : 0;
@@ -297,6 +325,12 @@ const RealRuntime = (() => {
     // The mod saved and read the choice back; show it before the next poll does.
     if (action === "set_spawn_difficulty" && done.status === "succeeded") s.difficulty.level = payload.difficulty;
     if (action === "set_fun_feature" && done.status === "succeeded") s.fun[payload.feature.toLowerCase()] = payload.enabled;
+    if (action === "set_team_immortal" && done.status === "succeeded") s.immortal[payload.team] = payload.enabled;
+    if (action === "set_clock_hud" && done.status === "succeeded") s.clockHud.on = payload.enabled;
+    if (action === "set_stat_mode" && done.status === "succeeded") {
+      s.statMatch.mode = payload.mode;
+      if (payload.mode === "custom") { s.statMatch.values = { ...payload.values }; s.statMatch.customCount = Object.keys(payload.values).length; }
+    }
     return done;
   }
 
@@ -370,6 +404,12 @@ const RealRuntime = (() => {
     setup,
     update,
     openFolder: () => host("openFolder"),
+    // The spawn stat mode and every custom value the mod saved (backend.py stat_settings).
+    async statSettings() {
+      const r = await fetch("/api/stat-settings", { cache: "no-store" });
+      if (!r.ok) throw fail("rejected");
+      return r.json();
+    },
     exportReport: () => host("exportReport"),
     // Prototype demo hooks; the packaged app has no demo panel.
     setGame() {}, cycleTeam() {}, defeatSolo() {}, toggleFreeCam() {}, set() {},

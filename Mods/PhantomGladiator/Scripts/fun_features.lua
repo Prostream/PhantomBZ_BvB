@@ -550,10 +550,13 @@ function Fun.new(options)
         syncLoop()
         local pawn=options.getPlayer and options.getPlayer()
         self.pawn=U.valid(pawn) and pawn or nil
-        local fresh={}
+        local fresh,count={},0
         for _,unit in ipairs(options.members and options.members() or {})do
-            local key=U.key(unit.actor);if key then fresh[key]=unit.actor end
+            local key=U.key(unit.actor);if key then fresh[key]=unit.actor;count=count+1 end
         end
+        -- The per-frame hit probe reads every unit's health: a one-on-one diagnostic (v0.36.4), stopped
+        -- with more than four units on the field (50 would mean 50 health reads every frame).
+        if count>4 then fresh={} end
         for key in pairs(targetHp)do if not fresh[key] then targetHp[key]=nil end end
         targets=fresh
         if self.on.SHACHI then

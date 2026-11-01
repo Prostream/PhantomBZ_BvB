@@ -39,6 +39,8 @@ Config.EnableNPCGrabs = true
 Config.EnableGrabStudy = false
 -- 召唤后只读记录召唤单位和参照地图怪的数值来源（等级曲线、难度系数），每只约14行日志；调查数值时再开。
 Config.EnableStatFormulaProbe = false
+-- 召唤的第一只蓝/红方单位把223项属性逐项写入测试值、隔0.5秒读回再恢复，每项一行日志，约15秒；核对自定义数值时再开。
+Config.EnableStatFieldProbe = false
 
 -- 历史碰撞复制实验，默认关；响应差异不证明实际攻击查询通道。
 Config.CopyPlayerHurtChannels = false

@@ -184,7 +184,7 @@ end
 assert(restoreIndex < destroyIndex)
 
 f = fixture()
-assert(not f.arena:select("/Catalog/X.X_C", "red", 9).ok)
+assert(not f.arena:select("/Catalog/X.X_C", "red", 101).ok and f.arena:select("/Catalog/X.X_C", "red", 50).ok)
 assert(not f.arena:spawn(nil, "invalid", 1).ok and #f.actors == 0)
 assert(not f.arena:spawn(nil, "blue", 1.5).ok)
 for _ = 1, 3 do assert(f.arena:spawn(nil, "blue", 8).ok) end
@@ -458,4 +458,89 @@ assert(stopped.ok and stopped.remaining_count==0 and c.arena:status().state=='id
 assert(c.actors[1].alive and c.actors[2].alive and not c.actors[3].alive and c.arena:status().companion_count==2)
 local dismissed=c.arena:clearCompanions()
 assert(dismissed.ok and dismissed.destroyed_count==2 and not c.actors[1].alive and c.arena:status().companion_owned==0)
+
+-- A batch of 50: allowed, every slot distinct, laid out in rows of five within about 33 m ahead and
+-- 16 m to the side; a single no-team unit still appears straight ahead.
+local big=fixture({maxUnits=0})
+local bigResult=big.arena:spawn(nil,'blue',50)
+assert(bigResult.ok and bigResult.spawned_count==50 and big.arena:status().blue_count==50,bigResult.message)
+local seenSlots={}
+for _,transform in ipairs(big.transforms)do
+    local p=transform.Translation
+    local key=p.X..','..p.Y
+    assert(not seenSlots[key],'50 slots must be distinct');seenSlots[key]=true
+    assert(p.X>=600 and p.X<=600+9*300 and p.Y<=-360 and p.Y>=-(360+4*300),'blue rows of five on the left: '..key)
+end
+assert(not big.arena:spawn(nil,'red',101).ok,'more than 100 in one summon is refused')
+local solo=fixture()
+assert(solo.arena:spawn(nil,'neutral',1).ok and solo.transforms[1].Translation.Y==0,'one no-team unit straight ahead')
+
+-- Safety net behind combat_lock.lua: every second a unit found out of combat (it walks home after a round)
+-- is sent at its target again; units in combat are never forced. A unit whose target died goes for the
+-- least attacked enemy.
+do
+    local t,combat,engaged=200,{},{}
+    local r=fixture({now=function()return t end,
+        inCombat=function(actor)local c=combat[actor]~=false;return c,c and 'AI.State.Combat' or 'AI.State.Idle' end,
+        engage=function(actor,target)engaged[#engaged+1]={actor,target};return true,'AI.State.Combat' end})
+    assert(r.arena:spawn(nil,'blue',3).ok and r.arena:spawn(nil,'red',2).ok and r.arena:start().ok)
+    local b1,b2,b3,r1,r2=r.actors[1],r.actors[2],r.actors[3],r.actors[4],r.actors[5]
+    r.arena:tickReinforcements()
+    assert(#engaged==0,'units in combat are left alone')
+    combat[b2]=false
+    t=200.5;r.arena:tickReinforcements()
+    assert(#engaged==0,'the safety net looks once a second')
+    t=201;r.arena:tickReinforcements()
+    assert(#engaged==1 and engaged[1][1]==b2 and engaged[1][2]==r2,'b2 is sent back at its own target (round robin gave it r2)')
+    t=201.5;r.arena:tickReinforcements()
+    assert(#engaged==1)
+    t=202;r.arena:tickReinforcements()
+    assert(#engaged==2 and engaged[2][1]==b2)
+    combat[b2]=nil;t=206;r.arena:tickReinforcements()
+    assert(#engaged==2,'back in combat: not forced again')
+    -- r1 dies: b1 and b3 (both sent at r1) take the least attacked enemy, which is r2.
+    r1.hp=0;t=207
+    local attacks=stageCount(r,'attack')
+    r.arena:tickReinforcements()
+    assert(stageCount(r,'attack')==attacks+2,'both attackers of the fallen enemy get a new target')
+    local last=r.trace[#r.trace]
+    assert(last[1]=='attack' and last[3]==r2)
+    -- Instant send-back by key: the unit goes at its live target; unknown keys, dead targets, the
+    -- stopped arena are refused.
+    local before=#engaged
+    assert(r.arena:reengage(tostring(b2)) and #engaged==before+1 and engaged[#engaged][1]==b2 and engaged[#engaged][2]==r2)
+    assert(not r.arena:reengage('nobody') and not r.arena:reengage(nil))
+    r2.hp=0;assert(not r.arena:reengage(tostring(b2)),'its target is down')
+    assert(r.arena:stop().ok and not r.arena:reengage(tostring(b1)),'no fight, no send-back')
+end
+
+-- Battle clock in game seconds: runs once both sides stand after the start, stops when one side has
+-- nobody alive or unreadable, starts over when the beaten side gets new units, and stop clears it.
+local now=100
+local k=fixture({now=function()return now end})
+assert(k.arena:status().battle_clock=='' and k.arena:status().battle_seconds==0,'no clock before a fight')
+assert(k.arena:spawn(nil,'blue',1).ok and k.arena:spawn(nil,'red',2).ok)
+now=103;assert(k.arena:status().battle_clock=='','summoning alone does not start the clock')
+assert(k.arena:start().ok)
+now=105;local ks=k.arena:status()
+assert(ks.battle_clock=='running' and ks.battle_seconds==0,'the clock starts at the first status after the start')
+now=110.5;assert(k.arena:status().battle_seconds==5.5)
+k.actors[2].hp=0;now=112;assert(k.arena:status().battle_clock=='running','one red still stands')
+k.options.valid=function(object)
+    if object==k.actors[3] then error('unreadable') end
+    return object~=nil and object.alive==true
+end
+k.actors[3].hp=0;now=114
+assert(k.arena:status().battle_clock=='running','an unreadable unit does not end the fight')
+k.options.valid=function(object)return object~=nil and object.alive==true end
+now=117;ks=k.arena:status()
+assert(ks.battle_clock=='ended' and ks.battle_seconds==12,'red wiped out at 117, 12 s after 105')
+now=130;assert(k.arena:status().battle_seconds==12,'an ended fight keeps its time')
+assert(k.arena:spawn(nil,'red',1).ok)
+now=131;ks=k.arena:status()
+assert(ks.battle_clock=='running' and ks.battle_seconds==0,'new units on the beaten side start a new fight')
+assert(k.arena:stop().ok and k.arena:status().battle_clock=='','stop clears the clock')
+local noClock=fixture()
+assert(noClock.arena:spawn(nil,'blue',1).ok and noClock.arena:spawn(nil,'red',1).ok and noClock.arena:start().ok)
+assert(noClock.arena:status().battle_clock=='','without a game clock nothing is timed')
 print("arena_controller: PASS (spawn policy, loading gate, pending-cleanup gate, combat preflight, warning ownership, spacing, teams, caps, partial failures, cleanup retries, deferred destruction, unknown readbacks)")

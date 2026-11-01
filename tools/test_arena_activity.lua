@@ -31,16 +31,37 @@ assert(activity:status().bone_refresh_count==1)
 assert(table.concat(observed,'\n'):find('HP=123 Shachi=45',1,true),'diagnostics must use actual attributes')
 camera=true;activity:sync({{actor=actor,class_path='owned'}})
 assert(proxy.calls==1 and activity:status().free_camera,'stable full-update actors must not be rewritten every frame')
-proxy.wave=3;activity:sync({{actor=actor,class_path='owned'}})
+-- A settled unit is looked at again every 10th sync (5 s), so a crowd costs one check per unit per round.
+proxy.wave=3;for _=1,10 do activity:sync({{actor=actor,class_path='owned'}})end
 assert(activity:status().full_update_count==0,'readback drift must not be reported as full updates')
 outsider.OptimizationProxy=proxy
 activity:sync({{actor=outsider,class_path='wrong_owner'}})
 assert(proxy.calls==1,'a component owned by a different actor must not be modified')
 -- A native write-back cannot cause an unbounded mutation/log loop.
 activity=Activity.new({isNPC=function()return true end})
-for _=1,3 do mesh.VisibilityBasedAnimTickOption=2;activity:sync({{actor=actor}});assert(mesh.VisibilityBasedAnimTickOption==0)end
-mesh.VisibilityBasedAnimTickOption=2;activity:sync({{actor=actor}})
+for _=1,3 do
+    mesh.VisibilityBasedAnimTickOption=2
+    for _=1,10 do activity:sync({{actor=actor}})end
+    assert(mesh.VisibilityBasedAnimTickOption==0)
+end
+mesh.VisibilityBasedAnimTickOption=2;for _=1,10 do activity:sync({{actor=actor}})end
 assert(mesh.VisibilityBasedAnimTickOption==2 and activity:status().bone_refresh_count==0)
+-- A crowd: the F6 readback samples at most four units per round.
+do
+    local lines={}
+    local crowd,list=Activity.new({isNPC=function()return true end,freeCam=function()return false end,log=function(l)lines[#lines+1]=l end}),{}
+    for i=1,10 do
+        local a=object(100+i,{});a.AttributeSetBase=object(200+i,{Health={CurrentValue=1},Shachi={CurrentValue=1}})
+        local p=object(300+i,{wave=0});function p:GetOwner()return a end;function p:GetOptimizationWave()return self.wave end
+        function p:DisableAllOptimizations()self.wave=1 end;a.OptimizationProxy=p
+        local m=object(400+i,{VisibilityBasedAnimTickOption=0});function m:GetOwner()return a end;function m:GetComponentTickInterval()return 0 end
+        a.Mesh=m;list[#list+1]={actor=a,class_path='crowd'}
+    end
+    for _=1,10 do crowd:sync(list)end
+    local samples=0;for _,l in ipairs(lines)do if l:find('[F6Readback] 只读',1,true) then samples=samples+1 end end
+    assert(samples==8,'two sample rounds of four: '..samples)
+    assert(crowd:status().full_update_count==10)
+end
 -- Valid outer actor does not authorize writes to invalid or foreign mesh objects.
 activity=Activity.new({isNPC=function()return true end})
 mesh.GetOwner=function()return outsider end

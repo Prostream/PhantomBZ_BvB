@@ -37,9 +37,15 @@ function Activity.new(options)
             local ok,value=pcall(options.context)
             log('[F6Readback] 上下文 freecam='..tostring(camera)..' '..(ok and tostring(value) or 'UNKNOWN'))
         end
-        local kept,count,boneCount={},0,0
+        local kept,count,boneCount,sampled={},0,0,0
+        local verify=changed or sample or self.ticks%10==0
         for _,unit in ipairs(members)do
-            if U.valid(unit.actor) and options.isNPC(unit.actor) then
+            local settled=not verify and self.records[U.key(unit.actor) or '']
+            if settled and settled.settled then
+                kept[U.key(unit.actor)]=settled
+                if settled.full then count=count+1 end
+                if settled.bone then boneCount=boneCount+1 end
+            elseif U.valid(unit.actor) and options.isNPC(unit.actor) then
                 local key=U.key(unit.actor);local proxy=U.field(unit.actor,'OptimizationProxy')
                 if key and U.valid(proxy) then
                     local ok,owner=pcall(function()return proxy:GetOwner()end)
@@ -72,8 +78,11 @@ function Activity.new(options)
                                     mode=after
                                 end
                                 if mode==0 then boneCount=boneCount+1 end
+                                record.bone=mode==0
                             end
                         end
+                        record.full=record.applied and current==1
+                        record.settled=record.full and record.bone==true
                         if changed then
                             local waveOK,wave=pcall(function()return proxy:GetOptimizationWave()end)
                             local tick='UNKNOWN';local visibility
@@ -84,8 +93,8 @@ function Activity.new(options)
                             end
                             log('[ArenaActivity] 观察模式读回 freecam='..tostring(camera)..' actor='..tostring(unit.class_path)..' wave='..tostring(waveOK and wave)..' mesh_tick='..tostring(tick)..' anim_visibility='..tostring(visibility))
                         end
-                        if sample and record.samples<120 then
-                            record.samples=record.samples+1
+                        if sample and record.samples<120 and sampled<4 then
+                            record.samples=record.samples+1;sampled=sampled+1
                             local attributes=U.field(unit.actor,'AttributeSetBase')
                             local controller=U.field(unit.actor,'Controller')
                             local ai=U.field(controller,'SGameAIComponent')

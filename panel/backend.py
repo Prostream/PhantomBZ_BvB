@@ -30,13 +30,104 @@ _taxonomy_module = importlib.util.module_from_spec(_taxonomy_spec)
 _taxonomy_spec.loader.exec_module(_taxonomy_module)
 
 DEFAULT_RUNTIME = Path(r"D:\steam\steamapps\common\PBZ\platform\steam\ue4ss\Mods\PhantomGladiator\Runtime")
-ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature"}
+ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature", "set_team_immortal", "set_clock_hud", "set_stat_mode"}
 # Teams a unit can be summoned to; companion units follow the player (companion.lua).
 TEAMS = ("blue", "red", "neutral", "companion")
 # FOLLOW keeps the game difficulty; the others are the game's own four levels (spawn_difficulty.lua).
 SPAWN_DIFFICULTIES = ("FOLLOW", "EASY", "NORMAL", "HARD", "NIGHTMARE")
 # Player-only fun features (fun_features.lua): infinite Shachi, auto perfect deflect, auto red-light dodge.
 FUN_FEATURES = ("SHACHI", "DEFLECT", "DODGE")
+# Teams whose units can be kept from going down (immortal_teams.lua); no-team units are the player's to beat.
+IMMORTAL_TEAMS = ("blue", "red", "companion")
+# Units per summon (arena_controller.lua MAX_BATCH): only guards against a mistyped number freezing the game.
+MAX_SPAWN_COUNT = 100
+# Every attribute of the game's attribute set (character_stats.lua Stats.allFields, CharacterBasics.hpp order):
+# what a unit's spawn values can be set to.
+STAT_FIELDS = (
+    "Level", "Health", "Health_Max", "Health_Max_Lv1", "Shield", "Shield_Max", "Infliction_Max",
+    "Infliction_Max_Lv1", "Attack", "Attack_Lv1", "Amplification_Physical", "DealtVulnerabilityMultiplier_Physical",
+    "DealtReductionMultiplier_Physical", "Resistance_Physical", "TakenAdditiveMultiplier_Physical",
+    "TakenVulnerabilityMultiplier_Physical", "TakenReductionMultiplier_Physical", "Amplification_PhysicalSharp",
+    "DealtVulnerabilityMultiplier_PhysicalSharp", "DealtReductionMultiplier_PhysicalSharp",
+    "Resistance_PhysicalSharp", "TakenAdditiveMultiplier_PhysicalSharp",
+    "TakenVulnerabilityMultiplier_PhysicalSharp", "TakenReductionMultiplier_PhysicalSharp",
+    "Amplification_PhysicalBlunt", "DealtVulnerabilityMultiplier_PhysicalBlunt",
+    "DealtReductionMultiplier_PhysicalBlunt", "Resistance_PhysicalBlunt", "TakenAdditiveMultiplier_PhysicalBlunt",
+    "TakenVulnerabilityMultiplier_PhysicalBlunt", "TakenReductionMultiplier_PhysicalBlunt", "Resistance_Poise",
+    "TakenAdditiveMultiplier_Poise", "TakenVulnerabilityMultiplier_Poise", "TakenReductionMultiplier_Poise",
+    "Amplification_Elemental", "DealtVulnerabilityMultiplier_Elemental", "DealtReductionMultiplier_Elemental",
+    "Resistance_Elemental", "TakenAdditiveMultiplier_Elemental", "TakenVulnerabilityMultiplier_Elemental",
+    "TakenReductionMultiplier_Elemental", "Amplification_Fire", "DealtVulnerabilityMultiplier_Fire",
+    "DealtReductionMultiplier_Fire", "Resistance_Fire", "TakenAdditiveMultiplier_Fire",
+    "TakenVulnerabilityMultiplier_Fire", "TakenReductionMultiplier_Fire", "Amplification_Toxin",
+    "DealtVulnerabilityMultiplier_Toxin", "DealtReductionMultiplier_Toxin", "Resistance_Toxin",
+    "TakenAdditiveMultiplier_Toxin", "TakenVulnerabilityMultiplier_Toxin", "TakenReductionMultiplier_Toxin",
+    "Amplification_Ice", "DealtVulnerabilityMultiplier_Ice", "DealtReductionMultiplier_Ice", "Resistance_Ice",
+    "TakenAdditiveMultiplier_Ice", "TakenVulnerabilityMultiplier_Ice", "TakenReductionMultiplier_Ice",
+    "Amplification_Aqua", "DealtVulnerabilityMultiplier_Aqua", "DealtReductionMultiplier_Aqua", "Resistance_Aqua",
+    "TakenAdditiveMultiplier_Aqua", "TakenVulnerabilityMultiplier_Aqua", "TakenReductionMultiplier_Aqua",
+    "Amplification_Lightning", "DealtVulnerabilityMultiplier_Lightning", "DealtReductionMultiplier_Lightning",
+    "Resistance_Lightning", "TakenAdditiveMultiplier_Lightning", "TakenVulnerabilityMultiplier_Lightning",
+    "TakenReductionMultiplier_Lightning", "Amplification_Blood", "DealtVulnerabilityMultiplier_Blood",
+    "DealtReductionMultiplier_Blood", "Resistance_Blood", "TakenAdditiveMultiplier_Blood",
+    "TakenVulnerabilityMultiplier_Blood", "TakenReductionMultiplier_Blood", "Amplification_Chaos",
+    "DealtVulnerabilityMultiplier_Chaos", "DealtReductionMultiplier_Chaos", "Resistance_Chaos",
+    "TakenAdditiveMultiplier_Chaos", "TakenVulnerabilityMultiplier_Chaos", "TakenReductionMultiplier_Chaos",
+    "Resistance_BreakDamageAdditionalMultiplier", "TakenAdditiveMultiplier_BreakDamage",
+    "TakenVulnerabilityMultiplier_BreakDamage", "TakenReductionMultiplier_BreakDamage", "Shachi", "Shachi_Min",
+    "Shachi_Max", "Shachi_Max_Lv1", "ShachiRegen", "ShachiRegenCooldown", "BreakDurationAdditionalMultiplier",
+    "ShachiAttack", "ShachiAttack_Lv1", "Amplification_ImpactShachi", "DealtVulnerabilityMultiplier_ImpactShachi",
+    "DealtReductionMultiplier_ImpactShachi", "Resistance_ImpactShachi", "TakenAdditiveMultiplier_ImpactShachi",
+    "TakenVulnerabilityMultiplier_ImpactShachi", "TakenReductionMultiplier_ImpactShachi",
+    "Amplification_ReflectShachi", "DealtVulnerabilityMultiplier_ReflectShachi",
+    "DealtReductionMultiplier_ReflectShachi", "Resistance_ReflectShachi", "TakenAdditiveMultiplier_ReflectShachi",
+    "TakenVulnerabilityMultiplier_ReflectShachi", "TakenReductionMultiplier_ReflectShachi",
+    "Amplification_DefenceShachi", "DealtVulnerabilityMultiplier_DefenceShachi",
+    "DealtReductionMultiplier_DefenceShachi", "Resistance_DefenceShachi", "TakenAdditiveMultiplier_DefenceShachi",
+    "TakenVulnerabilityMultiplier_DefenceShachi", "TakenReductionMultiplier_DefenceShachi",
+    "Resistance_ShachiWeaponHealth", "Resistance_ShachiWeaponShachi", "Resistance_ShachiWeaponStrength",
+    "Resistance_ShachiWeaponRanged", "Resistance_ShachiWeaponMagic", "Resistance_ShachiWeaponMartial",
+    "Resistance_ShachiWeaponSummon", "HeavyAttack_ShachiCostReduction", "UltimateCharge", "UltimateCharge_Max",
+    "UltimateChargeCount", "UltimateChargeCount_Max", "UltimateChargeAdditiveRate",
+    "UltimateChargeGainRateMultiplier", "SpiritShadow", "SpiritShadow_Max", "Ignite_Accumulation",
+    "Poison_Accumulation", "Frost_Accumulation", "Thunder_Accumulation", "Electrified_Accumulation",
+    "Bleed_Accumulation", "BloodBurst_Accumulation", "Water_Accumulation", "Amplification_ElementalAccumulation",
+    "DealtVulnerabilityMultiplier_ElementalAccumulation", "DealtReductionMultiplier_ElementalAccumulation",
+    "Resistance_ElementalAccumulation", "TakenAdditiveMultiplier_ElementalAccumulation",
+    "TakenVulnerabilityMultiplier_ElementalAccumulation", "TakenReductionMultiplier_ElementalAccumulation",
+    "Amplification_Ignite", "DealtVulnerabilityMultiplier_IgniteAccumulation",
+    "DealtReductionMultiplier_IgniteAccumulation", "Resistance_IgniteAccumulation",
+    "TakenAdditiveMultiplier_IgniteAccumulation", "TakenVulnerabilityMultiplier_IgniteAccumulation",
+    "TakenReductionMultiplier_IgniteAccumulation", "Amplification_Poison",
+    "DealtVulnerabilityMultiplier_PoisonAccumulation", "DealtReductionMultiplier_PoisonAccumulation",
+    "Resistance_PoisonAccumulation", "TakenAdditiveMultiplier_PoisonAccumulation",
+    "TakenVulnerabilityMultiplier_PoisonAccumulation", "TakenReductionMultiplier_PoisonAccumulation",
+    "Amplification_Frost", "DealtVulnerabilityMultiplier_FrostAccumulation",
+    "DealtReductionMultiplier_FrostAccumulation", "Resistance_FrostAccumulation",
+    "TakenAdditiveMultiplier_FrostAccumulation", "TakenVulnerabilityMultiplier_FrostAccumulation",
+    "TakenReductionMultiplier_FrostAccumulation", "Amplification_Electrified",
+    "DealtVulnerabilityMultiplier_ElectrifiedAccumulation", "DealtReductionMultiplier_ElectrifiedAccumulation",
+    "Resistance_ElectrifiedAccumulation", "TakenAdditiveMultiplier_ElectrifiedAccumulation",
+    "TakenVulnerabilityMultiplier_ElectrifiedAccumulation", "TakenReductionMultiplier_ElectrifiedAccumulation",
+    "Amplification_Bleed", "DealtVulnerabilityMultiplier_BleedAccumulation",
+    "DealtReductionMultiplier_BleedAccumulation", "Resistance_BleedAccumulation",
+    "TakenAdditiveMultiplier_BleedAccumulation", "TakenVulnerabilityMultiplier_BleedAccumulation",
+    "TakenReductionMultiplier_BleedAccumulation", "Amplification_BloodBurst",
+    "DealtVulnerabilityMultiplier_BloodBurstAccumulation", "DealtReductionMultiplier_BloodBurstAccumulation",
+    "Resistance_BloodBurstAccumulation", "TakenAdditiveMultiplier_BloodBurstAccumulation",
+    "TakenVulnerabilityMultiplier_BloodBurstAccumulation", "TakenReductionMultiplier_BloodBurstAccumulation",
+    "Amplification_Water", "DealtVulnerabilityMultiplier_WaterAccumulation",
+    "DealtReductionMultiplier_WaterAccumulation", "Resistance_WaterAccumulation",
+    "TakenAdditiveMultiplier_WaterAccumulation", "TakenVulnerabilityMultiplier_WaterAccumulation",
+    "TakenReductionMultiplier_WaterAccumulation", "StatusInflictionDecrementRate",
+    "ExecutionExecutorNormalHealthThreshold", "ExecutionExecutorBreakHealthThreshold",
+    "ExecutionTargetNormalHealthThreshold", "ExecutionTargetBreakHealthThreshold", "MindDustAdditiveMultiplier",
+    "Health_Min", "WalkSpeed", "JogSpeed", "SprintSpeed", "CrouchSpeed", "FinalWalkSpeed", "Awakening",
+    "Awakening_Max", "PowerScore", "XP", "Coin", "Corrosion",
+)
+STAT_MODES = {"game": "GAME", "match": "MATCH", "custom": "CUSTOM"}
+STAT_POSITIVE = {"Health", "Health_Max", "Shachi_Max", "Attack"}
+STAT_NON_NEGATIVE = {"Shachi", "ShachiAttack"}
 LEGACY_BINDING_NAMES = ("spawn", "start", "stop", "refresh_catalog")
 BINDING_NAMES = LEGACY_BINDING_NAMES + ("toggle_camera", "exit_camera", "cycle_team", "toggle_spectator")
 BINDING_LABELS = dict(zip(BINDING_NAMES, ("召唤所选单位", "开始交战", "停止并清理", "刷新单位目录", "自由观战（无仇恨＋隐身＋无敌锁血）", "退出自由观战并恢复", "切换召唤队伍", "单独切换无仇恨")))
@@ -229,7 +320,7 @@ class Bridge:
 
     def _path(self, name):
         # All caller-supplied unit IDs stay inside TSV fields, never file paths.
-        if name not in {"catalog.tsv", "catalog.tsv.partial", "codex.tsv", "codex-locations.tsv", "status.tsv", "inbox.tsv", "inbox.session.tsv", "ack.tsv", "inventory-report.json", "unit-evidence.json", "native-table-catalog.tsv", "decrypted-directory.tsv", "decrypted-directory-report.json", "unit-keybinds.tsv", "unit-keybinds-state.tsv", "function-keybinds.tsv", "function-keybinds.tsv.bak", "function-keybinds-state.tsv", "keybinds.tsv"}:
+        if name not in {"stat-custom-request.tsv", "stat-match-settings.tsv", "catalog.tsv", "catalog.tsv.partial", "codex.tsv", "codex-locations.tsv", "status.tsv", "inbox.tsv", "inbox.session.tsv", "ack.tsv", "inventory-report.json", "unit-evidence.json", "native-table-catalog.tsv", "decrypted-directory.tsv", "decrypted-directory-report.json", "unit-keybinds.tsv", "unit-keybinds-state.tsv", "function-keybinds.tsv", "function-keybinds.tsv.bak", "function-keybinds-state.tsv", "keybinds.tsv"}:
             raise ValidationError("unknown runtime file")
         path = self.runtime / name
         if path.resolve().parent != self.runtime:
@@ -362,7 +453,7 @@ class Bridge:
                 unit,key,mask=row[:3];clean_field(unit,'unit key path',512)
                 vk,mod=int(key),int(mask)
                 team,count=(row[3] or None,int(row[4]) if row[4] else None) if columns==5 else (None,None)
-                if team not in (None,)+TEAMS or not (count is None or 1<=count<=8):raise ValidationError('invalid unit key team or count')
+                if team not in (None,)+TEAMS or not (count is None or 1<=count<=MAX_SPAWN_COUNT):raise ValidationError('invalid unit key team or count')
                 if not 1<=vk<=255 or not 0<=mod<=7 or unit in result or vk in seen:raise ValidationError('invalid or duplicated unit key')
                 seen.add(vk);result[unit]={'key_code':vk,'modifiers':mod,'team':team,'count':count,'active':False,'message':'等待游戏确认'}
             status=bounded_read(self._path('unit-keybinds-state.tsv'),2*1024*1024)
@@ -508,7 +599,7 @@ class Bridge:
                     policy_entry = validation[item["class_path"]]
                     item["validation_status"] = policy_entry["validation_status"]
                     controlled = item["validation_status"] == "controlled_test"
-                    item["max_count"] = 1 if controlled else 8
+                    item["max_count"] = 1 if controlled else MAX_SPAWN_COUNT
                     item["validation_scope"] = ("普通暴徒单只测试；生成和互伤尚未验证，每次1只、场上最多2只" if controlled
                         else "仅该具体路径有生成观察；不表示战斗通过或所有场景安全")
                     if policy_entry.get("battle_excluded_reason"):
@@ -555,7 +646,7 @@ class Bridge:
                             item['browse_type']='通用角色候选';item['browse_type_basis']='继承链确认角色/Pawn；具体用途与战斗能力未验证'
                 if all_catalog and re.fullmatch(r'/[A-Za-z0-9_/.-]+\.[A-Za-z0-9_-]+_C',item['class_path']) and '..' not in item['class_path']:
                     item['spawnable']=True
-                    item['max_count']=8
+                    item['max_count']=MAX_SPAWN_COUNT
                     item['validation_status']='experimental_spawn'
                     item['validation_scope']='用户开启全部目录尝试召唤；运行时仍核对Actor类和对象，生成及战斗兼容性未保证'
                     item['reason']=item['validation_scope']+'；'+raw_reason
@@ -631,9 +722,9 @@ class Bridge:
             if not isinstance(team, str) or team not in TEAMS:
                 raise ValidationError("team must be blue, red, neutral or companion")
             count = request.get("count", 1)
-            if type(count) is not int or not 1 <= count <= 8:
-                raise ValidationError("count must be an integer from 1 to 8")
-            if count > unit.get("max_count", 8):
+            if type(count) is not int or not 1 <= count <= MAX_SPAWN_COUNT:
+                raise ValidationError("count must be an integer from 1 to %d" % MAX_SPAWN_COUNT)
+            if count > unit.get("max_count", MAX_SPAWN_COUNT):
                 raise ValidationError("该单位处于单只测试阶段，数量必须为 1")
             payload.update(unit_id=unit_id, team=team, count=count)
         elif action == 'configure_unit_key':
@@ -646,7 +737,7 @@ class Bridge:
             if 'team' in request or 'count' in request:
                 team,count=request.get('team'),request.get('count')
                 if team not in TEAMS:raise ValidationError('team must be blue, red, neutral or companion')
-                if type(count) is not int or not 1<=count<=min(8,unit.get('max_count',8)):raise ValidationError('count must be an integer from 1 to 8')
+                if type(count) is not int or not 1<=count<=min(MAX_SPAWN_COUNT,unit.get('max_count',MAX_SPAWN_COUNT)):raise ValidationError('count must be an integer from 1 to %d' % MAX_SPAWN_COUNT)
                 payload.update(team=team,count=count)
             vk=request.get('key_code');mods=request.get('modifiers',0)
             if type(vk) is not int or not 0<=vk<=255 or type(mods) is not int or not 0<=mods<=7:raise ValidationError('invalid key or modifiers')
@@ -671,6 +762,47 @@ class Bridge:
             if type(enabled) is not bool:
                 raise ValidationError('enabled must be true or false')
             payload.update(feature=feature, enabled=enabled)
+        elif action == 'set_team_immortal':
+            allowed |= {'team', 'enabled'}
+            team, enabled = request.get('team'), request.get('enabled')
+            if team not in IMMORTAL_TEAMS:
+                raise ValidationError('team must be one of ' + ', '.join(IMMORTAL_TEAMS))
+            if type(enabled) is not bool:
+                raise ValidationError('enabled must be true or false')
+            payload.update(team=team, enabled=enabled)
+        elif action == 'set_stat_mode':
+            allowed |= {'mode', 'values', 'revision'}
+            mode = request.get('mode')
+            if mode not in STAT_MODES:
+                raise ValidationError('mode must be one of ' + ', '.join(STAT_MODES))
+            payload['mode'] = mode
+            if mode == 'custom':
+                values = request.get('values')
+                if not isinstance(values, dict) or not values:
+                    raise ValidationError('custom mode needs at least one value')
+                clean = {}
+                for field, value in values.items():
+                    if field not in STAT_FIELDS:
+                        raise ValidationError('unknown attribute: ' + str(field)[:64])
+                    if type(value) not in (int, float) or not math.isfinite(value) or abs(value) > 1e9:
+                        raise ValidationError(field + ' must be a finite number')
+                    if field in STAT_POSITIVE and value <= 0:
+                        raise ValidationError(field + ' must be greater than 0')
+                    if field in STAT_NON_NEGATIVE and value < 0:
+                        raise ValidationError(field + ' must not be negative')
+                    clean[field] = value
+                payload['values'] = clean
+                # A stored payload is validated again right before delivery: keep the revision it was queued under.
+                revision = request.get('revision')
+                if revision is not None and not (isinstance(revision, str) and re.fullmatch(r'R[0-9A-F]{12}', revision)):
+                    raise ValidationError('revision must be R and 12 hex digits')
+                payload['revision'] = revision or 'R' + secrets.token_hex(6).upper()
+        elif action == 'set_clock_hud':
+            allowed.add('enabled')
+            enabled = request.get('enabled')
+            if type(enabled) is not bool:
+                raise ValidationError('enabled must be true or false')
+            payload['enabled'] = enabled
         elif action == "configure_keys":
             allowed.add("bindings")
             bindings = request.get("bindings")
@@ -705,6 +837,10 @@ class Bridge:
                 raise ValidationError("未建立当前游戏会话；目录可浏览，指令未提交，请游戏连接后重新请求")
             payload = self._validate(request)
             self._wire({"id": 9223372036854775807, "payload": json.dumps(payload, ensure_ascii=False)})
+            if payload["action"] == "set_stat_mode" and payload["mode"] == "custom":
+                # The values travel in a file of their own; the command names the revision to read.
+                rows = "".join(f"{field}\t{payload['values'][field]!r}\n" for field in STAT_FIELDS if field in payload["values"])
+                atomic_text(self._path("stat-custom-request.tsv"), f"StatCustomV1\t{payload['revision']}\n{rows}")
             with self.db:
                 cursor = self.db.execute("INSERT INTO commands(action,payload,state,created,game_session) VALUES(?,?,?,?,?)",
                     (payload["action"], json.dumps(payload, ensure_ascii=False), "pending", self.clock(), game["game_session"]))
@@ -734,6 +870,10 @@ class Bridge:
             bindings={'spawn':payload['difficulty']}
         elif payload['action']=='set_fun_feature':
             bindings={'spawn':payload['feature'],'start':'ON' if payload['enabled'] else 'OFF'}
+        elif payload['action']=='set_stat_mode':
+            bindings={'spawn':STAT_MODES[payload['mode']],'start':payload.get('revision','')}
+        elif payload['action'] in ('set_team_immortal','set_clock_hud'):
+            bindings={'start':'ON' if payload['enabled'] else 'OFF'}
         fields = [str(row["id"]), payload["action"], payload.get("unit_id", ""),
                   payload.get("team", "blue"), str(payload.get("count", 1))]
         if payload['action']=='configure_keys':
@@ -787,7 +927,7 @@ class Bridge:
                             if outcome not in {"ok", "error", "uncertain"}:
                                 raise ValidationError("ack.tsv: invalid status")
                             spawned = None if count in {"", "unknown"} else int(count)
-                            if spawned is not None and not 0 <= spawned <= 8:
+                            if spawned is not None and not 0 <= spawned <= MAX_SPAWN_COUNT:
                                 raise ValidationError("ack.tsv: invalid spawned_count")
                             if outcome == "ok" and current["action"] == "spawn" and spawned is None:
                                 raise ValidationError("ack.tsv: successful spawn requires an observed integer count")
@@ -896,6 +1036,29 @@ class Bridge:
         return {'available':bool(game['online'] and game.get('game_session') and values.get('function_keys_schema')=='2' and epoch),
                 'bindings':bindings,'revision':revision,'errors':errors}
 
+    def stat_settings(self):
+        """The spawn stat mode and custom values the mod saved (stat_match.lua, Runtime/stat-match-settings.tsv)."""
+        # Lua writes this file in text mode, so on Windows its lines end in CRLF.
+        text = (bounded_read(self._path("stat-match-settings.tsv"), 65536) or "").replace("\r\n", "\n")
+        lines = text.split("\n")
+        mode, values = "game", {}
+        if text == "StatMatchV1\t1\n":
+            mode = "match"
+        elif lines[0].startswith("StatMatchV2\t"):
+            saved = lines[0].split("\t", 1)[1]
+            mode = saved if saved in STAT_MODES else "game"
+            for line in lines[1:]:
+                field, _, raw = line.partition("\t")
+                if field not in STAT_FIELDS:
+                    continue
+                try:
+                    number = float(raw)
+                except ValueError:
+                    continue
+                if math.isfinite(number):
+                    values[field] = int(number) if number.is_integer() else number
+        return {"mode": mode, "values": values, "fields": list(STAT_FIELDS)}
+
     def keybinds(self):
         with self.lock:
             row = self.db.execute("SELECT value FROM settings WHERE key='requested_keys'").fetchone()
@@ -981,6 +1144,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.bridge.catalog()
             elif path == "/api/keybinds":
                 result = self.server.bridge.keybinds()
+            elif path == "/api/stat-settings":
+                result = self.server.bridge.stat_settings()
             elif path == '/api/disk-directory':
                 query=parse_qs(urlsplit(self.path).query)
                 result=self.server.bridge.disk_directory(query.get('q',[''])[0],query.get('kind',[''])[0],

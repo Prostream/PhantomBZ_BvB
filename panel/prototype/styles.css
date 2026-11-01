@@ -725,6 +725,16 @@ mark { background: rgba(244, 196, 80, .38); color: inherit; border-radius: 3px; 
 .field-note { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px; margin-top: 8px; font-size: 12px; color: var(--text-3); }
 .field-note span { display: inline-flex; align-items: center; gap: 5px; }
 .field-note-warn { color: var(--amber); cursor: help; }
+/* 不倒下: a small switch at the foot of each side and in the companion card. */
+.side-guard { display: inline-flex; align-items: center; gap: 5px; height: 24px; margin-top: 8px; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: 999px; background: transparent; color: var(--text-2); font: 600 11.5px/1 var(--font-sans); cursor: pointer; transition: background var(--t), color var(--t), border-color var(--t); }
+.side-guard .icon { width: 13px; height: 13px; }
+.side-guard:hover:not(:disabled) { background: var(--surface-3); }
+.side-guard.is-on { background: var(--green-soft); border-color: transparent; color: var(--green); }
+.side-guard:disabled { opacity: .5; cursor: default; }
+.side-guard:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.solo-actions .side-guard { margin-top: 0; height: 30px; }
+.battle-clock { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 650; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.battle-clock .icon { width: 13px; height: 13px; }
 .result-banner {
   display: flex;
   align-items: center;
@@ -769,6 +779,36 @@ mark { background: rgba(244, 196, 80, .38); color: inherit; border-radius: 3px; 
 .title-link { display: inline-flex; align-items: center; gap: 4px; margin: -3px -6px; padding: 3px 6px; border-radius: 7px; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text-3); transition: color var(--t-fast), background var(--t-fast); }
 .title-link:hover { color: var(--text); background: var(--bg-hover); }
 .title-link .icon { width: 14px; height: 14px; }
+/* 数值设定: mode switch and the custom form. */
+.stat-seg { display: flex; width: 100%; }
+.stat-seg .seg-btn { flex: 1; justify-content: center; padding: 0 6px; }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); min-width: 0; }
+.stat-input { height: 32px; min-width: 0; padding: 0 9px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: 600 13px/1 var(--font-sans); font-variant-numeric: tabular-nums; }
+.stat-input:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
+.stat-input::placeholder { color: var(--text-3); font-weight: 500; }
+.stat-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.stat-actions .btn-link { display: inline-flex; align-items: center; gap: 5px; }
+.stat-note { margin: 0; font-size: 11.5px; color: var(--text-3); line-height: 1.5; }
+.rule-head { font-size: 13px; font-weight: 700; color: var(--text); margin: 14px 0 6px; }
+.rule-head:first-child { margin-top: 0; }
+.rule-text { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+.stat-dialog-desc { margin: 0 0 12px; font-size: 12.5px; color: var(--text-3); }
+.stat-filter { width: 100%; height: 34px; margin: 0 0 10px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface); color: var(--text); font: 13px var(--font-sans); }
+.stat-filter:focus { outline: 2px solid var(--focus); outline-offset: -1px; }
+.stat-filter-none { margin: 8px 0 0; font-size: 12.5px; color: var(--text-3); }
+.stat-group { border-bottom: 1px solid var(--border); }
+.stat-group > summary { display: flex; align-items: center; gap: 8px; padding: 9px 0; cursor: pointer; list-style: none; }
+.stat-group > summary::-webkit-details-marker { display: none; }
+.stat-group-name { flex: 1; font-size: 12.5px; font-weight: 700; color: var(--text); }
+.stat-group-count { font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.stat-group > summary .chev { transition: transform .15s; color: var(--text-3); }
+.stat-group[open] > summary .chev { transform: rotate(180deg); }
+.stat-group[open] { padding-bottom: 8px; }
+.stat-row { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 10px; padding: 4px 0; }
+.stat-row[hidden], .stat-group[hidden] { display: none; }
+.stat-row-name { display: flex; flex-direction: column; min-width: 0; font-size: 12.5px; color: var(--text-2); }
+.stat-row-name small { font-size: 10.5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .match-card { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; padding: 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
 .match-card.is-waiting { border: 1.5px dashed var(--border-strong); background: transparent; }
 .match-base { display: flex; align-items: center; gap: 10px; min-width: 0; }

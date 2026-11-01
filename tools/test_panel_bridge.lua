@@ -127,13 +127,25 @@ test("illegal payloads never reach handlers", function()
     local bridge = create(fs, function() calls = calls + 1 return { ok = true, spawned_count = 1 } end)
     local invalid = {
         command("bad_action", "shell"), command("bad_team", "spawn", "u", "evil"),
-        command("bad_count", "spawn", "u", "blue", 9), command("empty_unit", "spawn", ""),
+        command("bad_count", "spawn", "u", "blue", 101), command("zero_count", "spawn", "u", "blue", 0),
+        command("padded_count", "spawn", "u", "blue", "050"), command("empty_unit", "spawn", ""),
         command("tab_unit", "spawn", "u\tmore"), command("newline", "spawn", "u\nmore"),
         command("bad_keys", "configure_keys", "", "blue", 1, { "F9", "F3", "F4", "bad key" }),
     }
     for _, payload in ipairs(invalid) do deliver(fs,payload) bridge:tick() end
     assert(calls == 0)
     assert(fs.files["runtime/ack.tsv"]:find("bad_keys\terror\t", 1, true))
+end)
+
+test("a summon of 50 or 100 reaches the handler and its count is acknowledged", function()
+    for _, n in ipairs({ 50, 100 }) do
+        local fs, seen = filesystem(), nil
+        local bridge = create(fs, function(command) seen = command.count return { ok = true, spawned_count = n } end)
+        deliver(fs, command("many" .. n, "spawn", "u", "red", n))
+        bridge:tick()
+        assert(seen == n and fs.files["runtime/ack.tsv"]:find("many" .. n .. "\tok\t", 1, true), tostring(fs.files["runtime/ack.tsv"]))
+        assert(fs.files["runtime/ack.tsv"]:find("\t" .. n .. "\n", 1, true), "spawned_count " .. n .. " must be acknowledged as is")
+    end
 end)
 
 test("handler exception remains uncertain across reload", function()
@@ -193,6 +205,17 @@ test("heartbeat status reserves protocol fields and preserves scalar false", fun
     assert(status:find("schema_version\t1\n", 1, true))
     assert(status:find("heartbeat_unix\t123456\n", 1, true))
     assert(status:find("game_running\tfalse\n", 1, true) and status:find("alive\t4\n", 1, true))
+end)
+
+test("every status entry the panel reports is written, well past the old cap of 100", function()
+    local fs = filesystem()
+    fs.files["runtime/command-journal.tsv"] = ""
+    local values = {}
+    for i = 1, 150 do values["entry_" .. i] = i end
+    local bridge = create(fs, function() error("must not execute") end, { status = function() return values end })
+    bridge:tick()
+    local status = fs.files["runtime/status.tsv"]
+    for i = 1, 150 do assert(status:find("entry_" .. i .. "\t" .. i .. "\n", 1, true), "entry_" .. i .. " dropped") end
 end)
 
 test("select_unit validates target fields but does not imply spawning", function()
@@ -333,6 +356,16 @@ test('camera exit is a session-bound recovery action that remains available whil
 end)
 
 -- 可选真实磁盘 smoke：外部测试命令负责创建/删除这个专用临时目录。
+test("stat mode reaches its handler with the mode and the custom revision (backend.py wire)", function()
+    local fs, got = filesystem(), nil
+    deliver(fs, command("s1", "set_stat_mode", "", "blue", 1, { "CUSTOM", "R0123456789AB", "", "" }))
+    local bridge = create(fs, nil, { handlers = { set_stat_mode = function(c)
+        got = c return { ok = true, message = "custom", spawned_count = 0 } end } })
+    bridge:tick()
+    assert(got and got.key_spawn == "CUSTOM" and got.key_start == "R0123456789AB", fs.files["runtime/ack.tsv"])
+    assert(fs.files["runtime/ack.tsv"] == "s1\tok\tcustom\t0\n", fs.files["runtime/ack.tsv"])
+end)
+
 if arg and arg[1] then
     test("real disk journal survives a new Bridge instance", function()
         local directory, calls = arg[1], 0

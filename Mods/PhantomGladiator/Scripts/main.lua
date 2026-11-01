@@ -42,6 +42,10 @@ local Companion=require('companion')
 local FunFeatures=require('fun_features')
 local SpawnLevel=require('spawn_level')
 local StatFormulaProbe=require('stat_formula_probe')
+local StatFieldProbe=require('stat_field_probe')
+local ImmortalTeams=require('immortal_teams')
+local BattleClockHUD=require('battle_clock_hud')
+local CombatLock=require('combat_lock')
 
 local MOD = "[PhantomGladiator]"
 local runLogPath=Config.RuntimePath..'/run-'..os.date('%Y%m%d-%H%M%S')..'.log'
@@ -64,7 +68,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.36.0-fun-levels"
+local BUILD = "v0.37.0-stats"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -110,9 +114,13 @@ local statMatch
 local spawnDifficulty
 local spawnLevel
 local statProbe
+local fieldProbe
 local companions
 local aiDifficulty
 local funFeatures
+local immortalTeams
+local clockHUD
+local combatLock
 local BeginArenaObservation
 local spawnAudit=SpawnAudit.new(Config.RuntimePath.."/spawn-attempts.tsv",log)
 local spawnGuard=SpawnGuard.new()
@@ -163,6 +171,16 @@ local function GetLocation(actor)
     local ok, loc = pcall(function() return actor:K2_GetActorLocation() end)
     if ok and loc then return loc end
     return nil
+end
+
+-- World time in seconds (stops while the game is paused, follows slow motion); nil before a world exists.
+local gameplayStatics
+local function GameSeconds()
+    if not safeValid(gameplayStatics) then gameplayStatics=StaticFindObject('/Script/Engine.Default__GameplayStatics') end
+    local world=UEHelpers.GetWorld()
+    if not safeValid(gameplayStatics) or not safeValid(world) then return nil end
+    local ok,seconds=pcall(function()return gameplayStatics:GetTimeSeconds(world)end)
+    return ok and type(seconds)=='number' and seconds or nil
 end
 
 local function DistSq(a, b)
@@ -1201,7 +1219,7 @@ spectator=SpectatorMode.new({log=log,valid=engineValid,getPlayer=GetPlayerPawn,p
         end
         return out
     end})
-arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=objectName,
+arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=objectName,now=GameSeconds,
     actorKey=function(actor) checked(actor);return actor:GetAddress() end,
     hp=function(actor) if spawnRoutes[actor]=='actor' then return nil end;return GetHP(actor) end,
     hasCombatHealth=function(actor) return spawnRoutes[actor]~='actor' end,
@@ -1256,6 +1274,11 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
                 if result.rollback_verified then return true,'初始化通过；数值统一失败已回滚',result.message..'；单位保留原生数值，可正常交战' end
                 return false,'单位已生成；'..result.message..'；保留对象供清理'
             end
+            -- An experiment: whatever it does, the summon stands.
+            if fieldProbe then
+                local probed,probeError=pcall(function()fieldProbe:start(actor,unitPath)end)
+                if not probed then log('[StatProbe] 启动失败: '..tostring(probeError)) end
+            end
         end
         if activationRequested and safeValid(actor) then
             local inspected,inspectError=pcall(function() return spawnInspector:inspect(actor,UEHelpers.GetWorld()) end)
@@ -1264,6 +1287,28 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
         return activationRequested==true and ai~=nil and type(hp)=="number" and hp>0,"仅确认初始化调用、AI组件和正HP；行为待验收"
     end,
     setRelation=SetFactionRelation,forceAttack=ForceAttack,
+    -- Whether the unit's AI state is combat (AI.State.Combat; Idle and Search are not), and its state name.
+    inCombat=function(actor)
+        local sg=GetAIComp(actor)
+        if not sg then return nil end
+        local ok,tag=pcall(function()return FNameToString(sg.CurrentStateTag.TagName)end)
+        if not ok or type(tag)~='string' then return nil end
+        return tag:find('Combat',1,true)~=nil,tag
+    end,
+    -- Sends a unit that left combat back at its opponent: hatred entry and ForceIntoCombat. The faction
+    -- relation and blackboard target written by ForceAttack at the start still hold.
+    engage=function(attacker,victim)
+        local sg=GetAIComp(attacker)
+        if not sg or not safeValid(victim) then return false,'AI组件或目标无效' end
+        local hm=GetHatredComp(attacker)
+        local hatred='?';pcall(function()hatred=#hm.HatredList end)
+        AddHatred(attacker,victim)
+        local ok=pcall(function()sg:ForceIntoCombat(victim)end)
+        local state='?';pcall(function()state=FNameToString(sg.CurrentStateTag.TagName)end)
+        local a,b=GetLocation(attacker),GetLocation(victim)
+        local d=a and b and math.sqrt(DistSq(a,b))/100
+        return ok,state,'迎敌前仇恨数='..tostring(hatred)..' 距目标='..(d and string.format('%.1fm',d) or '?')
+    end,
     prepareBattle=function(members)return arenaGrabs:sync(Config.EnableNPCGrabs and members or {},true,true) end,
     destroy=function(actor) checked(actor); actor:K2_DestroyActor() end,
     isDestroying=actorIsDestroying,
@@ -1316,44 +1361,64 @@ bossHUD=BossHUD.new({getController=GetRealPlayerController,getWorld=UEHelpers.Ge
     end,
     codexPath=Config.RuntimePath..'/codex.tsv',log=log})
 local arenaSupport={}
+-- One copy of the arena's members and status per support tick: a dozen modules ask for them, and each
+-- call re-checks every unit with the engine (50 units made the support tick take 20-50 ms in v0.37.2).
+-- Outside a tick the arena is asked directly.
+local tickMembers,tickStatus
+local function ArenaMembers()return tickMembers or arena:members() end
+local function ArenaStatus()return tickStatus or arena:status() end
 statMatch=StatMatch.new({path=Config.RuntimePath,log=log})
 spawnDifficulty=SpawnDifficulty.new({path=Config.RuntimePath,log=log,getWorld=UEHelpers.GetWorld,
     ready=function()return runtimeSession:status().game_ready==true end})
 statProbe=Config.EnableStatFormulaProbe and StatFormulaProbe.new({log=log}) or nil
+fieldProbe=Config.EnableStatFieldProbe and StatFieldProbe.new({log=log}) or nil
 spawnLevel=SpawnLevel.new({log=log,path=Config.RuntimePath,getPlayer=GetPlayerPawn,getLocation=GetLocation,collect=CollectNPCs,
     ours=function()
         local keys={}
-        for _,entry in ipairs(arena:members())do local key=UEObserve.key(entry.actor);if key then keys[key]=true end end
+        for _,entry in ipairs(ArenaMembers())do local key=UEObserve.key(entry.actor);if key then keys[key]=true end end
         return keys
     end})
 local grabStudy=Config.EnableGrabStudy and GrabStudy.new({path=Config.RuntimePath,log=log,ready=function()return runtimeSession:status().game_ready==true end}) or nil
 arenaGrabs=ArenaGrabs.new({path=Config.RuntimePath,log=log,hp=GetHP,ready=function()return runtimeSession:status().game_ready==true end})
 function arenaSupport:discover()
-    for _,link in ipairs(summonLinks:scan(arena:members())) do
+    for _,link in ipairs(summonLinks:scan(ArenaMembers())) do
         local result=arena:adoptSummon(link.actor,link.parent,link.class_path,link.evidence)
         if not result.ok then log('[SummonLinks] 接管未确认：'..tostring(result.message)) end
     end
 end
 companions=Companion.new({log=log,getPlayer=GetPlayerPawn,getWorld=UEHelpers.GetWorld,aiLib=GetAILib,getLocation=GetLocation,hp=GetHP,
-    members=function()return arena:members()end})
+    members=ArenaMembers})
 -- Units summoned at a chosen difficulty also get that difficulty when their AI asks for it.
 aiDifficulty=AIDifficulty.new({log=log,getWorld=UEHelpers.GetWorld,
-    ready=function()return runtimeSession:status().game_ready==true end,members=function()return arena:members()end,
+    ready=function()return runtimeSession:status().game_ready==true end,members=ArenaMembers,
     levelOf=function(actor)return spawnDifficulty:levelOf(actor)end})
 -- Infinite Shachi and auto deflect/dodge for the player only; paused while the free camera observes.
 funFeatures=FunFeatures.new({log=log,path=Config.RuntimePath,getPlayer=GetPlayerPawn,getController=GetRealPlayerController,
-    members=function()return arena:members()end,
+    members=ArenaMembers,
     ready=function()return runtimeSession:status().game_ready==true end,paused=function()return freeCamera:isActive()end})
+-- 不倒下: units of a switched-on team keep a health floor; after a reload the journal frees the old ones.
+immortalTeams=ImmortalTeams.new({log=log,path=Config.RuntimePath,members=ArenaMembers,collect=CollectNPCs,hp=GetHP,
+    ready=function()return runtimeSession:status().game_ready==true end})
+-- The fight time at the top centre of the game screen, when switched on in the app (battle_clock_hud.lua).
+clockHUD=BattleClockHUD.new({log=log,path=Config.RuntimePath,getController=GetRealPlayerController,getWorld=UEHelpers.GetWorld,
+    getPlayer=GetPlayerPawn,ready=function()return runtimeSession:status().game_ready==true end,
+    clock=function()local s=ArenaStatus();return s.battle_clock,s.battle_seconds end})
+-- 不死不休: while a fight runs, blue and red do not leave combat after an action and may hate each
+-- other through the game's own hatred checks (combat_lock.lua).
+combatLock=CombatLock.new({log=log,members=ArenaMembers,aiOf=GetAIComp,hatredOf=GetHatredComp,
+    -- Called inside the game's transition; the send-back runs on the next game-thread tick instead.
+    onDropped=function(key)ExecuteInGameThread(function()arena:reengage(key)end)end,
+    fighting=function()local s=ArenaStatus();return s.battle_active==true and s.blue_count>0 and s.red_count>0 end})
 -- A support tick slower than this is logged with the time of each step, to find the source of stutter.
 local SLOW_TICK_MS,slowTicks=10,0
-function arenaSupport:tick()
+local function supportSteps(self)
     local started,parts=os.clock(),{}
     local function step(name,fn)
         local t=os.clock();fn();parts[#parts+1]=string.format('%s=%.1f',name,(os.clock()-t)*1000)
     end
     step('prune',function()
         local memberKeys={}
-        for _,entry in ipairs(arena:members())do local key=UEObserve.key(entry.actor);if key then memberKeys[key]=true end end
+        for _,entry in ipairs(tickMembers)do local key=UEObserve.key(entry.actor);if key then memberKeys[key]=true end end
         spawnDifficulty:prune(memberKeys)
     end)
     step('aiDifficulty',function()aiDifficulty:tick()end)
@@ -1361,20 +1426,31 @@ function arenaSupport:tick()
     step('fun',function()funFeatures:tick()end)
     step('freeCamera',function()freeCamera:recover()end)
     if grabStudy then step('grabStudy',function()grabStudy:tick()end) end
+    if fieldProbe then step('fieldProbe',function()fieldProbe:tick()end) end
     step('summonLinks',function()self:discover()end)
-    step('activity',function()arenaActivity:sync(arena:members())end)
-    step('grabs',function()arenaGrabs:sync(Config.EnableNPCGrabs and arena:members() or {},arena:status().battle_active)end)
+    -- Before reinforcements: a unit joining an immortal team is locked before it is sent at the enemy.
+    step('immortal',function()immortalTeams:tick()end)
+    step('activity',function()arenaActivity:sync(tickMembers)end)
+    step('grabs',function()arenaGrabs:sync(Config.EnableNPCGrabs and tickMembers or {},tickStatus.battle_active)end)
+    step('combatLock',function()combatLock:tick()end)
     step('reinforce',function()arena:tickReinforcements()end)
     step('bossHUD',function()
-        local state=arena:status().state
+        local state=tickStatus.state
         if state=='cleanup_pending' or state=='restore_pending' or state=='spawn_uncertain' then bossHUD:clear()
-        else bossHUD:sync(arena:members()) end
+        else bossHUD:sync(tickMembers) end
     end)
+    step('clockHUD',function()clockHUD:tick()end)
     local total=(os.clock()-started)*1000
     if total>=SLOW_TICK_MS and slowTicks<60 then
         slowTicks=slowTicks+1
         log(string.format('[Perf] 支持循环耗时 %.1fms：%s',total,table.concat(parts,' ')))
     end
+end
+function arenaSupport:tick()
+    tickMembers,tickStatus=arena:members(),arena:status()
+    local ok,err=pcall(supportSteps,self)
+    tickMembers,tickStatus=nil,nil
+    if not ok then error(err,0) end
 end
 function arenaSupport:status()
     local result=bossHUD:status();local activity=arenaActivity:status()
@@ -1413,7 +1489,7 @@ RegisterKeyBind(Key.F9,{ModifierKey.SHIFT},function()
 end)
 end
 panelRuntime=PanelRuntime.new({arena=arena,exporter=exporter,path=Config.RuntimePath,
-    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,spawnDifficulty=spawnDifficulty,aiDifficulty=aiDifficulty,companions=companions,funFeatures=funFeatures,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
+    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,spawnDifficulty=spawnDifficulty,aiDifficulty=aiDifficulty,companions=companions,funFeatures=funFeatures,immortal=immortalTeams,clockHUD=clockHUD,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
     router=keyRouter,camera={status=function()return {active=freeCamera:isActive(),pending=freeCamera:hasPending()}end,
         toggle=ToggleFreeCam,exit=ForceExitFreeCam},
     spawnCatalog=SpawnCatalog.new({log=log,path=Config.RuntimePath,getWorld=UEHelpers.GetWorld}),
@@ -1430,6 +1506,9 @@ if ModRef then
         aiDifficulty:silence("Mod卸载")
         companions:silence()
         funFeatures:silence()
+        immortalTeams:silence()
+        clockHUD:silence()
+        combatLock:silence('Mod卸载')
         battle:cancel("Mod卸载")
         if battle:pendingCount()>0 or #arenaActors>0 then
             log("卸载时仍有参赛者或恢复记录；重载不会替代停止清理")

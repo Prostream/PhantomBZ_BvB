@@ -97,4 +97,63 @@ test('failed settings readback cannot enable matching',function()
     local h=harness();h.failSave=true
     assert(not h.match:toggle().ok and not h.match:status().enabled)
 end)
+test('custom values come from the request of the named revision, are validated and persist',function()
+    local h=harness()
+    h.files['memory/stat-custom-request.tsv']='StatCustomV1\tR1\nHealth_Max\t50000\nAttack\t120\n'
+    assert(not h.match:setMode('CUSTOM','R0').ok and h.match:status().mode=='game','another revision is refused')
+    local r=h.match:setMode('CUSTOM','R1')
+    assert(r.ok and r.message:find('血量上限=50000、攻击=120',1,true),r.message)
+    local s=h.match:status()
+    assert(s.mode=='custom' and s.enabled and s.custom_count==2 and s.custom.Health_Max==50000)
+    assert(h.files['memory/stat-match-settings.tsv']=='StatMatchV2\tcustom\nHealth_Max\t50000\nAttack\t120\n',h.files['memory/stat-match-settings.tsv'])
+    local reloaded=Match.new(h.options)
+    assert(reloaded:status().mode=='custom' and reloaded:status().custom.Attack==120,'mode and values persist')
+    for _,bad in ipairs({'Bogus\t5\n','Health_Max\t0\n','Attack\tabc\n','ShachiAttack\t-1\n',''})do
+        h.files['memory/stat-custom-request.tsv']='StatCustomV1\tR2\n'..bad
+        assert(not h.match:setMode('CUSTOM','R2').ok and h.match:status().custom.Health_Max==50000,'refused: '..bad)
+    end
+    assert(not h.match:setMode('ALL','').ok)
+    -- Back to the game's numbers keeps the custom values for next time; the old switch goes to the first unit.
+    assert(h.match:setMode('GAME','').ok and h.match:status().mode=='game' and h.match:status().custom_count==2)
+    assert(h.match:toggle().ok and h.match:status().mode=='match')
+    assert(h.match:toggle().ok and h.match:status().mode=='game')
+end)
+test('custom mode writes only the filled fields, with full bars for new maxima, field by field',function()
+    local h=harness()
+    h.files['memory/stat-custom-request.tsv']='StatCustomV1\tR1\nHealth_Max\t5000\nAttack\t33\n'
+    assert(h.match:setMode('CUSTOM','R1').ok)
+    local a=h:actor(100,80,20)
+    local result=h.match:onSpawn(a,'A')
+    assert(result.ok and result.applied and h.match:status().customized==1,result.message)
+    assert(a.values.Health_Max.current==5000 and a.values.Health.current==5000 and a.values.Attack.current==33)
+    assert(a.values.Shachi_Max.current==80 and a.values.ShachiAttack.current==15 and a.values.Resistance_Physical.current==0.2,'unfilled fields keep the unit value')
+    -- A field the game holds (a fixed override) is rolled back and named; the others stay.
+    local b=h:actor(300,200,60);b.mods.Attack={fixed=90};b.values.Attack.current=90
+    local partial=h.match:onSpawn(b,'B')
+    assert(partial.ok and partial.applied and partial.rejected[1]=='Attack' and #partial.rejected==1,partial.message)
+    assert(b.values.Health_Max.current==5000 and b.values.Health.current==5000 and b.values.Attack.base==60 and b.values.Attack.current==90)
+    assert(partial.message:find('1 项游戏没接受',1,true) and h.match:status().rejected[1]=='Attack')
+    -- Nothing read back: every field is rolled back, maxima before their current values.
+    h.failNative=true
+    local c=h:actor(1000,500,70);local failed=h.match:onSpawn(c,'C')
+    assert(not failed.ok and failed.rollback_verified and failed.message:find('自定义数值失败',1,true),failed.message)
+    assert(c.values.Health_Max.current==1000 and c.values.Health.current==1000 and c.values.Attack.current==70)
+    h.failNative=false
+    -- Companions are excluded by main.lua; a later unit gets the same values.
+    local d=h:actor(1000,500,70);assert(h.match:onSpawn(d,'D').applied and d.values.Health.current==5000)
+end)
+test('custom fields beyond the matched ones: maxima first, an explicit current kept, unreadable ones named',function()
+    local h=harness()
+    h.files['memory/stat-custom-request.tsv']='StatCustomV1\tR1\nHealth\t100\nShield\t50\nHealth_Max\t5000\n'
+    assert(h.match:setMode('CUSTOM','R1').ok and h.match:status().custom_count==3 and h.match:status().custom_fields==223)
+    local a=h:actor(300,80,20);local r=h.match:onSpawn(a,'A')
+    assert(r.ok and a.values.Health_Max.current==5000 and a.values.Health.current==100,'the maximum is written before the current value')
+    assert(#r.rejected==1 and r.rejected[1]=='Shield','an attribute this unit cannot read is named, not fatal')
+    local wrote={};for _,w in ipairs(h.writes)do wrote[#wrote+1]=w.field end
+    assert(table.concat(wrote,',')=='Health_Max,Health',table.concat(wrote,','))
+end)
+test('the v1 switch file still reads as matching',function()
+    local h=harness();h.files['memory/stat-match-settings.tsv']='StatMatchV1\t1\n'
+    assert(Match.new(h.options):status().mode=='match')
+end)
 print('stat_match: PASS ('..count..' lifecycle, calibration and rollback regressions)')

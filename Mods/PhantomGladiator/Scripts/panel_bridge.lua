@@ -3,9 +3,13 @@
 local Bridge = {}
 Bridge.__index = Bridge
 local MAX_INBOX, MAX_JOURNAL, MAX_MESSAGE = 2048, 2097152, 512
+-- Status entries per write. The panel reports about 120 today; v0.36.0 went past the old cap of 100
+-- and each Lua state dropped a random few (the battle clock, fun_supported, current_count...).
+local MAX_STATUS = 256
+local MAX_COUNT = 100   -- units per summon, as arena_controller.lua MAX_BATCH
 local ACTIONS = { spawn = true, start = true, stop = true, refresh_catalog = true,
     configure_keys = true,configure_unit_key=true, select_unit = true, toggle_spectator = true,clear_neutral=true,toggle_stat_match=true,
-    toggle_camera=true,exit_camera=true,cycle_team=true,set_spawn_difficulty=true,dismiss_companions=true,set_fun_feature=true }
+    toggle_camera=true,exit_camera=true,cycle_team=true,set_spawn_difficulty=true,dismiss_companions=true,set_fun_feature=true,set_team_immortal=true,set_clock_hud=true,set_stat_mode=true }
 local ACK_STATUS = { ok = true, error = true, uncertain = true }
 
 local function clean(value, limit)
@@ -35,8 +39,8 @@ end
 
 local function countText(value)
     if value == "unknown" then return value end
-    if type(value) == "number" and value >= 0 and value <= 8 and value % 1 == 0 then return tostring(value) end
-    if type(value) == "string" and value:match("^[0-8]$") then return value end
+    if type(value) == "number" and value >= 0 and value <= MAX_COUNT and value % 1 == 0 then return tostring(value) end
+    if type(value) == "string" and value:match("^%d%d?%d?$") and tonumber(value) <= MAX_COUNT then return value end
     return nil
 end
 
@@ -67,7 +71,9 @@ local function parseInbox(content)
     if fields[4] ~= "blue" and fields[4] ~= "red" and fields[4] ~= "neutral" and fields[4] ~= "companion" then
         return nil, "invalid payload: team", id
     end
-    if not fields[5]:match("^[1-8]$") then return nil, "invalid payload: count must be 1..8", id end
+    if not fields[5]:match("^[1-9]%d?%d?$") or tonumber(fields[5]) > MAX_COUNT then
+        return nil, "invalid payload: count must be 1.." .. MAX_COUNT, id
+    end
     for i = 6, extended and 13 or 9 do
         if #fields[i] > 32 or (fields[i] ~= "" and not fields[i]:match("^[A-Z0-9_]+$")) then
             return nil, "invalid payload: key name", id
@@ -258,7 +264,10 @@ function Bridge:_writeStatus()
     else
         local count = 0
         for key, value in pairs(supplied) do
-            if count >= 100 then break end
+            if count >= MAX_STATUS then
+                if not self.statusCapped then self.statusCapped = true; self.log("状态项超过 " .. MAX_STATUS .. " 项，多出的未写入") end
+                break
+            end
             if type(key) == "string" and #key <= 64 and key:match("^[%w_]+$")
                 and (type(value) == "string" or type(value) == "number" or type(value) == "boolean") then
                 values[key], count = clean(value), count + 1

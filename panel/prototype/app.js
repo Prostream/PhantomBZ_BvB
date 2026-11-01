@@ -545,8 +545,10 @@
     else hint = `<span class="spinner" style="width:12px;height:12px"></span><span>${esc(t("sel.syncing"))}</span>`;
     // Says what equal stats will do to this summon before the player clicks.
     const m = S.statMatch, base = m.baseline && byId.get(m.baseline.id);
-    const matchLine = m.enabled && RT.online() && !blocker
+    const matchLine = m.mode === "match" && RT.online() && !blocker
       ? `<button class="match-line" type="button" data-action="match-focus">${icon("scale")}<span>${esc(base ? t("match.next.match", { name: base.name }) : t("match.next.baseline"))}</span></button>`
+      : m.mode === "custom" && RT.online() && !blocker && ui.team !== "companion"
+      ? `<button class="match-line" type="button" data-action="match-focus">${icon("sliders")}<span>${esc(t("stats.next.custom", { n: m.customCount }))}</span></button>`
       : "";
     // A no-team unit keeps the game's hostility, but spectator mode (or the F6 camera) stops it attacking the player.
     const soloLine = ui.team === "neutral" && S.spectator && RT.online() && !blocker
@@ -574,9 +576,9 @@
           <div class="stepper">
             <button type="button" data-action="count-dec" aria-label="${esc(t("sel.countDec"))}" ${ui.count <= 1 ? "disabled" : ""}>${icon("minus")}</button>
             <input id="count-input" type="text" inputmode="numeric" value="${ui.count}" aria-label="${esc(t("sel.count"))}">
-            <button type="button" data-action="count-inc" aria-label="${esc(t("sel.countInc"))}" ${ui.count >= 8 ? "disabled" : ""}>${icon("plus")}</button>
+            <button type="button" data-action="count-inc" aria-label="${esc(t("sel.countInc"))}" ${ui.count >= MAX_COUNT ? "disabled" : ""}>${icon("plus")}</button>
           </div>
-          <div class="count-presets">${[1, 3, 5, 8].map(n => `<button class="preset" type="button" data-action="count-preset" data-n="${n}" aria-pressed="${ui.count === n}">${n}</button>`).join("")}</div>
+          <div class="count-presets">${[1, 5, 10, 50].map(n => `<button class="preset" type="button" data-action="count-preset" data-n="${n}" aria-pressed="${ui.count === n}">${n}</button>`).join("")}</div>
         </div>
       </div>
       <div class="summon-wrap">
@@ -652,7 +654,7 @@
            <div class="solo-stats">${esc(t("companion.stats", { alive: fmtNum(alive), down: fmtNum(down) }))}</div>`
         : `<p class="solo-desc">${esc(t("companion.desc"))}</p>`}
       ${warn}
-      <div class="solo-actions">${use}
+      <div class="solo-actions">${use}${guardHTML("companion")}
         <button class="btn btn-ghost btn-sm solo-clear" type="button" data-action="dismiss-companions" ${online && held && !busy ? "" : "disabled"}>${busy ? '<span class="spinner" style="width:12px;height:12px"></span>' : icon("trash", "icon-sm")}<span>${esc(t("companion.dismiss"))}</span></button>
       </div>
       ${held ? `<p class="solo-note">${esc(t("companion.note"))}</p>` : ""}`;
@@ -700,16 +702,143 @@
     ui.diffWanted = level;
     run("set_spawn_difficulty", { payload: { difficulty: level }, ok: () => ({ title: level === "FOLLOW" ? t("toast.diff.follow") : t("toast.diff.set", { name: diffName(level) }), body: t("toast.diff.body") }) });
   }
-  // Equal stats (toggle_stat_match). The switch only needs the game connected, like backend.py;
-  // the card mirrors the stat_match_* status: baseline unit, its spawn stats, matched/failed counts.
+  // The equal-stats card mirrors the stat_match_* status: baseline unit, its spawn stats, matched/failed counts.
   const fmtStat = n => new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format(n);
+  // Spawn stats (set_stat_mode, stat_match.lua): the game's numbers, the first unit's (equal stats), or the
+  // player's own values for the fields they fill in; empty fields keep the unit's own value.
+  const STAT_CORE = [["Health_Max", "hp"], ["Shachi_Max", "shachi"], ["Attack", "atk"], ["ShachiAttack", "satk"]];
+  // Every attribute of the game's attribute set (backend.py STAT_FIELDS, character_stats.lua Stats.allFields),
+  // grouped for the dialog. A family group's rows are its seven multipliers.
+  const STAT_PREFIXES = ["Amplification", "DealtVulnerabilityMultiplier", "DealtReductionMultiplier", "Resistance", "TakenAdditiveMultiplier", "TakenVulnerabilityMultiplier", "TakenReductionMultiplier"];
+  const STAT_DAMAGE = ["Physical", "PhysicalSharp", "PhysicalBlunt", "Elemental", "Fire", "Toxin", "Ice", "Aqua", "Lightning", "Blood", "Chaos", "ImpactShachi", "ReflectShachi"];
+  // Status buildup: Amplification_<family>, the other six <prefix>_<family>Accumulation.
+  const STAT_BUILDUP = ["ElementalAccumulation", "Ignite", "Poison", "Frost", "Electrified", "Bleed", "BloodBurst", "Water"];
+  const buildupField = (prefix, family) => prefix + "_" + (prefix === "Amplification" || family === "ElementalAccumulation" ? family : family + "Accumulation");
+  const STAT_GROUPS = [
+    { key: "core", fields: STAT_CORE.map(([f]) => f) },
+    { key: "health", fields: ["Health", "Health_Min", "Shield", "Shield_Max"] },
+    { key: "shachi", fields: ["Shachi", "Shachi_Min", "ShachiRegen", "ShachiRegenCooldown", "HeavyAttack_ShachiCostReduction", "BreakDurationAdditionalMultiplier"] },
+    { key: "defense", fields: [...STAT_PREFIXES.slice(3).map(p => p + "_Poise"), "Resistance_BreakDamageAdditionalMultiplier", ...STAT_PREFIXES.slice(4).map(p => p + "_BreakDamage"), ...STAT_PREFIXES.map(p => p + "_DefenceShachi")] },
+    { key: "weapon", fields: ["Health", "Shachi", "Strength", "Ranged", "Magic", "Martial", "Summon"].map(w => "Resistance_ShachiWeapon" + w) },
+    ...STAT_DAMAGE.map(family => ({ key: family, family, fields: STAT_PREFIXES.map(p => p + "_" + family) })),
+    { key: "status", fields: ["Infliction_Max", "StatusInflictionDecrementRate", ...["Ignite", "Poison", "Frost", "Thunder", "Electrified", "Bleed", "BloodBurst", "Water"].map(x => x + "_Accumulation")] },
+    ...STAT_BUILDUP.map(family => ({ key: family, family, fields: STAT_PREFIXES.map(p => buildupField(p, family)) })),
+    { key: "ultimate", fields: ["UltimateCharge", "UltimateCharge_Max", "UltimateChargeCount", "UltimateChargeCount_Max", "UltimateChargeAdditiveRate", "UltimateChargeGainRateMultiplier", "SpiritShadow", "SpiritShadow_Max", "Awakening", "Awakening_Max"] },
+    { key: "execution", fields: ["ExecutionExecutorNormalHealthThreshold", "ExecutionExecutorBreakHealthThreshold", "ExecutionTargetNormalHealthThreshold", "ExecutionTargetBreakHealthThreshold"] },
+    { key: "movement", fields: ["WalkSpeed", "JogSpeed", "SprintSpeed", "CrouchSpeed", "FinalWalkSpeed"] },
+    { key: "other", fields: ["Level", "MindDustAdditiveMultiplier", "PowerScore", "XP", "Coin", "Corrosion"] },
+    { key: "lv1", fields: ["Health_Max_Lv1", "Shachi_Max_Lv1", "Attack_Lv1", "ShachiAttack_Lv1", "Infliction_Max_Lv1"] },
+  ];
+  const groupHeading = g => g.family ? "stats.family." + g.family : "stats.group." + g.key;
+  // field -> [heading key or null, own key]: "family · multiplier", or a name of its own.
+  const STAT_META = new Map();
+  for (const g of STAT_GROUPS) for (const field of g.fields) {
+    const core = STAT_CORE.find(([f]) => f === field);
+    const multiplier = field.match(/^([A-Za-z]+)_(Poise|BreakDamage|DefenceShachi)$/);
+    const weapon = field.match(/^Resistance_ShachiWeapon(\w+)$/);
+    const buildup = field.match(/^(\w+)_Accumulation$/);
+    STAT_META.set(field, core ? [null, "stats.core." + core[1]]
+      : g.family ? [groupHeading(g), "stats.prefix." + field.split("_")[0]]
+      : field === "Resistance_BreakDamageAdditionalMultiplier" ? ["stats.family.BreakDamage", "stats.prefix.Resistance"]
+      : multiplier ? ["stats.family." + multiplier[2], "stats.prefix." + multiplier[1]]
+      : weapon ? ["stats.group.weapon", "stats.weapon." + weapon[1]]
+      : buildup ? ["stats.family." + buildup[1], "stats.current"]
+      : [null, "stats.field." + field]);
+  }
+  function statLabel(field) {
+    const [head, own] = STAT_META.get(field) || [null, null];
+    if (!own) return field;
+    return head ? t(head) + " · " + t(own) : t(own);
+  }
+  // In its own family's group a row needs only the multiplier's name.
+  const rowLabel = (field, g) => { const [head, own] = STAT_META.get(field); return head && head === groupHeading(g) ? t(own) : statLabel(field); };
+  // The draft the player edits: every saved value, as text; empty means "keep the unit's own".
+  function statDraft() {
+    if (!ui.statDraft) ui.statDraft = Object.fromEntries(Object.entries(S.statMatch.values || {}).map(([k, v]) => [k, String(v)]));
+    return ui.statDraft;
+  }
+  async function loadStatValues() {
+    ui.statLoaded = true;
+    try { const saved = await RT.statSettings(); S.statMatch.values = saved.values || {}; ui.statDraft = null; } catch { /* keep what we have */ }
+  }
+  // Numbers from the draft; null with a reason when a field cannot be sent.
+  function statValues() {
+    const values = {};
+    for (const [field, text] of Object.entries(statDraft())) {
+      const raw = String(text).trim();
+      if (!raw) continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || Math.abs(n) > 1e9) return [null, t("stats.invalid", { name: statLabel(field) })];
+      if (["Health", "Health_Max", "Shachi_Max", "Attack"].includes(field) && n <= 0) return [null, t("stats.positive", { name: statLabel(field) })];
+      if (["Shachi", "ShachiAttack"].includes(field) && n < 0) return [null, t("stats.nonneg", { name: statLabel(field) })];
+      values[field] = n;
+    }
+    return Object.keys(values).length ? [values] : [null, t("stats.empty")];
+  }
+  async function setStatMode(mode) {
+    if (mode === "custom") {
+      // Saved values switch at once; with none yet the form opens and Apply switches.
+      if (!S.statMatch.customCount) { ui.statTab = "custom"; await loadStatValues(); renderMatch(); return; }
+      await loadStatValues();
+      const [values] = statValues();
+      if (!values) { ui.statTab = "custom"; renderMatch(); return; }
+      return applyStats(values);
+    }
+    ui.statTab = null;
+    run("set_stat_mode", { payload: { mode }, ok: () => ({ title: t("toast.stats." + mode), body: t("toast.stats.body") }) });
+  }
+  async function applyStats(values) {
+    if (!values) {
+      const [checked, why] = statValues();
+      if (!checked) { toast({ kind: "error", title: why }); return; }
+      values = checked;
+    }
+    const job = await run("set_stat_mode", { payload: { mode: "custom", values }, ok: () => ({ title: t("toast.stats.custom", { n: Object.keys(values).length }), body: t("toast.stats.body") }) });
+    if (job?.status === "succeeded") { ui.statTab = null; S.statMatch.values = values; ui.statDraft = null; renderMatch(); renderSelection(); }
+  }
+  function statsDialog() {
+    const draft = statDraft();
+    const filled = f => String(draft[f] ?? "").trim() !== "";
+    const groups = STAT_GROUPS.map(g => `<details class="stat-group" data-group="${g.key}" ${g.key === "core" || g.fields.some(filled) ? "open" : ""}>
+      <summary><span class="stat-group-name">${esc(t(groupHeading(g)))}</span><span class="stat-group-count">${g.fields.filter(filled).length}/${g.fields.length}</span>${icon("chevron-down", "chev")}</summary>
+      ${g.fields.map(field => `<label class="stat-row" data-search="${esc((statLabel(field) + " " + field).toLowerCase())}"><span class="stat-row-name">${esc(rowLabel(field, g))}<small class="mono">${esc(field)}</small></span>
+        <input class="stat-input" type="text" inputmode="decimal" data-field="${field}" value="${esc(draft[field] ?? "")}" placeholder="${esc(t("stats.placeholder"))}" aria-label="${esc(statLabel(field))}"></label>`).join("")}</details>`).join("");
+    openDialog("stats", `<div class="dialog-head"><span class="row-icon">${icon("sliders")}</span><h2 id="dlg-title">${esc(t("stats.dialog.title"))}</h2><button class="icon-btn icon-btn-sm" type="button" data-action="dialog-close" aria-label="${esc(t("common.close"))}">${icon("x")}</button></div>
+      <div class="dialog-body"><p class="stat-dialog-desc">${esc(t("stats.dialog.desc"))}</p>
+        <input class="stat-filter" type="search" placeholder="${esc(t("stats.filter"))}" aria-label="${esc(t("stats.filter"))}">
+        ${groups}<p class="stat-filter-none" hidden>${esc(t("stats.filter.none"))}</p></div>
+      <div class="dialog-foot"><button class="btn btn-ghost" type="button" data-action="stats-clear">${esc(t("stats.dialog.clear"))}</button><button class="btn btn-ghost" type="button" data-action="dialog-close">${esc(t("common.cancel"))}</button><button class="btn btn-primary" type="button" data-action="stats-save" data-autofocus>${esc(t("stats.dialog.save"))}</button></div>`);
+  }
   function renderMatch() {
     const el = $("#dock-match");
     if (!el) return;
-    const m = S.statMatch, online = RT.online(), busy = ui.busy.has("toggle_stat_match");
-    const desc = busy ? t("match.switching") : !online ? t("match.desc.offline") : t(m.enabled ? "match.desc.on" : "match.desc.off");
+    const m = S.statMatch, online = RT.online(), busy = ui.busy.has("set_stat_mode") || ui.busy.has("toggle_stat_match");
+    if (ui.statTab && ui.statTab === m.mode) ui.statTab = null;
+    const tab = ui.statTab || m.mode;
+    const usable = online && !busy && m.modeSupported;
+    const desc = busy ? t("match.switching") : !online ? t("match.desc.offline") : !m.modeSupported ? t("fun.old")
+      : tab === "match" ? t("match.desc.on") : tab === "custom" ? t("stats.desc.custom") : t("stats.desc.game");
+    const seg = `<div class="seg stat-seg" role="radiogroup" aria-labelledby="match-title">${["game", "match", "custom"].map(mode =>
+      `<button class="seg-btn" type="button" role="radio" aria-checked="${tab === mode}" data-action="stats-mode" data-mode="${mode}" ${usable ? "" : "disabled"}>${esc(t("stats.mode." + mode))}</button>`).join("")}</div>`;
+    if (tab === "custom" && online && m.modeSupported && !ui.statLoaded) loadStatValues().then(renderMatch);
+    // Status updates re-render the card; keep the field being typed in.
+    const typing = el.contains(document.activeElement) && document.activeElement.classList.contains("stat-input")
+      ? { field: document.activeElement.dataset.field, start: document.activeElement.selectionStart, end: document.activeElement.selectionEnd } : null;
     let card = "";
-    if (m.enabled && online && !busy) {
+    if (tab === "custom" && online && m.modeSupported) {
+      const draft = statDraft();
+      const others = Object.keys(draft).filter(f => !STAT_CORE.some(([c]) => c === f) && String(draft[f]).trim()).length;
+      card = `<div class="match-card stat-card">
+          <div class="stat-grid">${STAT_CORE.map(([field, key]) => `<label class="stat-field"><span>${esc(t("stats.core." + key))}</span>
+            <input class="stat-input" type="text" inputmode="decimal" data-field="${field}" value="${esc(draft[field] ?? "")}" placeholder="${esc(t("stats.placeholder"))}" ${busy ? "disabled" : ""}></label>`).join("")}</div>
+          <div class="stat-actions"><button class="btn-link" type="button" data-action="stats-all">${icon("sliders", "icon-sm")}${esc(others ? t("stats.all.more", { n: others }) : t("stats.all"))}</button>
+            <button class="btn btn-primary btn-sm" type="button" data-action="stats-apply" ${usable ? "" : "disabled"}>${esc(t("stats.apply"))}</button></div>
+          ${m.mode === "custom" ? `<div class="match-foot">${icon("check-circle", "icon-sm")}<span>${esc(m.customized ? t("stats.applied", { n: m.customized }) : t("stats.applied.none"))}</span></div>` : ""}
+          ${m.rejected.length && m.mode === "custom" ? `<div class="match-warn">${icon("alert", "icon-sm")}<span>${esc(t("stats.rejected", { n: m.rejectedCount || m.rejected.length, names: m.rejected.slice(0, 4).map(statLabel).join("、") + (m.rejected.length > 4 ? "…" : "") }))}</span></div>` : ""}
+          ${m.failures && m.mode === "custom" ? `<div class="match-warn">${icon("alert", "icon-sm")}<span>${esc(t("match.failures", { n: m.failures }))}</span><button class="btn-link" type="button" data-action="open-history">${esc(t("history.open"))}</button></div>` : ""}
+          <p class="stat-note">${esc(t("stats.note"))}</p>
+        </div>`;
+    } else if (m.mode === "match" && tab === "match" && online && !busy) {
       const base = m.baseline && byId.get(m.baseline.id);
       const failures = m.failures
         ? `<div class="match-warn">${icon("alert", "icon-sm")}<span>${esc(t("match.failures", { n: m.failures }))}</span><button class="btn-link" type="button" data-action="open-history">${esc(t("history.open"))}</button></div>`
@@ -735,23 +864,27 @@
             ${failures}
           </div>`;
     }
-    el.innerHTML = `<div class="dock-title"><span id="match-title">${esc(t("match.title"))}</span><button class="title-link" type="button" data-action="match-rules">${icon("help", "icon-sm")}${esc(t("match.rules"))}</button></div>
-      <div class="control-row${m.enabled && online && !busy ? " is-on" : ""}">
-        <span class="control-icon">${icon("scale")}</span>
-        <div class="control-main"><div class="control-title">${esc(t("match.name"))}</div><div class="control-desc">${esc(desc)}</div></div>
-        <button class="switch" type="button" role="switch" aria-checked="${m.enabled}" aria-busy="${busy}" data-action="match-toggle" aria-label="${esc(t("match.name"))}" ${online && !busy ? "" : "disabled"}></button>
-      </div>
+    el.innerHTML = `<div class="dock-title"><span id="match-title">${esc(t("stats.title"))}</span><button class="title-link" type="button" data-action="match-rules">${icon("help", "icon-sm")}${esc(t("match.rules"))}</button></div>
+      ${seg}
+      <p class="diff-desc">${esc(desc)}</p>
       ${card}`;
+    const again = typing && el.querySelector(`.stat-input[data-field="${typing.field}"]`);
+    if (again) { again.focus(); again.setSelectionRange(typing.start, typing.end); }
   }
   function matchRulesDialog() {
-    openDialog("match", `<div class="dialog-head"><span class="row-icon">${icon("scale")}</span><h2 id="dlg-title">${esc(t("match.rules.title"))}</h2><button class="icon-btn icon-btn-sm" type="button" data-action="dialog-close" aria-label="${esc(t("common.close"))}">${icon("x")}</button></div>
-      <div class="dialog-body"><ol class="rule-list">${[1, 2, 3, 4, 5, 6, 7].map(i => `<li>${esc(t("match.rules." + i))}</li>`).join("")}</ol></div>
+    const rules = (prefix, n) => `<ol class="rule-list">${Array.from({ length: n }, (_, i) => `<li>${esc(t(prefix + (i + 1)))}</li>`).join("")}</ol>`;
+    openDialog("match", `<div class="dialog-head"><span class="row-icon">${icon("scale")}</span><h2 id="dlg-title">${esc(t("stats.rules.title"))}</h2><button class="icon-btn icon-btn-sm" type="button" data-action="dialog-close" aria-label="${esc(t("common.close"))}">${icon("x")}</button></div>
+      <div class="dialog-body">
+        <h3 class="rule-head">${esc(t("stats.mode.game"))}</h3><p class="rule-text">${esc(t("stats.rules.game"))}</p>
+        <h3 class="rule-head">${esc(t("stats.mode.match"))}</h3>${rules("match.rules.", 7)}
+        <h3 class="rule-head">${esc(t("stats.mode.custom"))}</h3>${rules("stats.rules.custom.", 6)}
+      </div>
       <div class="dialog-foot"><button class="btn btn-primary" type="button" data-action="dialog-close" data-autofocus>${esc(t("common.gotIt"))}</button></div>`, "dialog-sm");
   }
   // What equal stats did to a batch, read from the status change the same way the real panel will.
   function matchNote(before, n) {
     const m = S.statMatch, base = m.baseline && byId.get(m.baseline.id);
-    if (!m.enabled || !base) return "";
+    if (m.mode !== "match" || !base) return "";
     if (!before.baseline) return n > 1 ? t("toast.summon.baselineMore", { n: n - 1 }) : t("toast.summon.baseline");
     return m.matched > before.matched ? t("toast.summon.matched", { name: base.name }) : "";
   }
@@ -762,6 +895,25 @@
     const rest = entries.slice(2);
     const more = rest.length ? `<span class="roster-item" title="${esc(rest.map(([id, n]) => `${byId.get(id)?.name} ×${n}`).join("\n"))}">+${rest.length}</span>` : "";
     return `<div class="side-chips">${shown}${more}</div>`;
+  }
+  // 不倒下 (set_team_immortal, immortal_teams.lua): the units of a side switched on keep their HP.
+  function guardHTML(team) {
+    const on = S.immortal[team], busy = ui.busy.has("immortal_" + team);
+    return `<button class="side-guard${on ? " is-on" : ""}" type="button" role="switch" aria-checked="${on}" aria-busy="${busy}" data-action="immortal-toggle" data-team="${team}" title="${esc(t("immortal.hint"))}" ${RT.online() && S.immortal.supported && !busy ? "" : "disabled"}>${icon("shield", "icon-sm")}<span>${esc(t("immortal.name"))}</span></button>`;
+  }
+  async function toggleImmortal(team) {
+    if (!["blue", "red", "companion"].includes(team)) return;
+    const enabled = !S.immortal[team], name = teamName(team);
+    // With both sides held up nobody can win; say so, but an endless show fight is allowed.
+    const both = enabled && team !== "companion" && S.immortal[team === "blue" ? "red" : "blue"];
+    await run("set_team_immortal", { busyKey: "immortal_" + team, payload: { team, enabled },
+      ok: () => ({ title: t(enabled ? "toast.immortal.on" : "toast.immortal.off", { team: name }), ...(both ? { body: t("toast.immortal.both", { stop: t("field.stop") }) } : {}) }) });
+  }
+  // Game seconds from arena_controller.lua, shown as m:ss.
+  const fmtClock = seconds => { const s = Math.max(0, Math.floor(seconds)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+  function renderClock() {
+    const el = $("#battle-clock");
+    if (el) el.lastChild.textContent = fmtClock(S.clock.seconds);
   }
   function renderBattle() {
     const el = $("#dock-battle");
@@ -775,12 +927,15 @@
         <div class="side-count" id="count-${team}">${S[team]}</div>
         <div class="side-sub">${esc(t("field.aliveOf", { n: summoned(team) }))}</div>
         ${rosterHTML(team)}
+        ${guardHTML(team)}
       </div>`;
     // Fallen units stay in the world until cleanup; unreadable ones are neither alive nor fallen.
     const fallen = S.down.blue + S.down.red;
-    const note = fallen || S.unreadable
-      ? `<div class="field-note">${fallen ? `<span>${esc(t("field.down", { n: fmtNum(fallen) }))}</span>` : ""}${S.unreadable ? `<span class="field-note-warn" title="${esc(t("field.unreadableHelp"))}">${icon("alert", "icon-sm")}${esc(t("field.unreadable", { n: fmtNum(S.unreadable) }))}</span>` : ""}</div>`
+    const unlocked = S.immortal.failures;
+    const note = fallen || S.unreadable || unlocked
+      ? `<div class="field-note">${fallen ? `<span>${esc(t("field.down", { n: fmtNum(fallen) }))}</span>` : ""}${S.unreadable ? `<span class="field-note-warn" title="${esc(t("field.unreadableHelp"))}">${icon("alert", "icon-sm")}${esc(t("field.unreadable", { n: fmtNum(S.unreadable) }))}</span>` : ""}${unlocked ? `<span class="field-note-warn">${icon("alert", "icon-sm")}${esc(t("immortal.failed", { n: fmtNum(unlocked) }))}</span>` : ""}</div>`
       : "";
+    const time = S.clock.state === "ended" ? ` · ${t("field.time", { time: fmtClock(S.clock.seconds) })}` : "";
     const startBlocked = gameBlocker("field") || (fighting ? "" : !(S.blue > 0 && S.red > 0) ? t("field.needBoth") : "");
     const startBusy = ui.busy.has("start");
     const rematchable = Object.keys(ui.roster.blue).length && Object.keys(ui.roster.red).length;
@@ -791,7 +946,7 @@
         : `<div class="callout callout-amber field-callout">${icon("alert")}<div class="callout-body"><strong>${esc(t("field.unfinished.title"))}</strong><span>${esc(t("field.unfinished.body"))}</span><div class="callout-actions"><button class="btn btn-primary btn-sm" type="button" data-action="stop-again" ${ui.busy.has("stop") ? "disabled" : ""}>${ui.busy.has("stop") ? '<span class="spinner" style="width:12px;height:12px"></span>' : icon("trash", "icon-sm")}${esc(t("field.unfinished.again"))}</button></div></div></div>`
       : "";
     const actions = showResult
-      ? `<div class="result-banner"><span class="trophy">${icon("trophy")}</span><div><strong>${esc(t("field.winner." + S.winner))}</strong><p>${esc(S.winner === "draw" ? t("field.result.draw") : t("field.result.left", { n: S[S.winner] }))}</p></div></div>
+      ? `<div class="result-banner"><span class="trophy">${icon("trophy")}</span><div><strong>${esc(t("field.winner." + S.winner))}</strong><p>${esc((S.winner === "draw" ? t("field.result.draw") : t("field.result.left", { n: S[S.winner] })) + time)}</p></div></div>
         <div class="result-actions">${rematchable ? `<button class="btn btn-primary btn-sm" type="button" data-action="rematch" ${ui.busy.has("rematch") ? "disabled" : ""}>${icon("refresh", "icon-sm")}${esc(t("field.rematch"))}</button>` : ""}<button class="btn btn-secondary btn-sm" type="button" data-action="stop">${icon("trash", "icon-sm")}${esc(t("field.cleanup"))}</button></div>`
       : `<div class="battle-actions">
           <button class="btn btn-lg btn-block btn-primary" type="button" data-action="start" ${startBlocked || fighting || startBusy ? "disabled" : ""}>
@@ -799,7 +954,9 @@
           </button>
           ${startBlocked ? `<p class="reason">${esc(startBlocked)}</p>` : fighting ? `<p class="reason">${esc(t("field.fightingHint"))}</p>` : ""}
         </div>`;
-    el.innerHTML = `<div class="dock-title"><span style="display:flex;align-items:center;gap:8px">${esc(t("field.title"))}<span class="phase phase-${S.fight}">${esc(t("field.phase." + S.fight))}</span></span>
+    const clock = fighting && S.clock.state === "running"
+      ? `<span class="battle-clock" id="battle-clock" title="${esc(t("field.clockHint"))}">${icon("clock", "icon-sm")}<span>${esc(fmtClock(S.clock.seconds))}</span></span>` : "";
+    el.innerHTML = `<div class="dock-title"><span style="display:flex;align-items:center;gap:8px">${esc(t("field.title"))}<span class="phase phase-${S.fight}">${esc(t("field.phase." + S.fight))}</span>${clock}</span>
         <button class="btn btn-ghost stop-btn" type="button" data-action="stop" ${stopDisabled ? "disabled" : ""} title="${esc(t("field.stopHint"))}">${ui.busy.has("stop") ? '<span class="spinner" style="width:12px;height:12px"></span>' : icon("trash", "icon-sm")}${esc(t("field.stop"))}${keyCap(S.keys.stop)}</button></div>
       <div class="scoreboard">${side("blue")}<div class="vs">VS</div>${side("red")}</div>
       ${note}${unfinished}
@@ -832,7 +989,23 @@
           <div class="control-main"><div class="control-title">${esc(t("view.spectator"))}${keyCap(S.keys.toggle_spectator)}</div><div class="control-desc">${esc(desc)}</div></div>
           <button class="switch" type="button" role="switch" aria-checked="${on}" aria-busy="${!!phase}" data-action="spectator" aria-label="${esc(t("view.spectator"))}" ${RT.ready() && !phase && !cam ? "" : "disabled"}></button>
         </div>
+        ${clockHudRow()}
       </div>`;
+  }
+  // The fight time at the top centre of the game screen (set_clock_hud, battle_clock_hud.lua).
+  function clockHudRow() {
+    const h = S.clockHud, busy = ui.busy.has("set_clock_hud"), shown = h.on && h.supported;
+    const desc = !h.supported && RT.online() ? t("fun.old") : h.on && h.state === "failed" ? t("view.clockHud.failed")
+      : h.on && h.state === "shown" ? t("view.clockHud.shown") : t(h.on ? "view.clockHud.on" : "view.clockHud.desc");
+    return `<div class="control-row${shown ? " is-on" : ""}">
+          <span class="control-icon">${icon("clock")}</span>
+          <div class="control-main"><div class="control-title">${esc(t("view.clockHud"))}</div><div class="control-desc">${esc(desc)}</div></div>
+          <button class="switch" type="button" role="switch" aria-checked="${h.on}" aria-busy="${busy}" data-action="clock-hud" aria-label="${esc(t("view.clockHud"))}" ${RT.online() && h.supported && !busy ? "" : "disabled"}></button>
+        </div>`;
+  }
+  function toggleClockHud() {
+    const enabled = !S.clockHud.on;
+    run("set_clock_hud", { payload: { enabled }, ok: () => t(enabled ? "toast.clockHud.on" : "toast.clockHud.off") });
   }
 
   // ---------- Commands ----------
@@ -935,7 +1108,7 @@
   async function rematch() {
     // The stop below makes equal stats pick a new baseline, so the old baseline is summoned first
     // and the rematch keeps the same numbers.
-    const baseId = S.statMatch.enabled ? S.statMatch.baseline?.id : null;
+    const baseId = S.statMatch.mode === "match" ? S.statMatch.baseline?.id : null;
     const lineup = ["blue", "red"].flatMap(team => Object.entries(ui.roster[team]).map(([id, n]) => ({ id, team, n })))
       .sort((a, b) => (b.id === baseId) - (a.id === baseId));
     if (!lineup.length || ui.busy.has("rematch")) return;
@@ -1331,6 +1504,9 @@
       case "configure_unit_key": return t("action.configure_unit_key", { name: u?.name });
       case "set_spawn_difficulty": return t("action.set_spawn_difficulty", { name: diffName(p.difficulty) });
       case "set_fun_feature": return t("action.set_fun_feature", { name: t("fun." + p.feature + ".name"), state: t(p.enabled ? "fun.on" : "fun.off") });
+      case "set_team_immortal": return t("action.set_team_immortal", { team: teamName(p.team), state: t(p.enabled ? "fun.on" : "fun.off") });
+      case "set_clock_hud": return t("action.set_clock_hud", { state: t(p.enabled ? "fun.on" : "fun.off") });
+      case "set_stat_mode": return t("action.set_stat_mode", { mode: t("stats.mode." + p.mode) });
       default: return t("action." + job.action);
     }
   }
@@ -1613,6 +1789,13 @@
     "match-toggle": () => run("toggle_stat_match", { ok: () => (S.statMatch.enabled ? { title: t("toast.match.on"), body: t("toast.match.on.body") } : { title: t("toast.match.off"), body: t("toast.match.off.body") }) }),
     "match-rules": () => matchRulesDialog(),
     "fun-toggle": el => toggleFun(el.dataset.feature),
+    "immortal-toggle": el => toggleImmortal(el.dataset.team),
+    "stats-mode": el => setStatMode(el.dataset.mode),
+    "stats-apply": () => applyStats(),
+    "stats-all": async () => { if (!ui.statDraft) await loadStatValues(); statsDialog(); },
+    "stats-save": () => { closeDialog(); applyStats(); },
+    "stats-clear": () => { ui.statDraft = {}; for (const input of document.querySelectorAll(".dialog .stat-input")) input.value = ""; },
+    "clock-hud": () => toggleClockHud(),
     "match-focus": () => { const el = $("#dock-match"); el?.scrollIntoView({ block: "nearest", behavior: "smooth" }); el?.querySelector(".switch")?.focus({ preventScroll: true }); },
     "launch-game": () => { closePopover(); RT.launchGame(); toast({ kind: "info", title: t("toast.launching"), body: t("toast.launching.body") }); },
     "unitkey-capture": el => { if (ui.capture?.kind === "unit") cancelCapture(); else startCapture({ kind: "unit", id: el.dataset.id }); },
@@ -1712,8 +1895,10 @@
     "demo-f6": () => RT.toggleFreeCam(),
     "demo-reset": () => { store.clear(); location.reload(); },
   };
+  // Units per summon; backend.py MAX_SPAWN_COUNT (a guard against a mistyped number, not a game limit).
+  const MAX_COUNT = 100;
   function setCount(n) {
-    ui.count = Math.max(1, Math.min(8, Math.round(n) || 1));
+    ui.count = Math.max(1, Math.min(MAX_COUNT, Math.round(n) || 1));
     renderSelection();
     scheduleSync();
     followUnitKey();
@@ -1751,6 +1936,28 @@
     fn(el, e);
   });
   document.addEventListener("input", e => {
+    if (e.target.classList?.contains("stat-input")) {
+      statDraft()[e.target.dataset.field] = e.target.value;
+      const group = e.target.closest(".stat-group");
+      if (group) {
+        const inputs = [...group.querySelectorAll(".stat-input")];
+        group.querySelector(".stat-group-count").textContent = `${inputs.filter(i => i.value.trim()).length}/${inputs.length}`;
+      }
+      return;
+    }
+    if (e.target.classList?.contains("stat-filter")) {
+      const q = e.target.value.trim().toLowerCase();
+      let any = false;
+      for (const group of document.querySelectorAll(".dialog .stat-group")) {
+        let hits = 0;
+        for (const row of group.querySelectorAll(".stat-row")) { const hit = !q || row.dataset.search.includes(q); row.hidden = !hit; hits += hit; }
+        group.hidden = !hits;
+        if (q && hits) group.open = true;
+        any ||= hits > 0;
+      }
+      document.querySelector(".dialog .stat-filter-none").hidden = any;
+      return;
+    }
     if (e.target.id === "search") {
       ui.query = e.target.value;
       clearTimeout(ui.searchTimer);
@@ -1835,7 +2042,8 @@
         break;
       case "fightEnd":
         renderBattle();
-        toast({ kind: "success", title: t("field.winner." + event.winner), body: event.winner === "draw" ? t("field.result.draw") : t("field.result.left", { n: S[event.winner] }) });
+        toast({ kind: "success", title: t("field.winner." + event.winner), body: (event.winner === "draw" ? t("field.result.draw") : t("field.result.left", { n: S[event.winner] }))
+          + (S.clock.state === "ended" ? ` · ${t("field.time", { time: fmtClock(S.clock.seconds) })}` : "") });
         break;
       case "spectator":
         if (ui.page === "arena") renderDock();
@@ -1884,6 +2092,7 @@
           if (p.has("diff")) renderDifficulty();
           if (p.has("match")) renderMatch();
           if (p.has("battle")) renderBattle();
+          else if (p.has("clock")) renderClock();
           if (p.has("view")) renderView();
           if (p.has("grid") && !ui.capture) renderGrid();
         } else if (ui.page === "hotkeys" && p.has("keys") && !ui.capture && !ui.keysSaving) renderPage();

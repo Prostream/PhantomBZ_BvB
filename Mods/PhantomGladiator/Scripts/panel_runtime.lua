@@ -51,6 +51,11 @@ function Runtime.new(options)
             if not options.statMatch then return {ok=false,message='数值统一模块未加载',spawned_count=0} end
             return options.statMatch:toggle()
         end,
+        -- GAME, MATCH or CUSTOM in key_spawn; for CUSTOM the revision of Runtime/stat-custom-request.tsv in key_start.
+        set_stat_mode=function(command)
+            if not options.statMatch then return {ok=false,message='数值设定模块未加载',spawned_count=0} end
+            return options.statMatch:setMode(command.key_spawn,command.key_start)
+        end,
         -- The difficulty token travels in the key_spawn column (FOLLOW, EASY, NORMAL, HARD, NIGHTMARE).
         set_spawn_difficulty=function(command)
             if not options.spawnDifficulty then return {ok=false,message='召唤难度模块未加载',spawned_count=0} end
@@ -60,6 +65,16 @@ function Runtime.new(options)
         set_fun_feature=function(command)
             if not options.funFeatures then return {ok=false,message='趣味功能模块未加载',spawned_count=0} end
             return options.funFeatures:set(command.key_spawn,command.key_start)
+        end,
+        -- Team (blue, red, companion) in the team column, ON or OFF in key_start (immortal_teams.lua).
+        set_team_immortal=function(command)
+            if not options.immortal then return {ok=false,message='不倒下模块未加载',spawned_count=0} end
+            return options.immortal:set(command.team,command.key_start)
+        end,
+        -- ON or OFF in key_start (battle_clock_hud.lua).
+        set_clock_hud=function(command)
+            if not options.clockHUD then return {ok=false,message='画面计时模块未加载',spawned_count=0} end
+            return options.clockHUD:set(command.key_start)
         end,
         start=function()
             local why=readyError(); if why then return {ok=false,message=why,spawned_count=0} end
@@ -147,6 +162,23 @@ function Runtime.new(options)
         out.companion_message=companion.message or ''
         out.arena_team_revision=arena.team_revision or 0
         out.arena_summon_count=arena.summon_count or 0
+        out.battle_clock=arena.battle_clock or ''
+        out.battle_seconds=string.format('%.1f',arena.battle_seconds or 0)
+        local immortal=options.immortal and options.immortal:status() or {}
+        out.immortal_supported=not not options.immortal
+        out.immortal_blue=immortal.blue==true
+        out.immortal_red=immortal.red==true
+        out.immortal_companion=immortal.companion==true
+        out.immortal_locked=immortal.locked or 0
+        out.immortal_failures=immortal.failures or 0
+        out.immortal_breaches=immortal.breaches or 0
+        out.immortal_message=immortal.message or ''
+        local clockHUD=options.clockHUD and options.clockHUD:status() or {}
+        out.clock_hud_supported=not not options.clockHUD
+        out.clock_hud=clockHUD.on==true
+        out.clock_hud_state=clockHUD.state or 'off'
+        out.clock_hud_failures=clockHUD.failures or 0
+        out.clock_hud_message=clockHUD.message or ''
         local support=options.support and options.support:status() or {}
         out.boss_hud_registered=support.registered or 0
         out.boss_hud_visible=support.visible or 0
@@ -174,6 +206,18 @@ function Runtime.new(options)
         out.stat_match_failures=matching.failures or 0
         out.stat_match_message=matching.message or ''
         out.stat_match_fields=matching.field_count or 0
+        out.stat_match_mode=matching.mode or 'game'
+        out.stat_match_customized=matching.customized or 0
+        out.stat_custom_count=matching.custom_count or 0
+        local custom=matching.custom or {}
+        out.stat_custom_health=custom.Health_Max or ''
+        out.stat_custom_shachi=custom.Shachi_Max or ''
+        out.stat_custom_attack=custom.Attack or ''
+        out.stat_custom_shachi_attack=custom.ShachiAttack or ''
+        -- The fields the game did not take on the last custom unit; the app names the first few.
+        local rejected=matching.rejected or {}
+        out.stat_custom_rejected=#rejected
+        out.stat_custom_rejected_fields=table.concat(rejected,',',1,math.min(#rejected,12))
         local difficulty=options.spawnDifficulty and options.spawnDifficulty:status() or {}
         out.spawn_difficulty_supported=not not options.spawnDifficulty
         out.spawn_difficulty=difficulty.level or ''

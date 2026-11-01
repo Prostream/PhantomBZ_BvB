@@ -36,6 +36,14 @@ const MockRuntime = (() => {
   const FUN_KEY = "pg-proto.fun";
   let savedFun = {};
   try { savedFun = JSON.parse(localStorage.getItem(FUN_KEY) || "{}") || {}; } catch { /* storage may be unavailable */ }
+  // 不倒下 mirrors immortal_teams.lua: one saved switch per team (Runtime/immortal-teams.tsv).
+  const IMMORTAL_KEY = "pg-proto.immortal";
+  let savedImmortal = {};
+  try { savedImmortal = JSON.parse(localStorage.getItem(IMMORTAL_KEY) || "{}") || {}; } catch { /* storage may be unavailable */ }
+  // The on-screen clock switch mirrors battle_clock_hud.lua (Runtime/clock-hud.tsv).
+  const CLOCK_HUD_KEY = "pg-proto.clockHud";
+  let savedClockHud = false;
+  try { savedClockHud = localStorage.getItem(CLOCK_HUD_KEY) === "true"; } catch { /* storage may be unavailable */ }
   const s = {
     game: "ready",              // offline | connecting | notInMap | ready | mismatch
     gameRunning: true,          // the updater refuses to replace mod files while the game runs
@@ -52,12 +60,16 @@ const MockRuntime = (() => {
     spectator: false,
     spectatorPhase: "",         // "" | "switching" | "restoring"
     // baseline: { id, hp, shachi, atk, satk } spawn stats; reset: cleared because the field emptied
-    statMatch: { enabled: savedMatch, baseline: null, matched: 0, failures: 0, reset: false },
+    statMatch: { enabled: savedMatch, mode: savedMatch ? "match" : "game", modeSupported: true, baseline: null, matched: 0, failures: 0, reset: false, customCount: 0, customized: 0, rejected: [], rejectedCount: 0, values: {} },
     // level: FOLLOW | EASY | NORMAL | HARD | NIGHTMARE for new units; game: the game's own level
     difficulty: { level: savedDiff, game: "Easy", supported: true, failures: 0, skipped: 0, aiFailed: 0 },
     // shachiState: off | locked | failed; guardState: off | waiting | ready | failed; deflects/dodges pressed so far
     fun: { supported: true, shachi: !!savedFun.shachi, deflect: !!savedFun.deflect, dodge: !!savedFun.dodge,
       shachiState: savedFun.shachi ? "locked" : "off", guardState: savedFun.deflect || savedFun.dodge ? "waiting" : "off", deflects: 0, dodges: 0 },
+    // A side switched on here never loses a unit; locked counts the units held up right now.
+    immortal: { supported: true, blue: !!savedImmortal.blue, red: !!savedImmortal.red, companion: !!savedImmortal.companion, locked: 0, failures: 0 },
+    clock: { state: "", seconds: 0 },   // the fight's game seconds: running while fighting, ended once one side is out
+    clockHud: { supported: true, on: savedClockHud, state: savedClockHud ? "waiting" : "off" },  // off | waiting | shown | failed
     fight: "idle",              // idle | fighting | ended
     winner: "",                 // blue | red | draw
     cleanup: "",                // "" | restore_pending (one more cleanup) | spawn_uncertain (restart the game)
@@ -72,7 +84,7 @@ const MockRuntime = (() => {
     installed: false,           // loader + mod present in the chosen game folder
   };
   const jobs = [];
-  let seq = 270, fightTimer = null, scanTimer = null;
+  let seq = 270, fightTimer = null, scanTimer = null, clockTimer = null;
 
   const emit = event => { for (const fn of listeners) fn(event || {}); };
   const online = () => ["notInMap", "ready", "mismatch"].includes(s.game);
@@ -109,6 +121,13 @@ const MockRuntime = (() => {
         if (outcome === "uncertain") { job.status = "uncertain"; job.code = "noAck"; return; }
         const m = s.statMatch;
         m.reset = false;            // units are about to appear, so "the field was cleared" no longer holds
+        if (m.mode === "custom" && p.team !== "companion") {
+          s[p.team] += p.count; job.spawned = p.count; m.customized += p.count;
+          const v = m.values;
+          m.rejected = [["Health", "Health_Max"], ["Shield", "Shield_Max"], ["Shachi", "Shachi_Max"]].filter(([c, max]) => v[c] != null && v[max] != null && v[c] > v[max]).map(([c]) => c);
+          m.rejectedCount = m.rejected.length;
+          return;
+        }
         if (m.enabled && outcome === "matchAbort") {
           // The rollback could not be confirmed: the batch stops and that unit stays for cleanup.
           s[p.team] += 1;
@@ -137,6 +156,8 @@ const MockRuntime = (() => {
       case "stop":
         job.cleared = owned();
         clearTimeout(fightTimer);
+        clearInterval(clockTimer);
+        s.clock = { state: "", seconds: 0 };
         // Like arena_controller.lua: units go, but an unconfirmed restore leaves restore_pending.
         const partial = (s.stopOutcome === "partial" && job.cleared > 0) || s.stopOutcome === "stuck";
         if (s.stopOutcome === "partial") s.stopOutcome = "ok";
@@ -164,6 +185,20 @@ const MockRuntime = (() => {
         try { localStorage.setItem(FUN_KEY, JSON.stringify({ shachi: f.shachi, deflect: f.deflect, dodge: f.dodge })); } catch { /* ignore */ }
         return;
       }
+      case "set_stat_mode": {
+        const m = s.statMatch;
+        Object.assign(m, { mode: p.mode, enabled: p.mode !== "game", baseline: null, matched: 0, failures: 0, reset: false, customized: 0, rejected: [], rejectedCount: 0 });
+        if (p.mode === "custom") Object.assign(m, { values: { ...p.values }, customCount: Object.keys(p.values).length });
+        return;
+      }
+      case "set_clock_hud":
+        s.clockHud = { supported: true, on: p.enabled, state: p.enabled ? (s.fight === "idle" ? "waiting" : "shown") : "off" };
+        try { localStorage.setItem(CLOCK_HUD_KEY, String(p.enabled)); } catch { /* ignore */ }
+        return;
+      case "set_team_immortal":
+        s.immortal[p.team] = p.enabled;
+        try { localStorage.setItem(IMMORTAL_KEY, JSON.stringify({ blue: s.immortal.blue, red: s.immortal.red, companion: s.immortal.companion })); } catch { /* ignore */ }
+        return;
       case "set_spawn_difficulty":
         s.difficulty.level = p.difficulty;
         try { localStorage.setItem(DIFF_KEY, p.difficulty); } catch { /* ignore */ }
@@ -210,18 +245,30 @@ const MockRuntime = (() => {
 
   function startFight() {
     clearTimeout(fightTimer);
+    clearInterval(clockTimer);
     s.fight = "fighting";
     s.winner = "";
+    // Wall-clock seconds here; the mod reports game seconds twice a second.
+    const started = Date.now();
+    s.clock = { state: "running", seconds: 0 };
+    clockTimer = setInterval(() => {
+      s.clock.seconds = (Date.now() - started) / 1000;
+      emit({ type: "state", parts: new Set(["clock"]) });
+    }, 1000);
     const tick = () => {
       if (s.fight !== "fighting") return;
-      if (s.blue && s.red) {
+      // A side that does not go down never loses a unit; with both sides held the fight runs on.
+      const sides = ["blue", "red"].filter(team => !s.immortal[team]);
+      if (s.blue && s.red && sides.length) {
         // The larger side is less likely to lose the next unit.
-        const loser = Math.random() < s.red / (s.blue + s.red) ? "blue" : "red";
+        const loser = sides.length === 1 ? sides[0] : Math.random() < s.red / (s.blue + s.red) ? "blue" : "red";
         s[loser]--;
         s.down[loser]++;
         emit({ type: "casualty" });
       }
       if (!s.blue || !s.red) {
+        clearInterval(clockTimer);
+        s.clock = { state: "ended", seconds: (Date.now() - started) / 1000 };
         s.fight = "ended";
         s.winner = s.blue ? "blue" : s.red ? "red" : "draw";
         emit({ type: "fightEnd", winner: s.winner });
@@ -258,6 +305,8 @@ const MockRuntime = (() => {
     s.game = state;
     if (state === "offline") {
       clearTimeout(fightTimer);
+      clearInterval(clockTimer);
+      s.clock = { state: "", seconds: 0 };
       Object.assign(s, { blue: 0, red: 0, neutral: 0, down: { blue: 0, red: 0, neutral: 0 }, unreadable: 0, fight: "idle", winner: "", cleanup: "", spectator: false, spectatorPhase: "", freeCam: false, synced: null });
       // The mod's memory is gone with the game; only the saved switch survives.
       Object.assign(s.statMatch, { baseline: null, matched: 0, failures: 0, reset: false });
@@ -371,6 +420,7 @@ const MockRuntime = (() => {
     toggleFreeCam,
     update,
     setup,
+    async statSettings() { await wait(150); return { mode: s.statMatch.mode, values: { ...s.statMatch.values } }; },
     set(patch) { Object.assign(s, patch); emit({ type: "demo" }); },
   };
 })();

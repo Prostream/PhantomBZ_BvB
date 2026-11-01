@@ -43,7 +43,7 @@ assert(spawned[#spawned]==b and teams[#spawned][1]=='red' and teams[#spawned][2]
 assert(restored:configure(b,116,0,'neutral',1).ok,'switching the team keeps the same key')
 restored:dispatch(116,0);inGame=true;table.remove(queue,1)();inGame=false
 assert(teams[#spawned][1]=='neutral' and teams[#spawned][2]==1)
-assert(not restored:configure(b,116,0,'green',1).ok and not restored:configure(b,116,0,'red',9).ok,'unknown team or count is refused')
+assert(not restored:configure(b,116,0,'green',1).ok and not restored:configure(b,116,0,'red',101).ok,'unknown team or count is refused')
 local reloaded=Keys.new(options);reloaded:start()
 reloaded:dispatch(116,0);inGame=true;table.remove(queue,1)();inGame=false
 assert(teams[#spawned][1]=='neutral' and teams[#spawned][2]==1,'team and count survive reload (UnitKeysV2)')

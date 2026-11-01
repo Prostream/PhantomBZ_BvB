@@ -125,10 +125,10 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("observed integer", self.bridge.transport_error)
 
     def test_select_unit_uses_the_same_validated_fields_without_reporting_a_spawn(self):
-        command = self.bridge.enqueue({"action": "select_unit", "unit_id": UNIT, "team": "red", "count": 8})
+        command = self.bridge.enqueue({"action": "select_unit", "unit_id": UNIT, "team": "red", "count": 50})
         self.bridge.tick()
         columns = (self.bridge.runtime / "inbox.tsv").read_text().rstrip("\n").split("\t")
-        self.assertEqual(columns[1:5], ["select_unit", UNIT, "red", "8"])
+        self.assertEqual(columns[1:5], ["select_unit", UNIT, "red", "50"])
         self.write("ack.tsv", f"{command['id']}\tok\tselection saved\t0\n")
         self.bridge.tick()
         self.assertEqual(self.bridge._command(command["id"])["spawned_count"], 0)
@@ -203,6 +203,96 @@ class BridgeTests(unittest.TestCase):
             with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
                 self.bridge.enqueue(bad)
 
+    def test_stat_mode_carries_custom_values_in_a_file_of_their_own(self):
+        command = self.bridge.enqueue({"action": "set_stat_mode", "mode": "custom", "values": {"Attack": 120, "Health_Max": 50000.5}})
+        columns = self.bridge._wire({"id": command["id"], "payload": json.dumps(command["payload"])}).rstrip("\n").split("\t")
+        revision = command["payload"]["revision"]
+        self.assertRegex(revision, r"^R[0-9A-F]{12}$")
+        self.assertEqual(columns[1:8], ["set_stat_mode", "", "blue", "1", "CUSTOM", revision, ""])
+        request = (self.bridge.runtime / "stat-custom-request.tsv").read_text(encoding="utf-8")
+        self.assertEqual(request, f"StatCustomV1\t{revision}\nHealth_Max\t50000.5\nAttack\t120\n", "fields in the mod's order")
+        # Every attribute of the set can be sent, negative multipliers and resistances included.
+        everything = {field: -0.5 for field in backend.STAT_FIELDS if field not in backend.STAT_POSITIVE | backend.STAT_NON_NEGATIVE}
+        everything.update({field: 2 for field in backend.STAT_POSITIVE | backend.STAT_NON_NEGATIVE})
+        command = self.bridge.enqueue({"action": "set_stat_mode", "mode": "custom", "values": everything})
+        rows = (self.bridge.runtime / "stat-custom-request.tsv").read_text(encoding="utf-8").splitlines()[1:]
+        self.assertEqual([row.split("\t")[0] for row in rows], list(backend.STAT_FIELDS))
+        self.assertEqual((len(rows), len(set(backend.STAT_FIELDS))), (223, 223))
+        for mode, token in (("game", "GAME"), ("match", "MATCH")):
+            command = self.bridge.enqueue({"action": "set_stat_mode", "mode": mode})
+            columns = self.bridge._wire({"id": command["id"], "payload": json.dumps(command["payload"])}).rstrip("\n").split("\t")
+            self.assertEqual(columns[5:7], [token, ""])
+        for bad in ({"action": "set_stat_mode", "mode": "all"}, {"action": "set_stat_mode", "mode": "custom"},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {}},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {"Bogus": 5}},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {"Health": 0}},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {"Shachi": -1}},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {"Health_Max": 0}},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {"ShachiAttack": -1}},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {"Attack": "120"}},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {"Attack": float("nan")}},
+                    {"action": "set_stat_mode", "mode": "custom", "values": {"Attack": 2e9}}):
+            with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
+                self.bridge.enqueue(bad)
+
+    def test_queued_settings_pass_the_recheck_before_delivery(self):
+        # tick() validates a stored payload again right before sending it; whatever enqueue added
+        # (the custom revision) has to pass that second look, or the game never sees the command.
+        for request in ({"action": "set_stat_mode", "mode": "custom", "values": {"Health_Max": 99999, "Attack": 999}},
+                        {"action": "set_stat_mode", "mode": "game"},
+                        {"action": "set_team_immortal", "team": "red", "enabled": True},
+                        {"action": "set_clock_hud", "enabled": True}):
+            with self.subTest(request=request):
+                command = self.bridge.enqueue(request)
+                self.bridge.tick()
+                self.assertEqual(self.bridge._command(command["id"])["status"], "pending")
+                columns = (self.bridge.runtime / "inbox.tsv").read_text(encoding="utf-8").rstrip("\n").split("\t")
+                self.assertEqual(columns[:2], [str(command["id"]), request["action"]])
+                if request.get("mode") == "custom":
+                    revision = command["payload"]["revision"]
+                    self.assertEqual(columns[5:7], ["CUSTOM", revision])
+                    request_file = (self.bridge.runtime / "stat-custom-request.tsv").read_text(encoding="utf-8")
+                    self.assertTrue(request_file.startswith(f"StatCustomV1\t{revision}\n"), "the file the mod reads names the same revision")
+                self.write("ack.tsv", f"{command['id']}\tok\tfixture\t0\n")
+                self.bridge.tick()
+                self.assertEqual(self.bridge._command(command["id"])["status"], "succeeded")
+        for bad in ("R123", "r0123456789AB", "R0123456789AB\n"):
+            with self.subTest(revision=bad), self.assertRaises(backend.ValidationError):
+                self.bridge.enqueue({"action": "set_stat_mode", "mode": "custom", "values": {"Attack": 1}, "revision": bad})
+
+    def test_stat_settings_read_what_the_mod_saved(self):
+        self.assertEqual(self.bridge.stat_settings()["mode"], "game")
+        self.write("stat-match-settings.tsv", "StatMatchV1\t1\n")
+        self.assertEqual(self.bridge.stat_settings()["mode"], "match")
+        self.write("stat-match-settings.tsv", "StatMatchV2\tcustom\nAttack\t120\nHealth_Max\t50000.5\nShield\t3\nBogus\t1\n")
+        settings = self.bridge.stat_settings()
+        self.assertEqual((settings["mode"], settings["values"]), ("custom", {"Attack": 120, "Health_Max": 50000.5, "Shield": 3}))
+        self.assertEqual(len(settings["fields"]), 223)
+
+    def test_clock_hud_travels_in_the_start_key_column(self):
+        for enabled, token in ((True, "ON"), (False, "OFF")):
+            command = self.bridge.enqueue({"action": "set_clock_hud", "enabled": enabled})
+            columns = self.bridge._wire({"id": command["id"], "payload": json.dumps(command["payload"])}).rstrip("\n").split("\t")
+            self.assertEqual(columns[1:8], ["set_clock_hud", "", "blue", "1", "", token, ""])
+        for bad in ({"action": "set_clock_hud"}, {"action": "set_clock_hud", "enabled": "on"},
+                    {"action": "set_clock_hud", "enabled": True, "team": "red"}):
+            with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
+                self.bridge.enqueue(bad)
+
+    def test_team_immortal_travels_in_the_team_and_start_key_columns(self):
+        for team in backend.IMMORTAL_TEAMS:
+            for enabled, token in ((True, "ON"), (False, "OFF")):
+                command = self.bridge.enqueue({"action": "set_team_immortal", "team": team, "enabled": enabled})
+                columns = self.bridge._wire({"id": command["id"], "payload": json.dumps(command["payload"])}).rstrip("\n").split("\t")
+                self.assertEqual(columns[1:8], ["set_team_immortal", "", team, "1", "", token, ""])
+                self.assertEqual(len(columns), 10)
+        for bad in ({"action": "set_team_immortal", "team": "blue"}, {"action": "set_team_immortal", "team": "neutral", "enabled": True},
+                    {"action": "set_team_immortal", "team": "BLUE", "enabled": True},
+                    {"action": "set_team_immortal", "team": "red", "enabled": "true"},
+                    {"action": "set_team_immortal", "team": "red", "enabled": True, "count": 2}):
+            with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
+                self.bridge.enqueue(bad)
+
     def test_invalid_ack_keeps_command_pending_and_preserves_inbox(self):
         command = self.spawn()
         self.bridge.tick()
@@ -227,7 +317,7 @@ class BridgeTests(unittest.TestCase):
             {"action": "spawn", "unit_id": UNIT + "\nstart"},
             {"action": "spawn", "unit_id": UNIT, "team": {}},
             {"action": "spawn", "unit_id": UNIT, "count": True},
-            {"action": "spawn", "unit_id": UNIT, "count": 9},
+            {"action": "spawn", "unit_id": UNIT, "count": 101},
             {"action": "spawn", "unit_id": UNIT, "count": 0},
             {"action": "stop", "path": "C:/anything"},
         ]
@@ -510,7 +600,7 @@ class BridgeTests(unittest.TestCase):
         self.policy.write_text(json.dumps(policy),encoding='utf-8')
         unit=self.bridge.catalog()['units'][0]
         self.assertTrue(unit['spawnable']);self.assertEqual(unit['validation_status'],'experimental_spawn')
-        self.assertEqual(unit['max_count'],8)
+        self.assertEqual(unit['max_count'],backend.MAX_SPAWN_COUNT)
         self.assertEqual(self.bridge.enqueue({'action':'spawn','unit_id':actor,'count':8})['status'],'queued')
         self.assertEqual(self.bridge.enqueue({'action':'clear_neutral'})['status'],'queued')
 
@@ -539,7 +629,7 @@ class BridgeTests(unittest.TestCase):
         legacy=self.bridge.enqueue({'action':'configure_unit_key','unit_id':UNIT,'key_code':69,'modifiers':0})
         self.assertEqual(self.bridge._wire({'id':legacy['id'],'payload':json.dumps(legacy['payload'])}).split('\t')[7],'',
                          'a key without a team keeps following the panel selection')
-        for bad in ({'team':'green','count':1},{'team':'red','count':9},{'team':'red'},{'count':2}):
+        for bad in ({'team':'green','count':1},{'team':'red','count':101},{'team':'red'},{'count':2}):
             with self.assertRaises(backend.ValidationError):
                 self.bridge.enqueue({'action':'configure_unit_key','unit_id':UNIT,'key_code':81,'modifiers':0,**bad})
         self.write('unit-keybinds.tsv','UnitKeysV2\t3\n'+UNIT+'\t81\t0\tneutral\t3\n')
