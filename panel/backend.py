@@ -11,7 +11,6 @@ import io
 import importlib.util
 import json
 import math
-import mimetypes
 import os
 from pathlib import Path
 import re
@@ -48,6 +47,11 @@ COMMAND_FIELDS = ("id", "action", "unit_id", "team", "count", "key_spawn", "key_
 MAX_UNIT_ID_BYTES = 512
 MAX_INBOX_BYTES = 2048
 READY_ACTIONS = {"spawn", "start", "toggle_spectator"}
+# Content types for the app's own files. Not mimetypes.guess_type: on Windows it reads the registry, where
+# other software often registers .js as text/plain, and under nosniff the browser then refuses every
+# script and the window stays empty (reported by players on v0.35.1).
+STATIC_TYPES = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+                ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon", ".woff2": "font/woff2"}
 DEFAULT_VALIDATION = Path(__file__).with_name("unit_validation.json")
 NPC_NATIVE_PARENT = "/Script/ProjectPBZ.PBZCharacter_NPC"
 NON_UNIT_NATIVE_PARENTS = {
@@ -974,11 +978,11 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 relative = "index.html" if path == "/" else path.lstrip("/")
                 target = (self.server.static_dir / relative).resolve()
-                if not target.is_relative_to(self.server.static_dir) or target.suffix.lower() not in {".html", ".css", ".js", ".svg", ".png", ".ico", ".woff2"}:
+                if not target.is_relative_to(self.server.static_dir) or target.suffix.lower() not in STATIC_TYPES:
                     self._reply(403, {"error": "static path rejected"}); return
                 if not target.is_file():
                     self._reply(404, {"error": "file not found"}); return
-                self._reply(200, target.read_bytes(), mimetypes.guess_type(target.name)[0] or "application/octet-stream")
+                self._reply(200, target.read_bytes(), STATIC_TYPES[target.suffix.lower()])
                 return
             self._reply(200, result)
         except (OSError, UnicodeError, ValueError, sqlite3.Error) as error:
