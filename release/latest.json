@@ -1,52 +1,58 @@
 {
-  "version": "0.37.2",
-  "date": "2026-11-01T15:43:18+08:00",
-  "size": 20701212,
-  "sha256": "8d8c2fbc647dc2fefd7a1beaa8d7e310310ea5743f0a025b398254448cb0c66b",
+  "version": "0.37.3",
+  "date": "2026-11-01T22:29:31+08:00",
+  "size": 20720272,
+  "sha256": "acb7a6919f559b47d10895485aa65d7731f8a8d757e3c9b5367184efa9b48d10",
   "notes": {
     "zh": [
-      "检查更新更可靠：同时询问所有下载线路，取其中最新的版本，某条线路缓存了旧版本也不会再提示「已是最新」",
-      "包含 v0.37.0、v0.37.1：数值设定（按游戏 / 统一成第一只 / 自定义全部 223 项属性，连同游戏算伤害用的 1 级基准值一起改）、不倒下、交战计时、不死不休、每次召唤 1–100 只、自由观战空格上升 / Ctrl 下降",
-      "从 v0.37.1 升级不用更新游戏内模组；从更早的版本升级，请按助手提示更新"
+      "怪物头像：单位卡片、当前选择、数值基准和快捷键列表显示游戏图鉴里的头像，不再只有一个字。头像由模组从你自己电脑上的游戏里导出：更新游戏内模组后进任意地图，约 1 分钟后助手里自动出现。只需一次，以后不开游戏也能显示；安装包不含任何游戏图片",
+      "随从召唤出来的单位现在也会加入你这边",
+      "包含 v0.37.0–v0.37.2：数值设定（按游戏 / 统一成第一只 / 自定义全部 223 项属性）、不倒下、交战计时、不死不休、每次召唤 1–100 只、自由观战空格上升 / Ctrl 下降、检查更新更可靠",
+      "这一版需要更新游戏内模组，请按助手提示操作"
     ],
     "en": [
-      "More reliable update checks: the app asks every download source at once and takes the newest version, so a source serving an old copy no longer says you're up to date",
-      "Includes v0.37.0 and v0.37.1: unit stats (Game, Equal stats, or Custom with all 223 attributes, including the level-1 base values the game uses for damage), Undying, fight timer, units that stay in the fight, 1–100 per summon, free camera Space up / Ctrl down",
-      "Coming from v0.37.1, the in-game mod needs no update; from earlier versions, follow the prompt in the app"
+      "Monster portraits: unit cards, the current selection, the stats baseline and the key list show each monster's codex portrait instead of a single character. The mod saves them from your own copy of the game: after updating the in-game mod, enter any map and they appear in the app within about a minute. It only happens once, and afterwards they show even with the game closed. No game images ship with the app",
+      "Units summoned by your companions now join your side too",
+      "Includes v0.37.0–v0.37.2: unit stats (Game, Equal stats, or Custom with all 223 attributes), Undying, fight timer, units that stay in the fight, 1–100 per summon, free camera Space up / Ctrl down, more reliable update checks",
+      "This version updates the in-game mod; follow the prompt in the app"
     ],
     "ja": [
-      "更新確認の改善：すべてのダウンロード経路に同時に問い合わせ、最新のバージョンを使います。古い版をキャッシュしている経路があっても「最新です」と表示されなくなりました",
-      "v0.37.0・v0.37.1 の内容を含みます：ステータス設定（ゲーム準拠／1体目に統一／カスタムで全223属性、ダメージ計算に使う Lv1 基準値も変更）、倒れない、戦闘タイマー、戦闘から離脱しない、1回に1〜100体召喚、自由観戦でスペース上昇・Ctrl下降",
-      "v0.37.1 からの更新ではゲーム内Modの更新は不要です。それより前の版からはアプリの案内に従って更新してください"
+      "モンスターのアイコン：ユニットカード、選択中のユニット、ステータスの基準、キー一覧に図鑑のアイコンを表示します（これまでは名前の1文字だけでした）。アイコンはModがあなたのパソコンのゲームから書き出します：ゲーム内Modを更新したあと、どのマップでも入ると約1分でアプリに表示されます。一度だけで、以降はゲームを起動していなくても表示されます。アプリにゲームの画像は含まれません",
+      "お供が召喚したユニットもあなたの味方になります",
+      "v0.37.0〜v0.37.2 の内容を含みます：ステータス設定（ゲーム準拠／1体目に統一／カスタムで全223属性）、倒れない、戦闘タイマー、戦闘から離脱しない、1回に1〜100体召喚、自由観戦でスペース上昇・Ctrl下降、更新確認の改善",
+      "今回はゲーム内Modの更新が必要です。アプリの案内に従ってください"
     ],
     "fr": [
-      "Vérification des mises à jour plus fiable : l'application interroge toutes les sources à la fois et prend la version la plus récente ; une source qui sert une ancienne copie ne fait plus croire que vous êtes à jour",
-      "Inclut les v0.37.0 et v0.37.1 : stats des unités (Du jeu, Égalisées ou Perso avec les 223 attributs, valeurs de base niv. 1 utilisées pour les dégâts comprises), Immortel, chrono de combat, unités qui restent au combat, 1 à 100 par invocation, caméra libre Espace pour monter / Ctrl pour descendre",
-      "Depuis la v0.37.1, le mod en jeu n'a pas besoin de mise à jour ; depuis une version plus ancienne, suivez l'invite de l'application"
+      "Portraits des monstres : les cartes d'unités, la sélection en cours, la référence des stats et la liste des touches affichent le portrait du bestiaire au lieu d'un seul caractère. Le mod les enregistre à partir de votre propre jeu : après la mise à jour du mod en jeu, entrez dans n'importe quelle carte et ils apparaissent dans l'application en une minute environ. Cela ne se fait qu'une fois ; ensuite ils s'affichent même jeu fermé. Aucune image du jeu n'est fournie avec l'application",
+      "Les unités invoquées par vos compagnons rejoignent aussi votre camp",
+      "Inclut les v0.37.0 à v0.37.2 : stats des unités (Du jeu, Égalisées ou Perso avec les 223 attributs), Immortel, chrono de combat, unités qui restent au combat, 1 à 100 par invocation, caméra libre Espace pour monter / Ctrl pour descendre, vérification des mises à jour plus fiable",
+      "Cette version met à jour le mod en jeu ; suivez l'invite de l'application"
     ],
     "de": [
-      "Zuverlässigere Update-Prüfung: Die App fragt alle Downloadquellen gleichzeitig und nimmt die neueste Version; eine Quelle mit alter Kopie meldet nicht mehr, du seist auf dem neuesten Stand",
-      "Enthält v0.37.0 und v0.37.1: Einheitenwerte (Spiel, Angleichen oder Eigene mit allen 223 Attributen, einschließlich der Stufe-1-Basiswerte für den Schaden), Unsterblich, Kampftimer, Einheiten bleiben im Kampf, 1–100 pro Beschwörung, freie Kamera Leertaste hoch / Strg runter",
-      "Von v0.37.1 aus braucht der Mod im Spiel kein Update; von älteren Versionen dem Hinweis in der App folgen"
+      "Monsterporträts: Einheitenkarten, die aktuelle Auswahl, die Werte-Referenz und die Tastenliste zeigen das Kompendium-Porträt statt eines einzelnen Zeichens. Der Mod speichert sie aus deinem eigenen Spiel: Nach dem Update des Mods im Spiel eine beliebige Karte betreten, dann erscheinen sie nach etwa einer Minute in der App. Das passiert nur einmal; danach werden sie auch bei geschlossenem Spiel angezeigt. Die App enthält keine Spielbilder",
+      "Von deinen Begleitern beschworene Einheiten stehen jetzt auch auf deiner Seite",
+      "Enthält v0.37.0 bis v0.37.2: Einheitenwerte (Spiel, Angleichen oder Eigene mit allen 223 Attributen), Unsterblich, Kampftimer, Einheiten bleiben im Kampf, 1–100 pro Beschwörung, freie Kamera Leertaste hoch / Strg runter, zuverlässigere Update-Prüfung",
+      "Diese Version aktualisiert den Mod im Spiel; folge dem Hinweis in der App"
     ],
     "es": [
-      "Comprobación de actualizaciones más fiable: la aplicación consulta todas las fuentes a la vez y toma la versión más reciente; una fuente con una copia antigua ya no hace creer que estás al día",
-      "Incluye v0.37.0 y v0.37.1: estadísticas (Del juego, Igualar o Propias con los 223 atributos, incluidos los valores base de nivel 1 que el juego usa para el daño), Inmortal, cronómetro de combate, unidades que no abandonan el combate, 1–100 por invocación, cámara libre Espacio sube / Ctrl baja",
-      "Desde la v0.37.1, el mod del juego no necesita actualización; desde versiones anteriores, sigue el aviso de la aplicación"
+      "Retratos de los monstruos: las tarjetas de unidades, la selección actual, la referencia de estadísticas y la lista de teclas muestran el retrato del bestiario en lugar de un solo carácter. El mod los guarda a partir de tu propio juego: tras actualizar el mod del juego, entra en cualquier mapa y aparecerán en la aplicación en un minuto aproximadamente. Solo ocurre una vez; después se muestran incluso con el juego cerrado. La aplicación no incluye ninguna imagen del juego",
+      "Las unidades que invocan tus compañeros ahora también se unen a tu bando",
+      "Incluye v0.37.0 a v0.37.2: estadísticas (Del juego, Igualar o Propias con los 223 atributos), Inmortal, cronómetro de combate, unidades que no abandonan el combate, 1–100 por invocación, cámara libre Espacio sube / Ctrl baja, comprobación de actualizaciones más fiable",
+      "Esta versión actualiza el mod del juego; sigue el aviso de la aplicación"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.2/PhantomGladiator-0.37.2-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.3/PhantomGladiator-0.37.3-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.2/PhantomGladiator-0.37.2-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.3/PhantomGladiator-0.37.3-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.2/PhantomGladiator-0.37.2-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.3/PhantomGladiator-0.37.3-win64.zip"
     }
   ]
 }
