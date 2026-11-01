@@ -1,52 +1,46 @@
 {
-  "version": "0.35.1",
-  "date": "2026-11-01T09:53:11+08:00",
-  "size": 20626514,
-  "sha256": "4f6813af76295d2b39e367c3c0d9f1b7cfa47aaba5601eb952cb62b55d80e047",
+  "version": "0.35.2",
+  "date": "2026-11-01T10:24:48+08:00",
+  "size": 20626714,
+  "sha256": "36351a01eac96ce0d4d76c17a759b014ed3d7ab6b42fc4c22b165204746939f5",
   "notes": {
     "zh": [
-      "修复部分电脑在「一键安装」或下载更新时弹出 “CoreWebView2 can only be accessed from the UI thread”、安装无法完成的问题",
-      "游戏内的模组没有变化，已经装好的不用重新安装",
-      "如果在助手里更新时也弹出这个错误，请手动下载新版压缩包，解压到新文件夹后使用"
+      "修复部分电脑打开助手后界面全空的问题（系统注册表把脚本文件登记成了纯文本，浏览器拒绝运行界面）",
+      "本来就能正常使用的电脑不受影响；游戏内的模组没有变化，不用重新安装"
     ],
     "en": [
-      "Fixed “CoreWebView2 can only be accessed from the UI thread” appearing on some PCs when installing the mod or downloading an update, which stopped the install",
-      "The in-game mod is unchanged; there is no need to reinstall it",
-      "If updating in the app shows the same error, download the new zip by hand and unzip it into a new folder"
+      "Fixed the app window staying empty on some PCs (the Windows registry listed script files as plain text, so the browser refused to run the interface)",
+      "PCs where the app already worked are not affected; the in-game mod is unchanged, so there is no need to reinstall it"
     ],
     "ja": [
-      "一部のPCで、Modのインストールやアップデートのダウンロード中に「CoreWebView2 can only be accessed from the UI thread」と表示され、インストールが完了しない問題を修正",
-      "ゲーム内Modは変更なし。再インストールは不要です",
-      "アプリでの更新中に同じエラーが出る場合は、新しいzipを手動でダウンロードし、新しいフォルダーに展開して使ってください"
+      "一部のPCでアプリの画面が真っ白のままになる問題を修正（Windowsのレジストリでスクリプトがテキスト扱いになっており、ブラウザーが画面の実行を拒否していました）",
+      "正常に使えていたPCには影響ありません。ゲーム内Modは変更なし、再インストールは不要です"
     ],
     "fr": [
-      "Correction de l'erreur « CoreWebView2 can only be accessed from the UI thread » qui apparaissait sur certains PC lors de l'installation du mod ou du téléchargement d'une mise à jour et bloquait l'installation",
-      "Le mod en jeu n'a pas changé : inutile de le réinstaller",
-      "Si la mise à jour dans l'application affiche la même erreur, téléchargez le nouveau zip manuellement et décompressez-le dans un nouveau dossier"
+      "Correction de la fenêtre de l'application restée vide sur certains PC (le registre Windows déclarait les scripts comme du texte brut, et le navigateur refusait d'exécuter l'interface)",
+      "Rien ne change pour les PC où l'application fonctionnait déjà ; le mod en jeu n'a pas changé, inutile de le réinstaller"
     ],
     "de": [
-      "Behoben: Auf manchen PCs erschien beim Installieren des Mods oder beim Herunterladen eines Updates „CoreWebView2 can only be accessed from the UI thread“ und die Installation brach ab",
-      "Der Mod im Spiel ist unverändert, eine Neuinstallation ist nicht nötig",
-      "Zeigt das Update in der App denselben Fehler, lade die neue ZIP-Datei manuell herunter und entpacke sie in einen neuen Ordner"
+      "Behoben: Auf manchen PCs blieb das App-Fenster leer (die Windows-Registry führte Skriptdateien als reinen Text, deshalb verweigerte der Browser die Oberfläche)",
+      "Auf PCs, auf denen die App schon lief, ändert sich nichts; der Mod im Spiel ist unverändert, eine Neuinstallation ist nicht nötig"
     ],
     "es": [
-      "Corregido el error «CoreWebView2 can only be accessed from the UI thread» que aparecía en algunos PC al instalar el mod o descargar una actualización e impedía terminar la instalación",
-      "El mod del juego no cambia; no hace falta reinstalarlo",
-      "Si al actualizar desde la aplicación aparece el mismo error, descarga el nuevo zip a mano y descomprímelo en una carpeta nueva"
+      "Corregida la ventana de la aplicación que quedaba vacía en algunos PC (el registro de Windows marcaba los scripts como texto plano y el navegador se negaba a ejecutar la interfaz)",
+      "No cambia nada en los PC donde ya funcionaba; el mod del juego no cambia, no hace falta reinstalarlo"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.1/PhantomGladiator-0.35.1-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.1/PhantomGladiator-0.35.1-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.1/PhantomGladiator-0.35.1-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
     }
   ]
 }
