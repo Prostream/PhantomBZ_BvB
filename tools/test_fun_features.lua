@@ -259,10 +259,14 @@ do
     assert(#h.lines==before)
 end
 
--- Heavier attacks are pressed earlier, alternating two trial leads; the result is logged with them.
--- A frame the game leaves listed long after its hit is ended once and then ignored.
+-- The release presses every strength at the measured lead. Trial leads for heavier attacks are taken
+-- in turn and logged with the result. A frame the game leaves listed long after its hit is ended once
+-- and then ignored.
+assert(#Fun.HEAVY_LEADS==1 and Fun.HEAVY_LEADS[1]==Fun.LIGHT_LEAD,'every strength uses the measured lead')
 do
     local function strength(tag)return {TagName={ToString=function()return tag end}}end
+    local measured=Fun.HEAVY_LEADS
+    Fun.HEAVY_LEADS={0.09,0.13}
     local h=harness()
     local fun=h.new()
     fun:set('DEFLECT','ON');fun:tick()
@@ -284,6 +288,7 @@ do
     h.frames[2]=nil;h.frame()
     h.frames[2]={HitGameTime=103,IsDodge=false,IsHit=false};h.now=102.95;h.frame()
     assert(#h.injected==3,h.all())
+    Fun.HEAVY_LEADS=measured
 end
 
 -- Hit times in another time base are logged and never pressed for.

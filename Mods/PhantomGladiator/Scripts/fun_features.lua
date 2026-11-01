@@ -26,10 +26,11 @@ local PASSIVE={DEFLECT='BP_PlayerDeflectPassive_C',DODGE='BP_PerfectDodgePassive
 -- Perfect Window when that reads back as seconds; these are the fallbacks.
 Fun.LEAD={DEFLECT=0.06,DODGE=0.10}
 -- Deflect lead by the attack's strength tag. In v0.36.3 a press 0.04-0.06 s ahead made all 9 Light
--- attacks perfect deflects but only 6 of 30 Normal/Knockback ones, so heavier attacks are pressed
--- earlier; until the logs show which works, they alternate between two trial leads.
+-- attacks perfect deflects but only 6 of 30 Normal/Knockback ones. Earlier presses for the heavier
+-- ones (0.09 s and 0.13 s in turn) were set up in v0.36.6 but never ran in game, so the release
+-- presses every strength at the measured 0.06 s. Several leads listed here are tried in turn.
 Fun.LIGHT_LEAD=0.06
-Fun.HEAVY_LEADS={0.09,0.13}
+Fun.HEAVY_LEADS={0.06}
 local COOLDOWN=0.12   -- one press per kind per this many seconds; the game punishes quick re-clicks
 local STALE=1         -- a frame still listed this long after its hit time is treated as ended
 local LATE=0.03       -- a hit already this far past is not pressed for

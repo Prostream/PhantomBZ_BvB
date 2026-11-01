@@ -850,3 +850,52 @@ v0.36.3 长局（run-20261101-083501.log，08:35–08:48，魔渊、阿花，召
 
 - spawn_level.lua：每次扫到地图怪，就把最高的等级字段和单位名记下来，并写入 `Runtime/spawn-level.tsv`（`SpawnLevelV1\t<等级>\t<单位>`），值变了才写。召唤时附近和已加载地图都没有地图怪，就沿用这条记录，日志写"沿用上次记录的等级"；从没扫到过就保持原等级（0）。文件损坏则忽略。
 - 离线：test_spawn_level 新增"扫到后保存、无地图怪时沿用、重载后从文件沿用、换区域后更新、坏文件忽略"；全部 Lua 测试、后端 57 项、界面脚本测试通过。48 个 Lua 部署哈希一致，BUILD=v0.36.8-spawn-level。备份 `影之刃0-backups/v0368-spawn-level-20261101-094055`（含 v0.36.7 实机日志）。测试版助手 dist/PhantomGladiator-0.36.8，桌面快捷方式已指向它。沿用路径还没有实机读回。
+
+## v0.36.9：怪物数值公式完整读回（2026-11-01）
+
+用户要求把具体倍率查清再发评论。头文件依据：`PDA_ActorConfig."Attribute Data"`（`FPBZCharacterAttributeData`）的 MaxHealth/MaxShachi/Attack/ShachiAttack 是 `ULevelValueBase` 对象，子类 `ULevelValue_Plain{base,Grow}` 或 `ULevelValue_ScaledCurve{base,CurveScale,NormalizedCurve}`，都有 `GetValue(Level)`（SGameCombatSystem.hpp）；`EGenericValueModifyType`：Add=0、Multiply=1、AddMultiplier=2、Override=3、Max=4、Min=5（SGameUtils_enums.hpp）。
+
+新增只读 stat_formula_probe.lua：召唤后对召唤单位和它参照的地图怪，读配置的等级取值（类型、base、CurveScale、曲线名）、在 0/1/2/5/10/15/18/20/25/30/40 级调用 `GetValue`、曲线自身 0–40 级的 `GetFloatValue`、当前难度配置里对应属性的全局系数和该单位类型系数，算出预测值，和实际属性及 `_Lv1` 属性并排记录。
+
+实机读回（run-20261101-103933.log，死镇，地图怪白鹤门弟子 19 级；召唤难度六十六天，游戏难度入阵者）：
+
+- 四项都是 `LevelValue_ScaledCurve`，且 **CurveScale 等于 base**，`GetValue(L) = base + base×curve(L) = base×(1+curve(L))`，在 11 个等级上全部吻合。
+- 所有怪共用四条曲线：`CV_AttributeCurve_Monster_Health/Shachi/Attack/ShachiAttack`，0 级和 1 级都是 0（倍数 1）。倍数（1+曲线）：
+
+| 等级 | 血量 | 杀气上限 | 攻击 | 削杀气 |
+|---|---|---|---|---|
+| 1 | 1 | 1 | 1 | 1 |
+| 5 | 3.032 | 1.95 | 1.111 | 1.073 |
+| 10 | 6.07 | 3.415 | 1.296 | 1.221 |
+| 15 | 9.87 | 4.634 | 1.652 | 1.512 |
+| 18 | 11.628 | 7.9345 | 2.109 | 1.61 |
+| 19 | 12.209 | 8.9695 | 2.212 | 1.663 |
+| 20 | 12.8 | 9.7515 | 2.309 | 1.73 |
+| 25 | 18.51 | 12.7875 | 2.917 | 1.876 |
+| 30 | 19.55 | 13.29 | 3.02 | 1.897 |
+| 40 | 23.07 | 14.72 | 3.14 | 1.996 |
+
+  完整 0–40 级曲线值见该日志 `[StatFormula] 曲线` 行。
+- 基础值（角色配置里的 base）：魔渊 `ActorC_MoTian` 血 12000、杀气 3000、攻击 120、削杀气 120，类型 UltimateBoss；魔渊（龙珠 01）`ActorC_MoTian_LongZhu_01` 8000/1500/100/100，UltimateBoss；阿花 `ActorC_AHua_GuiTouDao` 9000/2000/100/100，GreatBoss；白鹤门弟子（刀）`ActorC_BaiheDisciple_Knife` 800/800/100/100，Standard。
+- **魔渊 1.2 倍的出处**：`DT_CharacterAttributes` 里 `ActorC_MoTian` 的 MaxHealth_Base 是 10000，但游戏实际使用的是角色配置里的 LevelValue，base=12000。属性表和配置不一致，以配置为准。
+- 难度：最终值 = `GetValue(战斗等级)` × 全局系数 × 类型系数（都是 Multiply），三只单位共 16 项全部吻合（比值 1）。本局读到的：入阵者全局 Health_Max ×1、Shachi_Max ×0.5、Attack ×0.7、ShachiAttack ×0.33；Standard 类型 Health_Max ×0.8、Shachi_Max ×0.4；六十六天无全局系数，UltimateBoss/GreatBoss 类型 Shachi_Max ×0.8。两档的 Global Mob Level Offset 都是 0，战斗等级=等级字段。
+- `_Lv1` 属性 = 1 级时的值再乘难度系数（例：白鹤门弟子 Health_Max_Lv1=640=800×0.8，Shachi_Max_Lv1=160=800×0.5×0.4，Attack_Lv1=70，ShachiAttack_Lv1=33）。
+- 和此前结论一致：v0.31.1 读到的魔渊入阵者 0 级 12000/1200/84/39.6 = 12000、3000×0.5×0.8、120×0.7、120×0.33。
+
+这一节把"基础值 → 等级曲线 → 全局系数 → 类型系数"整条链读实了。区域如何给出等级（PBZ_MobDomain、DT_AIAreaLevel、各层偏移）仍只有头文件依据，没有读回。
+
+## v0.36.0：发布（2026-11-01）
+
+用户批准发布，要求在更新公告里写明数值问题：召唤出来的单位为什么在不同地方数值不一样。发布内容是 v0.36.0–v0.36.8 的趣味功能和召唤等级，以及上一节读实的数值公式（写进公告和 README）。
+
+发布前的改动：
+- 数值公式探针默认关闭：config.lua 新增 `Config.EnableStatFormulaProbe=false`，main 只在它为 true 时创建探针。开着时每召唤一只单位多写约 14 行日志，调查数值时再开。探针文件和测试保留。
+- 格挡提前量：v0.36.6 起较重的攻击在 0.09 s 和 0.13 s 之间轮换试验，但 v0.36.6 之后的三局（085517、093725、103933）都没开自动防御，日志里没有一条格挡结果，这组试验从未在实机上运行过。发布版所有力度都按实测过的 0.06 s 按格挡（v0.36.3：Light 9/9 完美，Normal 6/26，Knockback 0/4），`Fun.HEAVY_LEADS` 列多个值时仍会轮换，留给下次试验。
+- BUILD=v0.36.0-fun-levels。
+
+发布时仍未实测：
+- 附近和已加载地图都没有地图怪时，沿用 `spawn-level.tsv` 记录的等级（文件里已有死镇的 19 级记录，但还没有一次召唤走到这条路径）。
+- 较重的攻击提前按能不能提高完美格挡率。
+- 区域如何给出等级（PBZ_MobDomain、DT_AIAreaLevel、各层偏移）只有头文件依据；"死镇 18～19 级"是地图怪读回。
+
+离线：Lua 47 项（含 main_boot npc/actor）、后端 58 项通过。

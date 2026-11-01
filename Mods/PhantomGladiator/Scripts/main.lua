@@ -41,6 +41,7 @@ local AIDifficulty=require('ai_difficulty')
 local Companion=require('companion')
 local FunFeatures=require('fun_features')
 local SpawnLevel=require('spawn_level')
+local StatFormulaProbe=require('stat_formula_probe')
 
 local MOD = "[PhantomGladiator]"
 local runLogPath=Config.RuntimePath..'/run-'..os.date('%Y%m%d-%H%M%S')..'.log'
@@ -63,7 +64,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.36.8-spawn-level"
+local BUILD = "v0.36.0-fun-levels"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -108,6 +109,7 @@ local arenaGrabs
 local statMatch
 local spawnDifficulty
 local spawnLevel
+local statProbe
 local companions
 local aiDifficulty
 local funFeatures
@@ -1227,10 +1229,21 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
         log("召唤激活读回 ControllerAI="..tostring(ai~=nil).." HP="..tostring(hp))
         local verified,verifyError=pcall(function()spawnDifficulty:verify(actor,unitPath)end)
         if not verified then log('[SpawnDifficulty] 生成后读回失败: '..tostring(verifyError)) end
-        -- What the level written before FinishSpawn changed, next to a map NPC of that level (read only).
+        -- What the level written before FinishSpawn changed, next to a map NPC of that level (read only),
+        -- and how both units' numbers are built from their configs (stat_formula_probe.lua, read only).
         if activationRequested==true and spawnLevel then
-            local compared,compareError=pcall(function()spawnLevel:verify(actor)end)
+            local reference
+            local compared,compareError=pcall(function()reference=spawnLevel:verify(actor)end)
             if not compared then log('[SpawnLevel] 出生后读回失败: '..tostring(compareError)) end
+            if statProbe then
+                local game=spawnDifficulty and spawnDifficulty:status().game or nil
+                if game=='' then game=nil end
+                local probed,probeError=pcall(function()
+                    statProbe:unit(actor,'召唤',spawnDifficulty and spawnDifficulty:levelOf(actor) or game)
+                    if reference then statProbe:unit(reference,'地图怪',game) end
+                end)
+                if not probed then log('[StatFormula] 失败: '..tostring(probeError)) end
+            end
         end
         if team=='companion' and companions then
             local checked,checkError=pcall(function()companions:afterActivate(actor,unitPath)end)
@@ -1306,6 +1319,7 @@ local arenaSupport={}
 statMatch=StatMatch.new({path=Config.RuntimePath,log=log})
 spawnDifficulty=SpawnDifficulty.new({path=Config.RuntimePath,log=log,getWorld=UEHelpers.GetWorld,
     ready=function()return runtimeSession:status().game_ready==true end})
+statProbe=Config.EnableStatFormulaProbe and StatFormulaProbe.new({log=log}) or nil
 spawnLevel=SpawnLevel.new({log=log,path=Config.RuntimePath,getPlayer=GetPlayerPawn,getLocation=GetLocation,collect=CollectNPCs,
     ours=function()
         local keys={}

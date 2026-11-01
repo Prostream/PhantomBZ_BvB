@@ -139,6 +139,7 @@ function Level.new(options)
         say('出生后 召唤 '..short(actor)..' '..describe(actor))
         reference=U.valid(reference) and reference or (mapLevel().best or {}).actor
         if U.valid(reference) then say('出生后 对照地图怪 '..short(reference)..' '..describe(reference)) end
+        return U.valid(reference) and reference or nil
     end
     function self:status()return {raised=self.raised,kept=self.kept,failures=self.failures,message=self.message}end
     return self

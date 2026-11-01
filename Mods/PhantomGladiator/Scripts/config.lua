@@ -37,6 +37,8 @@ Config.FreeCamera = { MoveSpeed = 900, MouseSensitivity = 1.0 }
 -- Existing native hit-triggered grabs; snapshots restore the shared event resources on F4.
 Config.EnableNPCGrabs = true
 Config.EnableGrabStudy = false
+-- 召唤后只读记录召唤单位和参照地图怪的数值来源（等级曲线、难度系数），每只约14行日志；调查数值时再开。
+Config.EnableStatFormulaProbe = false
 
 -- 历史碰撞复制实验，默认关；响应差异不证明实际攻击查询通道。
 Config.CopyPlayerHurtChannels = false
