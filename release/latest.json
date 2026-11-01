@@ -1,58 +1,58 @@
 {
-  "version": "0.37.3",
-  "date": "2026-11-01T22:29:31+08:00",
-  "size": 20720272,
-  "sha256": "acb7a6919f559b47d10895485aa65d7731f8a8d757e3c9b5367184efa9b48d10",
+  "version": "0.37.4",
+  "date": "2026-11-02T00:07:04+08:00",
+  "size": 20738523,
+  "sha256": "fdfe30660351aec77aa6f6c4a29d0502d74e2568dcdfece1e5c6ba80b3214f73",
   "notes": {
     "zh": [
-      "怪物头像：单位卡片、当前选择、数值基准和快捷键列表显示游戏图鉴里的头像，不再只有一个字。头像由模组从你自己电脑上的游戏里导出：更新游戏内模组后进任意地图，约 1 分钟后助手里自动出现。只需一次，以后不开游戏也能显示；安装包不含任何游戏图片",
-      "随从召唤出来的单位现在也会加入你这边",
-      "包含 v0.37.0–v0.37.2：数值设定（按游戏 / 统一成第一只 / 自定义全部 223 项属性）、不倒下、交战计时、不死不休、每次召唤 1–100 只、自由观战空格上升 / Ctrl 下降、检查更新更可靠",
+      "随从对玩家始终友好：开着自由观战或无仇恨时召唤的随从，关掉后会对玩家变回敌对，攻击会打到玩家。现在无仇恨不再改动随从，随从每秒自检，被改了会立刻改回",
+      "检查更新里新增「更新记录」，可以查看每个版本更新了什么",
+      "进地图后不再因为检查怪物头像卡顿一下",
       "这一版需要更新游戏内模组，请按助手提示操作"
     ],
     "en": [
-      "Monster portraits: unit cards, the current selection, the stats baseline and the key list show each monster's codex portrait instead of a single character. The mod saves them from your own copy of the game: after updating the in-game mod, enter any map and they appear in the app within about a minute. It only happens once, and afterwards they show even with the game closed. No game images ship with the app",
-      "Units summoned by your companions now join your side too",
-      "Includes v0.37.0–v0.37.2: unit stats (Game, Equal stats, or Custom with all 223 attributes), Undying, fight timer, units that stay in the fight, 1–100 per summon, free camera Space up / Ctrl down, more reliable update checks",
+      "Companions stay on your side: one summoned while the free camera or no aggro was on turned hostile to you when it was switched off, so its attacks hit you. No aggro now leaves companions alone, and they check every second that they are still friendly",
+      "Release history under Check for updates: see what each version changed",
+      "No more brief stutter from the portrait check after entering a map",
       "This version updates the in-game mod; follow the prompt in the app"
     ],
     "ja": [
-      "モンスターのアイコン：ユニットカード、選択中のユニット、ステータスの基準、キー一覧に図鑑のアイコンを表示します（これまでは名前の1文字だけでした）。アイコンはModがあなたのパソコンのゲームから書き出します：ゲーム内Modを更新したあと、どのマップでも入ると約1分でアプリに表示されます。一度だけで、以降はゲームを起動していなくても表示されます。アプリにゲームの画像は含まれません",
-      "お供が召喚したユニットもあなたの味方になります",
-      "v0.37.0〜v0.37.2 の内容を含みます：ステータス設定（ゲーム準拠／1体目に統一／カスタムで全223属性）、倒れない、戦闘タイマー、戦闘から離脱しない、1回に1〜100体召喚、自由観戦でスペース上昇・Ctrl下降、更新確認の改善",
+      "お供は常に味方に：自由視点やヘイト無効がオンのときに召喚したお供は、オフにすると敵対に戻り、攻撃が自分に当たっていました。ヘイト無効はお供に触れなくなり、お供は毎秒味方のままか確認します",
+      "アップデートの確認に「更新履歴」を追加：各バージョンの変更内容を確認できます",
+      "マップに入った後、アイコンの確認で一瞬止まることがなくなりました",
       "今回はゲーム内Modの更新が必要です。アプリの案内に従ってください"
     ],
     "fr": [
-      "Portraits des monstres : les cartes d'unités, la sélection en cours, la référence des stats et la liste des touches affichent le portrait du bestiaire au lieu d'un seul caractère. Le mod les enregistre à partir de votre propre jeu : après la mise à jour du mod en jeu, entrez dans n'importe quelle carte et ils apparaissent dans l'application en une minute environ. Cela ne se fait qu'une fois ; ensuite ils s'affichent même jeu fermé. Aucune image du jeu n'est fournie avec l'application",
-      "Les unités invoquées par vos compagnons rejoignent aussi votre camp",
-      "Inclut les v0.37.0 à v0.37.2 : stats des unités (Du jeu, Égalisées ou Perso avec les 223 attributs), Immortel, chrono de combat, unités qui restent au combat, 1 à 100 par invocation, caméra libre Espace pour monter / Ctrl pour descendre, vérification des mises à jour plus fiable",
+      "Les compagnons restent dans votre camp : un compagnon invoqué avec la caméra libre ou le mode sans aggro activés redevenait hostile à leur désactivation, et ses attaques vous touchaient. Le mode sans aggro ne touche plus aux compagnons, qui vérifient chaque seconde qu'ils sont toujours alliés",
+      "Historique des mises à jour dans « Rechercher des mises à jour » : voyez ce que chaque version a changé",
+      "Plus de brève saccade due à la vérification des portraits après l'entrée dans une carte",
       "Cette version met à jour le mod en jeu ; suivez l'invite de l'application"
     ],
     "de": [
-      "Monsterporträts: Einheitenkarten, die aktuelle Auswahl, die Werte-Referenz und die Tastenliste zeigen das Kompendium-Porträt statt eines einzelnen Zeichens. Der Mod speichert sie aus deinem eigenen Spiel: Nach dem Update des Mods im Spiel eine beliebige Karte betreten, dann erscheinen sie nach etwa einer Minute in der App. Das passiert nur einmal; danach werden sie auch bei geschlossenem Spiel angezeigt. Die App enthält keine Spielbilder",
-      "Von deinen Begleitern beschworene Einheiten stehen jetzt auch auf deiner Seite",
-      "Enthält v0.37.0 bis v0.37.2: Einheitenwerte (Spiel, Angleichen oder Eigene mit allen 223 Attributen), Unsterblich, Kampftimer, Einheiten bleiben im Kampf, 1–100 pro Beschwörung, freie Kamera Leertaste hoch / Strg runter, zuverlässigere Update-Prüfung",
+      "Begleiter bleiben auf deiner Seite: Wer bei aktiver freier Kamera oder ohne Aggro beschworen wurde, wurde beim Ausschalten wieder feindlich, und seine Angriffe trafen dich. Kein Aggro lässt Begleiter jetzt in Ruhe, und sie prüfen jede Sekunde, dass sie noch verbündet sind",
+      "Update-Verlauf unter „Nach Updates suchen“: sieh nach, was jede Version geändert hat",
+      "Kein kurzes Ruckeln mehr durch die Porträtprüfung nach dem Betreten einer Karte",
       "Diese Version aktualisiert den Mod im Spiel; folge dem Hinweis in der App"
     ],
     "es": [
-      "Retratos de los monstruos: las tarjetas de unidades, la selección actual, la referencia de estadísticas y la lista de teclas muestran el retrato del bestiario en lugar de un solo carácter. El mod los guarda a partir de tu propio juego: tras actualizar el mod del juego, entra en cualquier mapa y aparecerán en la aplicación en un minuto aproximadamente. Solo ocurre una vez; después se muestran incluso con el juego cerrado. La aplicación no incluye ninguna imagen del juego",
-      "Las unidades que invocan tus compañeros ahora también se unen a tu bando",
-      "Incluye v0.37.0 a v0.37.2: estadísticas (Del juego, Igualar o Propias con los 223 atributos), Inmortal, cronómetro de combate, unidades que no abandonan el combate, 1–100 por invocación, cámara libre Espacio sube / Ctrl baja, comprobación de actualizaciones más fiable",
+      "Los compañeros siguen de tu lado: uno invocado con la cámara libre o sin aggro activados volvía a ser hostil al desactivarlos, y sus ataques te alcanzaban. Ahora sin aggro no toca a los compañeros, que comprueban cada segundo que siguen siendo aliados",
+      "Historial de actualizaciones en «Buscar actualizaciones»: consulta qué cambió en cada versión",
+      "Se acabó el breve tirón al comprobar los retratos tras entrar en un mapa",
       "Esta versión actualiza el mod del juego; sigue el aviso de la aplicación"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.3/PhantomGladiator-0.37.3-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.4/PhantomGladiator-0.37.4-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.3/PhantomGladiator-0.37.3-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.4/PhantomGladiator-0.37.4-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.3/PhantomGladiator-0.37.3-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.4/PhantomGladiator-0.37.4-win64.zip"
     }
   ]
 }
