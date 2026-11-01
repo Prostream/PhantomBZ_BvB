@@ -726,12 +726,19 @@ namespace PhantomGladiator
             web.CoreWebView2.NavigateToString(html);
         }
 
+        // Install and download report progress from worker threads. WebView2 may only be touched on the UI
+        // thread ("CoreWebView2 can only be accessed from the UI thread"), even to check it, so a message from
+        // any other thread is handed to the UI thread first.
         void Post(Dictionary<string, object> message)
         {
-            if (IsDisposed || web.CoreWebView2 == null) return;
-            var text = json.Serialize(message);
-            if (InvokeRequired) BeginInvoke((Action)(() => { if (web.CoreWebView2 != null) web.CoreWebView2.PostWebMessageAsJson(text); }));
-            else web.CoreWebView2.PostWebMessageAsJson(text);
+            if (InvokeRequired)
+            {
+                // Throws (ObjectDisposedException is one) once the window is closing; the message is dropped then.
+                try { BeginInvoke((Action)(() => Post(message))); } catch (InvalidOperationException) { }
+                return;
+            }
+            if (IsDisposed || web.IsDisposed || web.CoreWebView2 == null) return;
+            web.CoreWebView2.PostWebMessageAsJson(json.Serialize(message));
         }
 
         void Progress(string task, Dictionary<string, object> data)
