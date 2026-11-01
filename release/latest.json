@@ -1,52 +1,46 @@
 {
-  "version": "0.35.0",
-  "date": "2026-11-01T07:40:39+08:00",
-  "size": 20626479,
-  "sha256": "756bc7a0b34ad5c3e49fc9cc427d018595719af3934651b39bbe18bcd3030c31",
+  "version": "0.35.2",
+  "date": "2026-11-01T10:24:48+08:00",
+  "size": 20626714,
+  "sha256": "36351a01eac96ce0d4d76c17a759b014ed3d7ab6b42fc4c22b165204746939f5",
   "notes": {
     "zh": [
-      "新增随从：阵营选「随从」召唤的怪会跟着你、帮你打，数量不限；离太远或快速移动后自动传送回来，投技对地图怪也能用，可随时解散",
-      "召唤难度更轻、更准：只在有带难度的单位时才生效，消除了地图上怪多时的卡顿，单位出生时的难度判断也按所选难度",
-      "界面和六种语言同步更新；更新后请按助手提示更新游戏内模组"
+      "修复部分电脑打开助手后界面全空的问题（系统注册表把脚本文件登记成了纯文本，浏览器拒绝运行界面）",
+      "本来就能正常使用的电脑不受影响；游戏内的模组没有变化，不用重新安装"
     ],
     "en": [
-      "New companions: units summoned to the Companion team follow you and fight on your side, no limit; they teleport back from far away or after fast travel, their grabs work on map enemies, and you can dismiss them any time",
-      "Summon difficulty is lighter and more accurate: it only runs while leveled units are out, which removes stutter in busy areas, and units get their level from the moment they spawn",
-      "Interface and all six languages updated; after updating, follow the prompt in the app to update the in-game mod"
+      "Fixed the app window staying empty on some PCs (the Windows registry listed script files as plain text, so the browser refused to run the interface)",
+      "PCs where the app already worked are not affected; the in-game mod is unchanged, so there is no need to reinstall it"
     ],
     "ja": [
-      "お供を追加：「お供」チームで召喚したユニットがあなたについて来て一緒に戦います（数は無制限）。離れすぎたときやファストトラベル後は近くへテレポートし、投げ技はマップの敵にも有効、いつでも解散できます",
-      "召喚難易度を軽量化・改善：難易度付きユニットがいるときだけ動作し、敵の多い場所でのカクつきを解消。出現した瞬間から選んだ難易度で判定します",
-      "画面と6言語を更新。更新後はアプリの案内に従ってゲーム内Modも更新してください"
+      "一部のPCでアプリの画面が真っ白のままになる問題を修正（Windowsのレジストリでスクリプトがテキスト扱いになっており、ブラウザーが画面の実行を拒否していました）",
+      "正常に使えていたPCには影響ありません。ゲーム内Modは変更なし、再インストールは不要です"
     ],
     "fr": [
-      "Nouveaux compagnons : les unités invoquées dans l'équipe Compagnon vous suivent et combattent à vos côtés, sans limite ; elles se téléportent près de vous quand elles sont trop loin ou après un voyage rapide, leurs prises fonctionnent sur les ennemis de la carte, et vous pouvez les renvoyer à tout moment",
-      "Difficulté d'invocation plus légère et plus précise : active seulement quand des unités concernées sont présentes, ce qui supprime les saccades dans les zones chargées, et appliquée dès l'apparition des unités",
-      "Interface et six langues mises à jour ; après la mise à jour, suivez l'invite de l'application pour mettre à jour le mod en jeu"
+      "Correction de la fenêtre de l'application restée vide sur certains PC (le registre Windows déclarait les scripts comme du texte brut, et le navigateur refusait d'exécuter l'interface)",
+      "Rien ne change pour les PC où l'application fonctionnait déjà ; le mod en jeu n'a pas changé, inutile de le réinstaller"
     ],
     "de": [
-      "Neue Begleiter: Einheiten im Team Begleiter folgen dir und kämpfen auf deiner Seite, ohne Limit; sie teleportieren sich zu dir, wenn sie zu weit weg sind oder nach einer Schnellreise, ihre Würfe wirken auf Gegner der Karte, und du kannst sie jederzeit entlassen",
-      "Beschwörungsschwierigkeit leichter und genauer: nur aktiv, solange betroffene Einheiten da sind, was Ruckler in vollen Gebieten beseitigt, und ab dem Erscheinen wirksam",
-      "Oberfläche und alle sechs Sprachen aktualisiert; nach dem Update dem Hinweis in der App folgen, um den Mod im Spiel zu aktualisieren"
+      "Behoben: Auf manchen PCs blieb das App-Fenster leer (die Windows-Registry führte Skriptdateien als reinen Text, deshalb verweigerte der Browser die Oberfläche)",
+      "Auf PCs, auf denen die App schon lief, ändert sich nichts; der Mod im Spiel ist unverändert, eine Neuinstallation ist nicht nötig"
     ],
     "es": [
-      "Nuevos compañeros: las unidades invocadas en el equipo Compañero te siguen y luchan de tu lado, sin límite; se teletransportan a tu lado si se alejan demasiado o tras un viaje rápido, sus agarres funcionan con los enemigos del mapa y puedes despedirlas cuando quieras",
-      "Dificultad de invocación más ligera y precisa: solo actúa mientras hay unidades afectadas, lo que elimina los tirones en zonas con muchos enemigos, y se aplica desde que aparecen",
-      "Interfaz y seis idiomas actualizados; tras actualizar, sigue el aviso de la aplicación para actualizar el mod del juego"
+      "Corregida la ventana de la aplicación que quedaba vacía en algunos PC (el registro de Windows marcaba los scripts como texto plano y el navegador se negaba a ejecutar la interfaz)",
+      "No cambia nada en los PC donde ya funcionaba; el mod del juego no cambia, no hace falta reinstalarlo"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.2/PhantomGladiator-0.35.2-win64.zip"
     }
   ]
 }
