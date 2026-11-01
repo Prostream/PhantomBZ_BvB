@@ -1,58 +1,64 @@
 {
-  "version": "0.36.0",
-  "date": "2026-11-01T12:07:47+08:00",
-  "size": 20650920,
-  "sha256": "c818be05d12257d1904a28548e251c187fbf59f67c91e6bd5e5ce0f7991cbf1b",
+  "version": "0.37.0",
+  "date": "2026-11-01T15:13:11+08:00",
+  "size": 20698814,
+  "sha256": "3c2e1441c522f0b6633580d68b69677da3ac9cc5e16d42e14d35a3485ff78d37",
   "notes": {
     "zh": [
-      "召唤的单位改为按所在地区的等级生成，和附近地图怪一样强。以前一律是 0 级，所以召出来的 BOSS 几刀就死",
-      "因此同一只怪在不同地方召唤，数值会不一样：数值 = 基础值 ×（1＋等级曲线）× 难度系数 × 怪物类型系数。例：阿花在 1 级的地方 9000 血，在死镇（19 级）109881 血",
-      "新增「趣味功能」页：无限杀气、自动精准防御、自动闪避红光，只作用在你自己的角色上",
+      "数值设定：按游戏、统一成第一只、自定义三种模式。自定义可以改血量、杀气、攻击等，「全部属性」里能改游戏全部 223 项属性",
+      "新增「不倒下」开关：这一方照常挨打但不会倒下；交战显示用时，也可以显示在游戏画面正上方",
+      "交战中的单位不再脱战走回原地；每次召唤 1–100 只；自由观战空格上升、Ctrl 下降",
+      "修复功能开得多时部分开关状态显示不出来（v0.36.0 有这个问题）",
       "更新后请按助手提示更新游戏内模组"
     ],
     "en": [
-      "Summoned units now spawn at the level of the map enemies around you, as strong as the local enemies. Before, they were all level 0, so summoned bosses went down in a few hits",
-      "So the same unit has different stats in different places: stat = base × (1 + level curve) × difficulty modifier × unit-type modifier. For example, a boss with 9,000 HP at level 1 has 109,881 HP at level 19",
-      "New Fun features page: Infinite Sha-Chi, Auto perfect deflect and Auto-dodge red attacks, for your own character only",
+      "Unit stats: Game, Equal stats or Custom. Custom sets HP, Sha-Chi, attack and more, and All stats covers all 223 of the game's attributes",
+      "New Undying switch: that side takes hits but never goes down. Fights show how long they took, also at the top of the game screen if you like",
+      "Units no longer drop out of a fight and walk back; summon 1–100 at a time; free camera: Space goes up, Ctrl goes down",
+      "Fixed: with many features on, some switches didn't show their state (affects v0.36.0)",
       "After updating, follow the prompt in the app to update the in-game mod"
     ],
     "ja": [
-      "召喚したユニットは、周りにいるマップの敵と同じレベルで出現するようになりました。以前はすべてレベル0だったため、召喚したボスが数回の攻撃で倒れていました",
-      "そのため、同じユニットでも場所によって数値が変わります：数値＝基礎値×（1＋レベル曲線）×難易度係数×敵タイプ係数。例：レベル1で体力9000のボスは、レベル19では109881になります",
-      "「お楽しみ機能」ページを追加：殺気無限、自動ジャスト防御、赤い攻撃を自動回避（自分のキャラクターのみ）",
+      "ステータス設定：ゲーム準拠・1体目に統一・カスタムの3モード。カスタムでは体力・殺気・攻撃などを変更でき、「全ステータス」ではゲームの全223属性を変更できます",
+      "「倒れない」スイッチを追加：その陣営は攻撃を受けても倒れません。戦闘の経過時間を表示し、ゲーム画面の上中央にも表示できます",
+      "戦闘中のユニットが離脱して元の位置に戻らなくなりました。1回に1〜100体召喚できます。自由観戦でスペースで上昇、Ctrlで下降",
+      "修正：多くの機能をオンにすると一部のスイッチの状態が表示されなかった問題（v0.36.0で発生）",
       "更新後はアプリの案内に従ってゲーム内Modも更新してください"
     ],
     "fr": [
-      "Les unités invoquées apparaissent désormais au niveau des ennemis de la carte autour de vous, aussi fortes que ceux de la zone. Avant, elles étaient toutes au niveau 0, d'où des boss invoqués vaincus en quelques coups",
-      "La même unité n'a donc pas les mêmes valeurs selon l'endroit : valeur = base × (1 + courbe de niveau) × modificateur de difficulté × modificateur de type. Par exemple, un boss à 9 000 PV au niveau 1 en a 109 881 au niveau 19",
-      "Nouvelle page Fonctions bonus : Sha-Chi infini, Parade parfaite auto et Esquive auto des attaques rouges, pour votre personnage uniquement",
+      "Stats des unités : Du jeu, Égalisées ou Perso. Perso règle les PV, le Sha-Chi, l'attaque, etc., et Toutes les stats couvre les 223 attributs du jeu",
+      "Nouvel interrupteur Immortel : ce camp encaisse les coups sans jamais tomber. Les combats affichent leur durée, aussi en haut de l'écran de jeu si vous le souhaitez",
+      "Les unités ne quittent plus le combat pour rentrer ; invocation de 1 à 100 à la fois ; caméra libre : Espace pour monter, Ctrl pour descendre",
+      "Corrigé : avec beaucoup de fonctions actives, certains interrupteurs n'affichaient pas leur état (concerne la v0.36.0)",
       "Après la mise à jour, suivez l'invite de l'application pour mettre à jour le mod en jeu"
     ],
     "de": [
-      "Beschworene Einheiten erscheinen jetzt auf der Stufe der Gegner der Karte in deiner Nähe und sind so stark wie die Gegner vor Ort. Vorher hatten alle Stufe 0, deshalb fielen beschworene Bosse nach wenigen Treffern",
-      "Dieselbe Einheit hat darum an verschiedenen Orten andere Werte: Wert = Basiswert × (1 + Stufenkurve) × Schwierigkeitsfaktor × Typfaktor. Beispiel: Ein Boss mit 9.000 LP auf Stufe 1 hat auf Stufe 19 109.881 LP",
-      "Neue Seite Extras: Unendliches Sha-Chi, Automatische perfekte Parade und Roten Angriffen automatisch ausweichen, nur für deine eigene Figur",
+      "Einheitenwerte: Spiel, Angleichen oder Eigene. Eigene setzt LP, Sha-Chi, Angriff und mehr, und „Alle Werte“ umfasst alle 223 Attribute des Spiels",
+      "Neuer Schalter Unsterblich: Diese Seite steckt Treffer ein, fällt aber nie. Kämpfe zeigen ihre Dauer, auf Wunsch auch oben im Spielbild",
+      "Einheiten verlassen den Kampf nicht mehr und laufen zurück; 1–100 pro Beschwörung; freie Kamera: Leertaste hoch, Strg runter",
+      "Behoben: Bei vielen aktiven Funktionen zeigten manche Schalter ihren Zustand nicht an (betrifft v0.36.0)",
       "Nach dem Update dem Hinweis in der App folgen, um den Mod im Spiel zu aktualisieren"
     ],
     "es": [
-      "Las unidades invocadas ahora aparecen al nivel de los enemigos del mapa que tienes cerca, igual de fuertes que los de la zona. Antes todas eran de nivel 0, por eso los jefes invocados caían en pocos golpes",
-      "Por eso la misma unidad tiene valores distintos según el lugar: valor = base × (1 + curva de nivel) × modificador de dificultad × modificador de tipo. Por ejemplo, un jefe con 9000 PV en el nivel 1 tiene 109 881 en el nivel 19",
-      "Nueva página Extras: Sha-Chi infinito, Desvío perfecto automático y Esquivar ataques rojos automáticamente, solo para tu personaje",
+      "Estadísticas: Del juego, Igualar o Propias. Propias ajusta vida, Sha-Chi, ataque y más, y Todas las estadísticas cubre los 223 atributos del juego",
+      "Nuevo interruptor Inmortal: ese bando recibe golpes pero nunca cae. Los combates muestran su duración, también arriba en la pantalla del juego si quieres",
+      "Las unidades ya no abandonan el combate para volver atrás; invoca de 1 a 100 a la vez; cámara libre: Espacio sube, Ctrl baja",
+      "Corregido: con muchas funciones activas, algunos interruptores no mostraban su estado (afecta a la v0.36.0)",
       "Después de actualizar, sigue el aviso de la aplicación para actualizar el mod del juego"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.36.0/PhantomGladiator-0.36.0-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.0/PhantomGladiator-0.37.0-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.36.0/PhantomGladiator-0.36.0-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.0/PhantomGladiator-0.37.0-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.36.0/PhantomGladiator-0.36.0-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.0/PhantomGladiator-0.37.0-win64.zip"
     }
   ]
 }
