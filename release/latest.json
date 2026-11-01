@@ -1,52 +1,52 @@
 {
-  "version": "0.37.1",
-  "date": "2026-11-01T15:29:48+08:00",
-  "size": 20700775,
-  "sha256": "6bf8f7460db03d827ddcfdb8a2469fcc0d080ba86229776dd67762bf1250fff9",
+  "version": "0.37.2",
+  "date": "2026-11-01T15:43:18+08:00",
+  "size": 20701212,
+  "sha256": "8d8c2fbc647dc2fefd7a1beaa8d7e310310ea5743f0a025b398254448cb0c66b",
   "notes": {
     "zh": [
-      "修复自定义数值没有真正改到伤害：游戏按「1级基准值」算伤害，现在改血量、杀气、攻击、削杀气时，1级值会按同样比例一起改。实测血量上限 9999999 的单位被 10 只怪围攻 50 秒只掉约 0.5%",
-      "「统一成第一只」也一起统一1级值，两只单位挨打和出手的伤害才真正一样",
-      "更新后请按助手提示更新游戏内模组"
+      "检查更新更可靠：同时询问所有下载线路，取其中最新的版本，某条线路缓存了旧版本也不会再提示「已是最新」",
+      "包含 v0.37.0、v0.37.1：数值设定（按游戏 / 统一成第一只 / 自定义全部 223 项属性，连同游戏算伤害用的 1 级基准值一起改）、不倒下、交战计时、不死不休、每次召唤 1–100 只、自由观战空格上升 / Ctrl 下降",
+      "从 v0.37.1 升级不用更新游戏内模组；从更早的版本升级，请按助手提示更新"
     ],
     "en": [
-      "Fixed: custom stats didn't change damage. The game works out damage from level-1 base values; changing HP, Sha-Chi, attack or Sha-Chi damage now scales those by the same ratio. Tested: a unit with 9,999,999 max HP lost about 0.5% in 50 seconds against ten attackers",
-      "Equal stats now matches the level-1 values too, so matched units really take and deal the same damage",
-      "After updating, follow the prompt in the app to update the in-game mod"
+      "More reliable update checks: the app asks every download source at once and takes the newest version, so a source serving an old copy no longer says you're up to date",
+      "Includes v0.37.0 and v0.37.1: unit stats (Game, Equal stats, or Custom with all 223 attributes, including the level-1 base values the game uses for damage), Undying, fight timer, units that stay in the fight, 1–100 per summon, free camera Space up / Ctrl down",
+      "Coming from v0.37.1, the in-game mod needs no update; from earlier versions, follow the prompt in the app"
     ],
     "ja": [
-      "修正：カスタム数値がダメージに反映されていませんでした。ゲームはダメージを「Lv1 基準値」で計算するため、体力・殺気・攻撃・殺気削りを変えると Lv1 値も同じ比率で変わるようにしました。実測：最大体力 9999999 のユニットは 10 体に 50 秒囲まれても約 0.5% しか減りません",
-      "「1体目に統一」も Lv1 値まで統一するので、受けるダメージと与えるダメージが本当に同じになります",
-      "更新後はアプリの案内に従ってゲーム内Modも更新してください"
+      "更新確認の改善：すべてのダウンロード経路に同時に問い合わせ、最新のバージョンを使います。古い版をキャッシュしている経路があっても「最新です」と表示されなくなりました",
+      "v0.37.0・v0.37.1 の内容を含みます：ステータス設定（ゲーム準拠／1体目に統一／カスタムで全223属性、ダメージ計算に使う Lv1 基準値も変更）、倒れない、戦闘タイマー、戦闘から離脱しない、1回に1〜100体召喚、自由観戦でスペース上昇・Ctrl下降",
+      "v0.37.1 からの更新ではゲーム内Modの更新は不要です。それより前の版からはアプリの案内に従って更新してください"
     ],
     "fr": [
-      "Corrigé : les stats perso ne changeaient pas les dégâts. Le jeu calcule les dégâts à partir des valeurs de base niv. 1 ; changer les PV, le Sha-Chi, l'attaque ou les dégâts Sha-Chi les ajuste désormais dans la même proportion. Testé : une unité à 9 999 999 PV max n'a perdu qu'environ 0,5 % en 50 secondes face à dix attaquants",
-      "Égalisées aligne aussi les valeurs niv. 1 : les unités encaissent et infligent vraiment les mêmes dégâts",
-      "Après la mise à jour, suivez l'invite de l'application pour mettre à jour le mod en jeu"
+      "Vérification des mises à jour plus fiable : l'application interroge toutes les sources à la fois et prend la version la plus récente ; une source qui sert une ancienne copie ne fait plus croire que vous êtes à jour",
+      "Inclut les v0.37.0 et v0.37.1 : stats des unités (Du jeu, Égalisées ou Perso avec les 223 attributs, valeurs de base niv. 1 utilisées pour les dégâts comprises), Immortel, chrono de combat, unités qui restent au combat, 1 à 100 par invocation, caméra libre Espace pour monter / Ctrl pour descendre",
+      "Depuis la v0.37.1, le mod en jeu n'a pas besoin de mise à jour ; depuis une version plus ancienne, suivez l'invite de l'application"
     ],
     "de": [
-      "Behoben: Eigene Werte änderten den Schaden nicht. Das Spiel berechnet Schaden aus den Basiswerten der Stufe 1; LP, Sha-Chi, Angriff und Sha-Chi-Schaden ändern diese jetzt im selben Verhältnis. Getestet: Eine Einheit mit 9.999.999 max. LP verlor gegen zehn Angreifer in 50 Sekunden nur etwa 0,5 %",
-      "Angleichen gleicht jetzt auch die Stufe-1-Werte an, damit Einheiten wirklich denselben Schaden einstecken und austeilen",
-      "Nach dem Update dem Hinweis in der App folgen, um den Mod im Spiel zu aktualisieren"
+      "Zuverlässigere Update-Prüfung: Die App fragt alle Downloadquellen gleichzeitig und nimmt die neueste Version; eine Quelle mit alter Kopie meldet nicht mehr, du seist auf dem neuesten Stand",
+      "Enthält v0.37.0 und v0.37.1: Einheitenwerte (Spiel, Angleichen oder Eigene mit allen 223 Attributen, einschließlich der Stufe-1-Basiswerte für den Schaden), Unsterblich, Kampftimer, Einheiten bleiben im Kampf, 1–100 pro Beschwörung, freie Kamera Leertaste hoch / Strg runter",
+      "Von v0.37.1 aus braucht der Mod im Spiel kein Update; von älteren Versionen dem Hinweis in der App folgen"
     ],
     "es": [
-      "Corregido: los valores propios no cambiaban el daño. El juego calcula el daño a partir de los valores base de nivel 1; ahora, al cambiar vida, Sha-Chi, ataque o daño Sha-Chi, esos valores cambian en la misma proporción. Probado: una unidad con 9 999 999 de vida máxima perdió solo un 0,5 % en 50 segundos contra diez atacantes",
-      "Igualar ahora también iguala los valores de nivel 1, así que las unidades reciben y hacen de verdad el mismo daño",
-      "Después de actualizar, sigue el aviso de la aplicación para actualizar el mod del juego"
+      "Comprobación de actualizaciones más fiable: la aplicación consulta todas las fuentes a la vez y toma la versión más reciente; una fuente con una copia antigua ya no hace creer que estás al día",
+      "Incluye v0.37.0 y v0.37.1: estadísticas (Del juego, Igualar o Propias con los 223 atributos, incluidos los valores base de nivel 1 que el juego usa para el daño), Inmortal, cronómetro de combate, unidades que no abandonan el combate, 1–100 por invocación, cámara libre Espacio sube / Ctrl baja",
+      "Desde la v0.37.1, el mod del juego no necesita actualización; desde versiones anteriores, sigue el aviso de la aplicación"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.1/PhantomGladiator-0.37.1-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.2/PhantomGladiator-0.37.2-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.1/PhantomGladiator-0.37.1-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.2/PhantomGladiator-0.37.2-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.1/PhantomGladiator-0.37.1-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.2/PhantomGladiator-0.37.2-win64.zip"
     }
   ]
 }
