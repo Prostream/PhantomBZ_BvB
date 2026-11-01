@@ -1,52 +1,52 @@
 {
-  "version": "0.35.0",
-  "date": "2026-11-01T07:40:39+08:00",
-  "size": 20626479,
-  "sha256": "756bc7a0b34ad5c3e49fc9cc427d018595719af3934651b39bbe18bcd3030c31",
+  "version": "0.35.1",
+  "date": "2026-11-01T09:53:11+08:00",
+  "size": 20626514,
+  "sha256": "4f6813af76295d2b39e367c3c0d9f1b7cfa47aaba5601eb952cb62b55d80e047",
   "notes": {
     "zh": [
-      "新增随从：阵营选「随从」召唤的怪会跟着你、帮你打，数量不限；离太远或快速移动后自动传送回来，投技对地图怪也能用，可随时解散",
-      "召唤难度更轻、更准：只在有带难度的单位时才生效，消除了地图上怪多时的卡顿，单位出生时的难度判断也按所选难度",
-      "界面和六种语言同步更新；更新后请按助手提示更新游戏内模组"
+      "修复部分电脑在「一键安装」或下载更新时弹出 “CoreWebView2 can only be accessed from the UI thread”、安装无法完成的问题",
+      "游戏内的模组没有变化，已经装好的不用重新安装",
+      "如果在助手里更新时也弹出这个错误，请手动下载新版压缩包，解压到新文件夹后使用"
     ],
     "en": [
-      "New companions: units summoned to the Companion team follow you and fight on your side, no limit; they teleport back from far away or after fast travel, their grabs work on map enemies, and you can dismiss them any time",
-      "Summon difficulty is lighter and more accurate: it only runs while leveled units are out, which removes stutter in busy areas, and units get their level from the moment they spawn",
-      "Interface and all six languages updated; after updating, follow the prompt in the app to update the in-game mod"
+      "Fixed “CoreWebView2 can only be accessed from the UI thread” appearing on some PCs when installing the mod or downloading an update, which stopped the install",
+      "The in-game mod is unchanged; there is no need to reinstall it",
+      "If updating in the app shows the same error, download the new zip by hand and unzip it into a new folder"
     ],
     "ja": [
-      "お供を追加：「お供」チームで召喚したユニットがあなたについて来て一緒に戦います（数は無制限）。離れすぎたときやファストトラベル後は近くへテレポートし、投げ技はマップの敵にも有効、いつでも解散できます",
-      "召喚難易度を軽量化・改善：難易度付きユニットがいるときだけ動作し、敵の多い場所でのカクつきを解消。出現した瞬間から選んだ難易度で判定します",
-      "画面と6言語を更新。更新後はアプリの案内に従ってゲーム内Modも更新してください"
+      "一部のPCで、Modのインストールやアップデートのダウンロード中に「CoreWebView2 can only be accessed from the UI thread」と表示され、インストールが完了しない問題を修正",
+      "ゲーム内Modは変更なし。再インストールは不要です",
+      "アプリでの更新中に同じエラーが出る場合は、新しいzipを手動でダウンロードし、新しいフォルダーに展開して使ってください"
     ],
     "fr": [
-      "Nouveaux compagnons : les unités invoquées dans l'équipe Compagnon vous suivent et combattent à vos côtés, sans limite ; elles se téléportent près de vous quand elles sont trop loin ou après un voyage rapide, leurs prises fonctionnent sur les ennemis de la carte, et vous pouvez les renvoyer à tout moment",
-      "Difficulté d'invocation plus légère et plus précise : active seulement quand des unités concernées sont présentes, ce qui supprime les saccades dans les zones chargées, et appliquée dès l'apparition des unités",
-      "Interface et six langues mises à jour ; après la mise à jour, suivez l'invite de l'application pour mettre à jour le mod en jeu"
+      "Correction de l'erreur « CoreWebView2 can only be accessed from the UI thread » qui apparaissait sur certains PC lors de l'installation du mod ou du téléchargement d'une mise à jour et bloquait l'installation",
+      "Le mod en jeu n'a pas changé : inutile de le réinstaller",
+      "Si la mise à jour dans l'application affiche la même erreur, téléchargez le nouveau zip manuellement et décompressez-le dans un nouveau dossier"
     ],
     "de": [
-      "Neue Begleiter: Einheiten im Team Begleiter folgen dir und kämpfen auf deiner Seite, ohne Limit; sie teleportieren sich zu dir, wenn sie zu weit weg sind oder nach einer Schnellreise, ihre Würfe wirken auf Gegner der Karte, und du kannst sie jederzeit entlassen",
-      "Beschwörungsschwierigkeit leichter und genauer: nur aktiv, solange betroffene Einheiten da sind, was Ruckler in vollen Gebieten beseitigt, und ab dem Erscheinen wirksam",
-      "Oberfläche und alle sechs Sprachen aktualisiert; nach dem Update dem Hinweis in der App folgen, um den Mod im Spiel zu aktualisieren"
+      "Behoben: Auf manchen PCs erschien beim Installieren des Mods oder beim Herunterladen eines Updates „CoreWebView2 can only be accessed from the UI thread“ und die Installation brach ab",
+      "Der Mod im Spiel ist unverändert, eine Neuinstallation ist nicht nötig",
+      "Zeigt das Update in der App denselben Fehler, lade die neue ZIP-Datei manuell herunter und entpacke sie in einen neuen Ordner"
     ],
     "es": [
-      "Nuevos compañeros: las unidades invocadas en el equipo Compañero te siguen y luchan de tu lado, sin límite; se teletransportan a tu lado si se alejan demasiado o tras un viaje rápido, sus agarres funcionan con los enemigos del mapa y puedes despedirlas cuando quieras",
-      "Dificultad de invocación más ligera y precisa: solo actúa mientras hay unidades afectadas, lo que elimina los tirones en zonas con muchos enemigos, y se aplica desde que aparecen",
-      "Interfaz y seis idiomas actualizados; tras actualizar, sigue el aviso de la aplicación para actualizar el mod del juego"
+      "Corregido el error «CoreWebView2 can only be accessed from the UI thread» que aparecía en algunos PC al instalar el mod o descargar una actualización e impedía terminar la instalación",
+      "El mod del juego no cambia; no hace falta reinstalarlo",
+      "Si al actualizar desde la aplicación aparece el mismo error, descarga el nuevo zip a mano y descomprímelo en una carpeta nueva"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.1/PhantomGladiator-0.35.1-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.1/PhantomGladiator-0.35.1-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.0/PhantomGladiator-0.35.0-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.35.1/PhantomGladiator-0.35.1-win64.zip"
     }
   ]
 }
