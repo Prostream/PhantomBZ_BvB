@@ -29,6 +29,8 @@ const RealRuntime = (() => {
     statMatch: { enabled: false, baseline: null, matched: 0, failures: 0, reset: false },
     // spawn_difficulty_*: the level new units take (FOLLOW = the game's), the game's own level, counts.
     difficulty: { level: "FOLLOW", game: "", supported: false, failures: 0, skipped: 0, aiFailed: 0 },
+    // fun_*: the player-only switches saved by fun_features.lua and what each one reads back.
+    fun: { supported: false, shachi: false, deflect: false, dodge: false, shachiState: "off", guardState: "off", deflects: 0, dodges: 0 },
     fight: "idle",
     winner: "",
     // arena_state after a cleanup the mod could not confirm: cleanup_pending / restore_pending need
@@ -173,6 +175,15 @@ const RealRuntime = (() => {
       d.skipped = num("spawn_difficulty_skipped");
       // ai_difficulty.lua reads its override back on every unit; a failure means stats changed but the AI did not.
       d.aiFailed = num("spawn_difficulty_ai_failed");
+      const f = s.fun;
+      f.supported = yes("fun_supported");
+      f.shachi = yes("fun_shachi");
+      f.deflect = yes("fun_deflect");
+      f.dodge = yes("fun_dodge");
+      f.shachiState = v.fun_shachi_state || "off";
+      f.guardState = v.fun_guard_state || "off";
+      f.deflects = num("fun_deflect_pressed");
+      f.dodges = num("fun_dodge_pressed");
       s.scan = v.catalog_state === "scanning" ? { done: num("catalog_paths_done"), total: Math.max(1, num("catalog_paths_total")) } : null;
     } else {
       // Closing the game removes everything the mod spawned.
@@ -220,6 +231,7 @@ const RealRuntime = (() => {
       companion: [s.game, s.companion, s.down.companion, s.companionFailures],
       match: [s.game, JSON.stringify(s.statMatch)],
       diff: [s.game, JSON.stringify(s.difficulty)],
+      fun: [s.game, JSON.stringify(s.fun)],
       battle: [s.game, s.cleanup, s.blue, s.red, s.neutral, s.down.blue, s.down.neutral, s.unreadable, s.fight, owned, JSON.stringify([s.keys.start, s.keys.stop])],
       view: [s.game, s.spectator, s.spectatorPhase, s.freeCam, JSON.stringify([s.keys.toggle_camera, s.keys.toggle_spectator])],
       keys: [s.game, JSON.stringify(s.keys)],
@@ -260,6 +272,7 @@ const RealRuntime = (() => {
       if (payload.code && payload.team) Object.assign(body, { team: payload.team, count: payload.count });
     }
     else if (action === "set_spawn_difficulty") body = { action, difficulty: payload.difficulty };
+    else if (action === "set_fun_feature") body = { action, feature: payload.feature, enabled: payload.enabled };
     else if (action === "configure_keys") { path = "/api/keybinds"; body = Object.fromEntries(KEY_NAMES.map(k => [k, wireKey(payload.bindings[k])])); }
     else body = { action };
     const held = action === "stop" ? owned : action === "clear_neutral" ? s.neutral + s.down.neutral : 0;
@@ -283,6 +296,7 @@ const RealRuntime = (() => {
     if (action === "dismiss_companions") done.cleared = Number((done.message || "").match(/已确认=(\d+)/)?.[1] ?? Math.max(0, companionsHeld - s.companion - s.down.companion));
     // The mod saved and read the choice back; show it before the next poll does.
     if (action === "set_spawn_difficulty" && done.status === "succeeded") s.difficulty.level = payload.difficulty;
+    if (action === "set_fun_feature" && done.status === "succeeded") s.fun[payload.feature.toLowerCase()] = payload.enabled;
     return done;
   }
 

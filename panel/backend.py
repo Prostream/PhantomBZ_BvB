@@ -31,11 +31,13 @@ _taxonomy_module = importlib.util.module_from_spec(_taxonomy_spec)
 _taxonomy_spec.loader.exec_module(_taxonomy_module)
 
 DEFAULT_RUNTIME = Path(r"D:\steam\steamapps\common\PBZ\platform\steam\ue4ss\Mods\PhantomGladiator\Runtime")
-ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions"}
+ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature"}
 # Teams a unit can be summoned to; companion units follow the player (companion.lua).
 TEAMS = ("blue", "red", "neutral", "companion")
 # FOLLOW keeps the game difficulty; the others are the game's own four levels (spawn_difficulty.lua).
 SPAWN_DIFFICULTIES = ("FOLLOW", "EASY", "NORMAL", "HARD", "NIGHTMARE")
+# Player-only fun features (fun_features.lua): infinite Shachi, auto perfect deflect, auto red-light dodge.
+FUN_FEATURES = ("SHACHI", "DEFLECT", "DODGE")
 LEGACY_BINDING_NAMES = ("spawn", "start", "stop", "refresh_catalog")
 BINDING_NAMES = LEGACY_BINDING_NAMES + ("toggle_camera", "exit_camera", "cycle_team", "toggle_spectator")
 BINDING_LABELS = dict(zip(BINDING_NAMES, ("召唤所选单位", "开始交战", "停止并清理", "刷新单位目录", "自由观战（无仇恨＋隐身＋无敌锁血）", "退出自由观战并恢复", "切换召唤队伍", "单独切换无仇恨")))
@@ -657,6 +659,14 @@ class Bridge:
             if difficulty not in SPAWN_DIFFICULTIES:
                 raise ValidationError('difficulty must be one of ' + ', '.join(SPAWN_DIFFICULTIES))
             payload['difficulty'] = difficulty
+        elif action == 'set_fun_feature':
+            allowed |= {'feature', 'enabled'}
+            feature, enabled = request.get('feature'), request.get('enabled')
+            if feature not in FUN_FEATURES:
+                raise ValidationError('feature must be one of ' + ', '.join(FUN_FEATURES))
+            if type(enabled) is not bool:
+                raise ValidationError('enabled must be true or false')
+            payload.update(feature=feature, enabled=enabled)
         elif action == "configure_keys":
             allowed.add("bindings")
             bindings = request.get("bindings")
@@ -718,6 +728,8 @@ class Bridge:
             if 'team' in payload:bindings['stop']='FIXED'
         elif payload['action']=='set_spawn_difficulty':
             bindings={'spawn':payload['difficulty']}
+        elif payload['action']=='set_fun_feature':
+            bindings={'spawn':payload['feature'],'start':'ON' if payload['enabled'] else 'OFF'}
         fields = [str(row["id"]), payload["action"], payload.get("unit_id", ""),
                   payload.get("team", "blue"), str(payload.get("count", 1))]
         if payload['action']=='configure_keys':

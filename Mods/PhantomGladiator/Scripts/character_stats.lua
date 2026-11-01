@@ -39,8 +39,9 @@ local function attributeSet(actor)
 end
 function Stats.new()
     local self={effects={}}
-    -- Health_Min is available only to the observer guard, not the stat-matching list.
-    local allowed={Health=true,Shachi=true,Health_Min=true};for _,field in ipairs(Stats.fields)do allowed[field]=true end
+    -- Health_Min (observer guard) and Shachi_Min (fun_features.lua infinite Shachi) are writable here
+    -- but are not in the stat-matching list.
+    local allowed={Health=true,Shachi=true,Health_Min=true,Shachi_Min=true};for _,field in ipairs(Stats.fields)do allowed[field]=true end
     function self:read(actor,field)
         local set,why=attributeSet(actor);if not set then return nil,why end
         local data,ok=U.field(set,field)

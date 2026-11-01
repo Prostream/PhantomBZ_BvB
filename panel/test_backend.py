@@ -188,6 +188,20 @@ class BridgeTests(unittest.TestCase):
             with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
                 self.bridge.enqueue(bad)
 
+    def test_fun_feature_travels_in_the_spawn_and_start_key_columns(self):
+        for feature in backend.FUN_FEATURES:
+            for enabled, token in ((True, "ON"), (False, "OFF")):
+                command = self.bridge.enqueue({"action": "set_fun_feature", "feature": feature, "enabled": enabled})
+                columns = self.bridge._wire({"id": command["id"], "payload": json.dumps(command["payload"])}).rstrip("\n").split("\t")
+                self.assertEqual(columns[1:7], ["set_fun_feature", "", "blue", "1", feature, token])
+                self.assertEqual(len(columns), 10)
+        for bad in ({"action": "set_fun_feature", "feature": "SHACHI"}, {"action": "set_fun_feature", "feature": "shachi", "enabled": True},
+                    {"action": "set_fun_feature", "feature": "GOD", "enabled": True},
+                    {"action": "set_fun_feature", "feature": "DODGE", "enabled": 1},
+                    {"action": "set_fun_feature", "feature": "DODGE", "enabled": True, "unit_id": UNIT}):
+            with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
+                self.bridge.enqueue(bad)
+
     def test_invalid_ack_keeps_command_pending_and_preserves_inbox(self):
         command = self.spawn()
         self.bridge.tick()

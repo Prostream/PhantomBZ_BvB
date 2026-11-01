@@ -32,6 +32,10 @@ const MockRuntime = (() => {
   const DIFF_KEY = "pg-proto.difficulty";
   let savedDiff = "FOLLOW";
   try { savedDiff = localStorage.getItem(DIFF_KEY) || "FOLLOW"; } catch { /* storage may be unavailable */ }
+  // Fun features mirror fun_features.lua: player-only switches saved like Runtime/fun-features.tsv.
+  const FUN_KEY = "pg-proto.fun";
+  let savedFun = {};
+  try { savedFun = JSON.parse(localStorage.getItem(FUN_KEY) || "{}") || {}; } catch { /* storage may be unavailable */ }
   const s = {
     game: "ready",              // offline | connecting | notInMap | ready | mismatch
     gameRunning: true,          // the updater refuses to replace mod files while the game runs
@@ -51,6 +55,9 @@ const MockRuntime = (() => {
     statMatch: { enabled: savedMatch, baseline: null, matched: 0, failures: 0, reset: false },
     // level: FOLLOW | EASY | NORMAL | HARD | NIGHTMARE for new units; game: the game's own level
     difficulty: { level: savedDiff, game: "Easy", supported: true, failures: 0, skipped: 0, aiFailed: 0 },
+    // shachiState: off | locked | failed; guardState: off | waiting | ready | failed; deflects/dodges pressed so far
+    fun: { supported: true, shachi: !!savedFun.shachi, deflect: !!savedFun.deflect, dodge: !!savedFun.dodge,
+      shachiState: savedFun.shachi ? "locked" : "off", guardState: savedFun.deflect || savedFun.dodge ? "waiting" : "off", deflects: 0, dodges: 0 },
     fight: "idle",              // idle | fighting | ended
     winner: "",                 // blue | red | draw
     cleanup: "",                // "" | restore_pending (one more cleanup) | spawn_uncertain (restart the game)
@@ -149,6 +156,14 @@ const MockRuntime = (() => {
         s.down.neutral = 0;
         releaseBaseline();
         return;
+      case "set_fun_feature": {
+        const f = s.fun;
+        f[p.feature.toLowerCase()] = p.enabled;
+        f.shachiState = f.shachi ? "locked" : "off";
+        f.guardState = f.deflect || f.dodge ? (f.deflects || f.dodges ? "ready" : "waiting") : "off";
+        try { localStorage.setItem(FUN_KEY, JSON.stringify({ shachi: f.shachi, deflect: f.deflect, dodge: f.dodge })); } catch { /* ignore */ }
+        return;
+      }
       case "set_spawn_difficulty":
         s.difficulty.level = p.difficulty;
         try { localStorage.setItem(DIFF_KEY, p.difficulty); } catch { /* ignore */ }

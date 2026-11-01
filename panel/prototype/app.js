@@ -341,7 +341,7 @@
       renderDock();
       return;
     }
-    const html = { hotkeys: hotkeysHTML, settings: settingsHTML, about: aboutHTML }[ui.page]();
+    const html = { hotkeys: hotkeysHTML, fun: funHTML, settings: settingsHTML, about: aboutHTML }[ui.page]();
     content.innerHTML = `<div class="page page-scroll scroll">${html}</div>`;
   }
 
@@ -1094,6 +1094,46 @@
       ${ui.installing ? `<div style="margin-top:10px"><div class="progress"><i style="width:${Math.round(ui.installing.ratio * 100)}%"></i></div><div class="progress-meta"><span>${esc(t("comp.installing", { step: t("comp." + ui.installing.step) }))}</span><span>${Math.round(ui.installing.ratio * 100)}%</span></div></div>`
         : missing ? `<div class="callout-actions"><button class="btn btn-primary btn-sm" type="button" data-action="install-components">${icon("download", "icon-sm")}${esc(t("comp.install"))}</button></div>` : ""}`;
   }
+  // ---------- Fun features (fun_features.lua) ----------
+  // Player-only switches; the mod saves them, so they show the game's answer and wait for it to connect.
+  const FUN = [["SHACHI", "shachi", "zap"], ["DEFLECT", "deflect", "shield"], ["DODGE", "dodge", "swap"]];
+  function funState(feature) {
+    const f = S.fun;
+    if (feature === "SHACHI") return f.shachiState === "locked" ? ["green", t("fun.state.locked")]
+      : f.shachiState === "failed" ? ["amber", t("fun.state.failed")] : ["", t("fun.state.waitMap")];
+    if (f.guardState === "failed") return ["amber", t("fun.state.failed")];
+    if (f.guardState === "off") return ["", t("fun.state.waitMap")];
+    const n = feature === "DEFLECT" ? f.deflects : f.dodges;
+    return n ? ["green", t(feature === "DEFLECT" ? "fun.state.deflects" : "fun.state.dodges", { n })] : ["", t("fun.state.waiting")];
+  }
+  function funHTML() {
+    const f = S.fun, online = RT.online(), usable = online && f.supported;
+    const callout = !online ? ["info", "fun.offline"] : !f.supported ? ["alert", "fun.old"] : null;
+    const rows = FUN.map(([feature, key, ic]) => {
+      const on = f[key], busy = ui.busy.has("fun_" + feature);
+      const [tone, text] = on && usable ? funState(feature) : ["", ""];
+      return `<div class="row"><span class="row-icon">${icon(ic)}</span>
+        <div class="row-main"><div class="row-title">${esc(t("fun." + feature + ".name"))}</div><div class="row-desc">${esc(t("fun." + feature + ".desc"))}</div>
+          ${text ? `<div class="fun-state${tone ? " is-" + tone : ""}">${tone === "green" ? icon("check-circle", "icon-sm") : tone === "amber" ? icon("alert", "icon-sm") : icon("clock", "icon-sm")}<span>${esc(text)}</span></div>` : ""}</div>
+        <button class="switch" type="button" role="switch" aria-checked="${on}" aria-busy="${busy}" data-action="fun-toggle" data-feature="${feature}" aria-label="${esc(t("fun." + feature + ".name"))}" ${usable && !busy ? "" : "disabled"}></button></div>`;
+    }).join("");
+    return `<div class="stack">
+      <div class="page-head"><div><h1 class="page-title">${esc(t("fun.title"))}</h1><p class="page-sub">${esc(t("fun.subtitle"))}</p></div></div>
+      ${callout ? `<div class="callout${callout[0] === "alert" ? " callout-amber" : ""}">${icon(callout[0])}<div class="callout-body"><span>${esc(t(callout[1]))}</span></div></div>` : ""}
+      <section class="card"><div class="rows">${rows}</div></section>
+      <p class="muted" style="font-size:12.5px">${esc(t("fun.note"))}</p>
+    </div>`;
+  }
+  async function toggleFun(feature) {
+    const key = FUN.find(([f]) => f === feature)?.[1];
+    if (!key) return;
+    const enabled = !S.fun[key], name = t("fun." + feature + ".name");
+    const busyKey = "fun_" + feature;
+    const pending = run("set_fun_feature", { busyKey, payload: { feature, enabled }, ok: () => t(enabled ? "toast.fun.on" : "toast.fun.off", { name }) });
+    if (ui.page === "fun") renderPage();
+    await pending;
+    if (ui.page === "fun") renderPage();
+  }
   function settingsHTML() {
     const opt = (action, value, checked, main, sub = "", extra = "") => `<button class="option ${extra}" type="button" role="radio" aria-checked="${checked}" data-action="${action}" data-value="${value}"><span class="radio"></span><span class="option-main"><span>${main}</span>${sub ? `<small>${sub}</small>` : ""}</span></button>`;
     const sw = (key, title, desc) => `<div class="row"><div class="row-main"><div class="row-title">${esc(title)}</div><div class="row-desc">${esc(desc)}</div></div><button class="switch" type="button" role="switch" aria-checked="${ui.settings[key]}" data-action="toggle-setting" data-setting="${key}" aria-label="${esc(title)}"></button></div>`;
@@ -1290,6 +1330,7 @@
         : p.team === "companion" ? t("action.spawnCompanion", { name: u?.name, n: p.count }) : t("action.spawn", { name: u?.name, n: p.count, team: teamName(p.team) });
       case "configure_unit_key": return t("action.configure_unit_key", { name: u?.name });
       case "set_spawn_difficulty": return t("action.set_spawn_difficulty", { name: diffName(p.difficulty) });
+      case "set_fun_feature": return t("action.set_fun_feature", { name: t("fun." + p.feature + ".name"), state: t(p.enabled ? "fun.on" : "fun.off") });
       default: return t("action." + job.action);
     }
   }
@@ -1571,6 +1612,7 @@
     spectator: () => run("toggle_spectator", { busyKey: "toggle_spectator", ok: () => t(S.spectator ? "toast.spectator.on" : "toast.spectator.restoring") }),
     "match-toggle": () => run("toggle_stat_match", { ok: () => (S.statMatch.enabled ? { title: t("toast.match.on"), body: t("toast.match.on.body") } : { title: t("toast.match.off"), body: t("toast.match.off.body") }) }),
     "match-rules": () => matchRulesDialog(),
+    "fun-toggle": el => toggleFun(el.dataset.feature),
     "match-focus": () => { const el = $("#dock-match"); el?.scrollIntoView({ block: "nearest", behavior: "smooth" }); el?.querySelector(".switch")?.focus({ preventScroll: true }); },
     "launch-game": () => { closePopover(); RT.launchGame(); toast({ kind: "info", title: t("toast.launching"), body: t("toast.launching.body") }); },
     "unitkey-capture": el => { if (ui.capture?.kind === "unit") cancelCapture(); else startCapture({ kind: "unit", id: el.dataset.id }); },
@@ -1846,6 +1888,7 @@
           if (p.has("grid") && !ui.capture) renderGrid();
         } else if (ui.page === "hotkeys" && p.has("keys") && !ui.capture && !ui.keysSaving) renderPage();
         else if (ui.page === "settings" && p.has("settings")) renderPage();
+        else if (ui.page === "fun" && p.has("fun")) renderPage();
         if (dlg?.kind === "update" && p.has("update")) setDialog(updateHTML());
         break;
       }

@@ -692,3 +692,161 @@ v0.35.9 实机（run-20261101-072358.log，07:24–07:29）：
 
 修改：只读采样。我们让它跑时每秒记一次，共8次；它自己在战斗中实际速度超过 300 时记4次。内容包括实际速度、moveState、GameplayTag_IsSprint、SpeedWalkRun(x,y,z)、DisplacementSpeed、AIMovementMode、AI状态，以及能力组件（改从 SGameAIComponent.AbilitySystemComponent 取）上含 Attitude/Sprint/Move 的标签。用来对比两种情况下动画输入的差别。全部 Lua 测试通过；46个Lua部署哈希一致，BUILD=v0.35.10-anim-sample。
 
+
+## v0.36.0：趣味功能（无限杀气、自动精准防御、自动闪避红光）（2026-11-01，待实机读回）
+
+用户要求在助手左栏加「趣味功能」页，三个开关可自由组合；自动防御要在玩家出招中也触发。三项只作用于玩家角色。
+
+头文件依据：
+- 玩家属性集（CharacterBasics.hpp）有 `Shachi`、`Shachi_Min`、`Shachi_Max`；资源索引里有 `GE_MA_Shachi_Min_1_Override`，和观战锁血用的 `Health_Min` 是同一条已验证写入路径。
+- `UDeflectComponent.ReceiveFrames`（TMap<int32, FDeflectReceiveFrame>）：攻击方提前登记每一下的 `HitGameTime`(double)、`IsDodge`、`IsHit`、`DeflectStrength/Direction`、`SourceAction`。推测 `IsDodge=true` 是不能格挡、只能闪避的红光招，待日志确认。
+- 玩家蓝图 `BP_RenewalPlayer` 有 `Deflect Component`。格挡被动 `BP_PlayerDeflectPassive_C` 有 `Last Deflect Click`、`Perfect Window`、`Normal Window`、`Current Perfect Window Counter`（连点惩罚），以及 `Can Activate Ability On Frame(Can Trigger Auto Deflect)`、`Try Activate Stance Ability On Frame`、`Noob  Tested Handles`；完美闪避被动 `BP_PerfectDodgePassive_C` 有 `Try Auto Dodge(Handle, Frame)`。说明游戏自带一套"新手自动格挡/闪避"，开关条件未知（推测与难度有关），本版未使用。
+- Enhanced Input（UE 5.3+）：`IEnhancedInputSubsystemInterface:InjectInputVectorForAction(Action, FVector, Modifiers, Triggers)`。`FInputActionValue` 没有反射成员，Lua 无法构造，所以用 FVector 版本。
+
+修改（fun_features.lua）：
+- 无限杀气：每 0.5 s 把 `Shachi_Min` 写成 `Shachi_Max` 并读回；杀气低于上限时直接写满（记录前10次，用来判断下限是否真的拦得住）。原始下限记在 `Runtime/fun-shachi-floor.tsv`，关闭时恢复；Mod 重载后由新实例在游戏线程恢复，卸载时不写游戏对象。
+- 自动防御/闪避：开关开着时注册 `LoopInGameThreadWithDelay(1)` 逐帧读 `ReceiveFrames`，用 `GameplayStatics:GetTimeSeconds(玩家)` 算距命中时间。普通帧在 `Perfect Window` 的一半（读不到时 0.06 s）之前注入 `IA_Deflect`，`IsDodge` 帧在 0.10 s 前注入 `IA_Dodge`；每个 handle 只按一次，同类按键间隔 ≥0.12 s；自由观战时暂停。注入前用 `KismetSystemLibrary:DoesImplementInterface` 确认子系统实现了接口。
+- 读回：按格挡后 0.5 s 内 `Last Deflect Click` 变化 = 游戏收到按键；按闪避后 `PerfectDodgeResultData.HitGameTime` 变化 = 完美闪避；预告在命中时间前消失 = 被消耗。第一次出现预告时若 `HitGameTime` 和游戏时间相差 30 s 以上，记"时间基准对不上"并不按键。还记录两个输入动作的 ValueType 和动作级触发器、逐帧循环两秒内的实际次数、每分钟汇总。
+- 助手：左栏新增「趣味功能」页（三个开关、状态行、六语），后端新动作 `set_fun_feature`（key_spawn=功能，key_start=ON/OFF）。
+
+离线：新增 test_fun_features（设置读回、锁定/恢复下限、重载后按日志恢复、按键时机、每帧只按一次、冷却、红光走闪避、暂停、时间基准不符、接口检查）；全部 Lua 测试、后端 57 项、界面脚本测试通过。47 个 Lua 部署哈希一致，BUILD=v0.36.0-fun-features。备份在 `影之刃0-backups/v036-fun-features-20261101-080635`。测试版助手 dist/PhantomGladiator-0.36.0，桌面快捷方式已指向它。
+
+## v0.36.1：闪避按攻击类型判断（2026-11-01，待实机读回）
+
+v0.36.0 实机（run-20261101-081129.log，08:13–08:15，玩家对暂不配队的六十六天魔渊）：
+- 输入注入可行：`DoesImplementInterface` 读回 true；10 次格挡注入后 `Last Deflect Click` 都在下一帧变化，即格挡被动收到了按键。逐帧循环约 45 次/秒，单次最多 3 ms。
+- 时间基准一致：预告的 `HitGameTime` 和 `GameplayStatics:GetTimeSeconds` 同一时钟。普通帧在命中前约 0.30 s 送达，`IsDodge` 帧约 0.50 s。
+- 12 条预告：11 条可格挡（强度 Normal/Light/Knockback），1 条 `IsDodge`（按了闪避，没被打中，`PerfectDodgeResultData` 未变）。只有 handle=6 被打中：它在命中前 0.002 s 才送达，来不及按。
+- 预告 handle 不连续（8–13、16–26 等缺号），同一时段魔渊在掉血。推测编号是全局计数，缺号是玩家自己出招发给魔渊的帧；未验证。
+- 无限杀气：`Shachi_Min` 写成 700 并读回，3 分钟内 0 次重锁、0 次补满，下限一直拦得住。
+- `Perfect Window`/`Normal Window` 读回 0（可能只在格挡时计算），提前量用了默认 0.06 s。
+
+用户反馈：有些 BOSS 除了红光，还有可以闪避的攻击，第一版没算进去。
+
+头文件与资源依据：`EDeflectBulletType` = CantDeflect 0 / Normal 1 / BlueEye 2 / RedEye 3 / PowerAttack 4 / HoldDeflect 5，存在每条预告的 `SourceAction`（`ULGAAction_DurationBulletWithDeflectBase.DeflectBulletType`，弹幕类动作叫 `DeflectType`）。资源里有「完美红光」「完美蓝光」UI 视频、蓝光教程、`GA_Hun_PerfectDodge_TroopKick_Blue/Red` 等完美闪避反击。第一版只看 `IsDodge`，蓝光如果不带这个标记，就被当成普通攻击去按格挡了。
+
+修改：每条预告第一次出现时读 `SourceAction` 的攻击类型和预告里的 `CounterAbility`。闪避开着时，以下情况改按闪避：`IsDodge`；类型为红光、蓝光或不能格挡；反击技能名含 `PerfectDodge`。只开格挡时，不带 `IsDodge` 的仍按格挡。日志每条预告记录类型值、判断结果和反击技能名。助手里该开关改名为「自动闪避红蓝光」。
+
+离线：test_fun_features 新增蓝光、完美闪避反击、重击三种情况；全部测试通过。47 个 Lua 部署哈希一致，BUILD=v0.36.1-fun-dodge-types。备份在 `影之刃0-backups/v0361-fun-dodge-types-20261101-082004`（含上一局日志）。测试版助手 dist/PhantomGladiator-0.36.1，桌面快捷方式已指向它。
+
+## v0.36.2：只按"能不能格挡"决定（2026-11-01，待实机读回）
+
+用户明确规则：只看攻击能不能被格挡，不能格挡的就闪避。v0.36.1 按颜色和反击技能名把蓝光、带完美闪避反击的招也改成闪避，不符合这条规则，已撤回。
+
+修改：判定只有一条。预告带 `IsDodge`，或攻击类型为 CantDeflect(0)/RedEye(3) 时算不能格挡，按闪避；其余（普通、蓝光、重击、按住格挡，以及带反击技能的）都按格挡。只开格挡时，不能格挡的攻击不按任何键。日志仍记录每条预告的类型值、反击技能名和"→格挡/→闪避"判断，可以对照实际有没有挨打来修正。开关名改回「自动闪避红光」，说明改为"红光等不能格挡的攻击"。
+
+待确认：蓝光实际能不能格挡；有没有不能格挡、却完全不发预告的攻击（若有，日志里不会出现它，需另找来源）。
+
+离线：test_fun_features 改为验证红光/不能格挡→闪避，蓝光/重击/带反击→格挡，只开格挡时红光不按键；全部测试通过。47 个 Lua 部署哈希一致，BUILD=v0.36.2-fun-undeflectable。备份在 `影之刃0-backups/v0362-fun-undeflectable-20261101-082313`。测试版助手 dist/PhantomGladiator-0.36.2，桌面快捷方式已指向它。
+
+## v0.36.3：掉血来源与格挡档位读回（2026-11-01，待实机读回）
+
+v0.36.2 实机（run-20261101-082533.log，08:27:43–08:28:35，玩家对暂不配队的六十六天魔渊）：
+- 15 条预告全部判断并按键：13 条普通（类型值=1）→格挡，2 条红光（类型值=3，IsDodge=true）→闪避。格挡被动 12/12 收到按键，没有一条 IsHit=true。本局没有出现蓝光或其他类型。
+- 第二条红光带反击技能 `GA_Hun_BDEx_MoYuan_01_C`。
+- 用户反馈：仍然掉血。日志没有玩家血量，无法区分是"没有预告的攻击"，还是格挡成功但不是完美档。
+- 用户反馈：召出来的魔渊几刀就死。读回：魔渊 Health_Max=12000（BOSS 各难度相同），08:27:50–08:28:08 只格挡时 HP 一直 12000，只有杀气被削 2400→1996；08:28:11 起 13 秒内 HP 12000→757，同时玩家 `Shachi_Min` 当前值被游戏改成 1（基础值仍 700），每 0.5 s 都要补满杀气，说明玩家在连续消耗杀气（杀招/杀气武器）。结论：无限杀气让杀招不受限，是伤害高的原因，不是召唤数值出错。
+- 杀气锁：杀气技能期间游戏会把 `Shachi_Min` 当前值压到 1，下限拦不住，由补满兜底（17 次），杀气一直在 694–700。
+- 另见：`aiDifficulty` 每 15 s 查找未加载的检查节点仍有 67–70 ms 的单次卡顿（08:28:14、08:28:29），待单独处理。
+
+头文件依据：`BP_StanceAction_Base_Player_C`（格挡技能实例）有 `Current Result Data`（FDeflectResultData，含 `DeflectResult` 标签和 `HitGameTime`）、`Perfect Pre Hit Time`、`Perfect Window`、`Great Window`、`Normal Window`，即格挡分完美/优秀/普通三档。格挡被动有 `Current Perfect Window Counter`（连点惩罚）。
+
+修改（只加读回，不改按键规则和时机）：
+- 每帧读玩家 `Health`，掉血时记录当时进行中的预告和 0.5 s 内刚结束的预告（类型、按过什么）；两者都没有就记"没有预告的攻击"。每分钟汇总加掉血次数和无预告掉血次数。
+- 第一次按格挡后，慢循环每 3 s 至多一次全对象查找格挡技能实例（按 Deflect Component 匹配），记下四个时间窗口。之后每次按格挡，0.8 s 内读 `Current Result Data` 是否更新，记录结果标签（完美/优秀/普通等）；没更新也记一行。
+- 按格挡被收到时，同时记被动的完美窗口、普通窗口和连点惩罚计数。
+- 按键后的观察改为独立队列，不再随预告结束而中断。
+
+离线：test_fun_features 新增"找到格挡技能后读结果档位、掉血关联刚结束的预告、无预告掉血、回血不记"；全部测试通过。47 个 Lua 部署哈希一致，BUILD=v0.36.3-fun-readbacks。备份 `影之刃0-backups/v0363-fun-readbacks-20261101-083243`（含上一局日志）。测试版助手 dist/PhantomGladiator-0.36.3，桌面快捷方式已指向它。
+
+## v0.36.4：逐刀伤害读回（2026-11-01，待实机读回）
+
+用户反馈：打召唤出来的魔渊，平 A 伤害高得不对劲（上一节"杀招不受限"的结论用户否认，作废）。
+
+对照两局（都开着无限杀气、都打六十六天魔渊）：
+- v0.36.0：玩家出手时杀气不减（0 次补满），魔渊每次读回掉 150–680。
+- v0.36.2：玩家出手期间杀气每 0.5 s 少 3–6、`Shachi_Min` 当前值被游戏压到 1（17 次补满），魔渊每秒掉 1000–2500。
+
+推测（未验证）：当前武器的被动按杀气（代码里叫 Anger）给平 A 加伤害并消耗杀气，例如 `UGA_SlitheringSword_PenetratePassive.AngerDamageCoefficient`、`UGA_ZhanMa_SustainedBloodPassive.AngerDamageBonusPerSecond/MaxAngerDamageBonus`（PBZCombatAsset.hpp）。无限杀气一直补满，加成就一直是满的。
+
+修改（只加读回）：任一趣味开关开着就运行逐帧循环；每帧读本Mod召唤单位的 HP（名单由慢循环刷新），掉血时记录掉了多少、玩家杀气在这一刀前后的值、`Shachi_Min` 当前值、无限杀气开关状态；每分钟汇总按开/关分别累计伤害和次数，以及受伤时玩家杀气减少合计。验证方法：同一把武器，开着无限杀气砍一会儿，再关掉砍一会儿，对比每刀伤害和杀气消耗。
+
+离线：test_fun_features 新增逐刀读回一项；全部测试通过。47 个 Lua 部署哈希一致，BUILD=v0.36.4-fun-hit-probe。备份 `影之刃0-backups/v0364-fun-hit-probe-20261101-084142`。测试版助手 dist/PhantomGladiator-0.36.4，桌面快捷方式已指向它。
+
+## v0.36.5–v0.36.6：召唤单位等级、格挡按力度提前（2026-11-01，待实机读回）
+
+用户反馈：把趣味功能全关了，打召唤出来的单位仍然"像砍小兵"。v0.36.4 的"武器被动吃满杀气"推测作废：伤害高和无限杀气无关。
+
+v0.36.3 长局（run-20261101-083501.log，08:35–08:48，魔渊、阿花，召唤难度六十六天）读回：
+- 格挡结果 52 条（另 18 次 0.8 s 内没有新结果）：Perfect 15、Normal 25、空标签 11。按力度分：Light 9/9 完美；Normal 6/26 完美；Knockback 0/4 完美。按键时距命中都在 0.041–0.060 s，时机本身分不开完美和普通，差别在攻击力度。
+- 格挡被动的 `Perfect Window`/`Normal Window` 不是时长，是时间点，等于 `Last Deflect Click + 0.4`（点击后 0.4 s 内接受预告）。格挡技能实例是 `GA_Hun_Tang_Stance_C`，它的 `Perfect Pre Hit Time` 等读出 -11000/627.99 这类值，不是秒数，不能用。
+- 连点惩罚计数 54 次为 0、2 次为 1，影响很小。
+- 掉血：有一条预告（handle=61，普通）在命中后一直没从 ReceiveFrames 消失，导致之后所有掉血都被归到"进行中预告"，"无预告掉血=0"不可信。大额掉血 -648/-288/-272.8 发生时 0.5 s 内没有预告结束，推测来自没有预告的攻击；另有连续 -0.8/帧的持续掉血（来源未知）。
+- 预告类型：普通 53、红光 4、蓝光 2、重击 4。
+
+头文件依据：怪物属性集有 `Level`（CharacterBasics.hpp）。地图怪的等级由所在区域给出：`APBZ_MobDomain_C`（`Level Area Name`、`Level Offset`、`Offset By Difficulty`、`Level Area Table` → `DT_AIAreaLevel`，行结构 `FAIAreaLevelTableStructure{Parent, LevelOffset}`）、`AIScript_LevelOffset`、`GroupScript_Level*`、全局 `Global Mob Level Offset`。召唤单位不经过这些，推测停在类默认等级。资源索引有 `GE_MA_Level_1_Override`，可走已验证的属性写入路径。
+
+修改：
+- spawn_level.lua（v0.36.5）：召唤激活后，读新单位、玩家以及地图怪（CollectNPCs，排除本Mod单位，优先玩家 200 m 内，没有就用全部已加载）的 `Level`。召唤单位低于地图怪最高等级时写到同级并读回，同时记录写入前后的生命上限；不降级；5 s 内重复召唤复用同一次扫描。character_stats 允许写 `Level`。
+- fun_features.lua（v0.36.6）：格挡提前量按力度——Light 0.06 s；其余在 0.09 s 和 0.13 s 之间轮换试验，结果行记录力度、提前量、按键时距命中。预告在命中后 1 s 仍未消失就按结束处理并忽略，直到它从列表消失。
+
+离线：新增 test_spawn_level（提升到附近地图怪最高级、排除本Mod单位和远处、同批复用、不降级、无参照不改、远处兜底、写入未读回算失败）；test_fun_features 新增力度提前量和残留预告两项；全部测试通过。48 个 Lua 部署哈希一致，BUILD=v0.36.6-level-and-leads。备份 `影之刃0-backups/v0365-spawn-level-20261101-085021`（含 08:49 的日志）。测试版助手 dist/PhantomGladiator-0.36.6，桌面快捷方式已指向它。
+
+### v0.36.6 实机读回（run-20261101-085517.log，08:55–08:59，趣味功能全关）
+
+- 等级：召唤的阿花 `Level`=0，附近地图怪（白鹤门弟子 Knife/FishRod）=18，玩家=1。第一只阿花提升到 18 并读回 18.0/18.0，生命上限仍 9000。后两只召唤时没有已加载的地图怪，保持 0。
+- 伤害对照：18 级的阿花 08:56:51–08:57:04 约 10 s 被打死（每秒 -540 至 -2365）；0 级的阿花 08:58:15–08:58:28 约 13 s 被打死（每秒 -630 至 -2680）。等级对受到的伤害没有可见影响，"像砍小兵"不是等级造成的。spawn_level 的作用未得到证据，发布前应撤回或重新验证。
+- 用户补充：在哪里打都伤害高，不只召唤单位。用户怀疑自动防御/闪避启用了隐藏的最低难度（Handicapped）并作用到全局。读回不支持：
+  - 每局 `GetDiffcultMode(World)` 都读回 1（Easy，入阵者），没有 0（Handicapped）。助手的"跟随游戏（当前：…）"用的也是这个值。
+  - 本Mod所有版本（含 git 历史）都没有调用 SetDifficultMode/SetPendingDifficultMode/SetSaveGameDifficultyMode 等任何写难度的函数。
+  - GetDifficulty 挂钩本局只改写了两类上下文：`BP_Monster_AHua_GuiTouDao_C`（3 次）和它的 `BTDecorator_AboveDifficulty_C`（13 次），没有玩家或地图怪。
+  - 自动防御/闪避只注入 IA_Deflect/IA_Dodge 按键；关闭无限杀气时 `Shachi_Min` 已恢复到 0 并读回。
+  - 本Mod唯一改共享对象的是 arena_grabs 的 `NonPlayerGE`（NPC 投技），与玩家伤害无关。游戏目录没有其他 pak/LogicMods，UE4SS 只开着默认的 CheatManager/Console 类 mod。
+- 待定：伤害高是游戏本身（入阵者：普通怪攻击 ×0.7、杀气 ×0.5，破防更快，破防伤害 ×1.5）还是本Mod未知的副作用。判定方法：完全停用本Mod并重启游戏，在同一处打同样的地图怪对照。
+
+### 停用对照（2026-11-01 09:08–09:20）
+
+- 09:08 按用户要求停用：mods.txt `PhantomGladiator : 0`，enabled.txt 改名为 enabled.txt.disabled，原文件备份在 `影之刃0-backups/mod-disable-20261101-090849`。09:12 游戏重启，UE4SS.log 读回 `Mod 'PhantomGladiator' disabled in mods.txt.`，本Mod未加载。
+- 用户结果：停用后打小兵伤害正常。09:20 已恢复两处开关，与备份逐字节一致，下次启动游戏生效。
+- 这次对照有两个混杂因素：一是同时重启了游戏；二是比较的对象是地图小兵，而此前的抱怨都是针对召唤出来的 BOSS（"几刀就砍死""像砍小兵一样"）。所以它只能说明停用+重启后地图小兵正常，不能说明开着本Mod时地图小兵也异常。
+- 开着本Mod时排除过的项（v0.36.6 那局 08:55，游戏 08:54:57 新启动，趣味功能全程关闭）：
+  - 没有写过玩家的杀气属性（本局没有"无限杀气开始"）。
+  - GetDifficulty 挂钩只在有按难度召唤的单位时存在，单位销毁后从名单移除（"移出已销毁登记…IsValid=false"），最后一只离场后挂钩摘除。所有日志里被改写的上下文只有召唤单位（魔渊、阿花、余从）、它们的 `BTDecorator_AboveDifficulty_C` 和 `BP_PBZAIController_C`，没有玩家和地图怪。
+  - hatred.lua 的伤害钩子从未被调用（没有任何引用），属于废弃代码。
+- 新方向（待验证）：地图怪生成时的 `FAISpawnInfo` 带 `MobDomain`（TSoftObjectPtr）和 `MobGroupName`，由此获得区域等级、分组脚本（`GroupScript_Level*`、`UMobGroupScript_FactionDamageMultiplier.FactionDamageMultipliersWithPlayer`）和 `ExtraScripts`（`AIScript_LevelOffset`、`UAIScript_FactionDamageMultiplier_opt`）。召唤单位没有区域和分组，等级为 0。出生后再把等级提到 18 没有可见效果，可能因为等级相关数值在出生时就已算好。`MobDomain` 是软指针，Lua 写软指针在 v0.35.1 导致过原生崩溃，这条路不能走。
+
+## v0.36.7：出生前写角色等级字段（2026-11-01，待实机读回）
+
+用户确认：开着本Mod时，只有召唤出来的怪脆，地图原有的怪正常。
+
+头文件依据（BP_RenewalNPC.hpp）：角色本身有 `double Level`（0x0DF8，与属性集里的 `Level` 属性是两回事），旁边是 `MobGroup`、`Mob Group Bound Actor`、`Spawner`（ABP_AISpawner_C）、`SpawnerInterface`、`ExtraAIScripts`，函数有 `GetCombatLevel()`、`GetAttributeActorConfig()`、`GetAttributeGlobalConfig()`。地图怪由区域刷怪点生成，推测刷怪点在出生前写入这个等级字段，角色初始化时据此算出属性。召唤单位不经过刷怪点，字段为 0。`UAttributeComponent`（角色上叫 `Attribute Component`）另有 `GlobalConfig`、`DefaultDamageCalculator`、`PreCalculationModification`/`PreTakeDataModification`（伤害修正，结构体 0x250，不适合从 Lua 拷贝）和 `ReinitializeAttributes()`。
+
+修改：
+- spawn_level.lua 改为在 FinishSpawn 之前（召唤难度写配置之后）把召唤单位的 `Level` 字段写成玩家附近地图怪的最高等级字段（没有就用全部已加载），读回；不降级；同批 5 s 内复用扫描。v0.36.5 那种出生后改属性 `Level` 的做法撤掉，character_stats 不再允许写 `Level`。
+- 激活后只读并排记录召唤单位和它参照的地图怪：等级字段、`GetCombatLevel()`、属性 `Level`、`Health_Max`、`Attack`、`Shachi_Max`、`ShachiAttack`、物理抗性与三种受伤倍率、`Resistance_Poise`、杀气防御相关两项。用来判断等级字段会不会改变初始化出来的数值，以及召唤怪和地图怪还差在哪里。
+
+离线：test_spawn_level 改为验证出生前写字段、排除本Mod单位与远处、出生后并排记录、同批复用、不降级、无字段或无参照不改、远处兜底、写入不生效算失败；全部 Lua 测试通过。48 个 Lua 部署哈希一致，BUILD=v0.36.7-spawn-level-before。备份 `影之刃0-backups/v0367-spawn-level-before-20261101-093202`。模组开关已恢复（mods.txt=1、enabled.txt 在），需要重启游戏生效。测试版助手 dist/PhantomGladiator-0.36.7，桌面快捷方式已指向它。
+
+### v0.36.7 实机读回（run-20261101-093725.log，09:37–09:38，死镇区域）
+
+- 出生前：附近已加载地图怪 2 只（白鹤门弟子 Knife/FishRod），等级字段都是 18。召唤的阿花等级字段 0→18，读回 18。
+- 出生后并排读回：
+
+| | 召唤阿花（0 级，v0.36.6 及以前） | 召唤阿花（出生前写 18） | 地图怪白鹤门弟子 Knife（18） |
+|---|---|---|---|
+| 等级字段 / 战斗等级 / 属性 Level | 0 / – / 0 | 18 / 18 / 18 | 18 / 18 / 18 |
+| Health_Max | 9000 | 104652 | 7441.92 |
+| Attack | 100 | 210.9 | 147.63 |
+| Shachi_Max | 1600 | 12695.2 | 1269.52 |
+| ShachiAttack | 100 | 161 | 53.13 |
+| 物理抗性 / 三种受伤倍率 / 韧性 / 杀气防御 | 0 / 1,1,0 / 0 / 0 | 同左 | 同左 |
+
+- 结论（有读回）：角色的等级字段在出生前写入，就会作用到初始化出来的血量、攻击、杀气；出生后再改属性 `Level`（v0.36.5–v0.36.6）没有作用。召唤的怪"像砍小兵"的原因是等级为 0，拿的是最低一档数值。减伤类属性在两边都是默认值，不是原因。
+- 玩家对 18 级阿花约 20 s 打掉约 5600（每秒约 250–1460），之前 0 级同样打法约 10 s 打死 9000。09:38:14 阿花 HP 回满一次，推测是脱战回血。
+- 未决：参照"附近地图怪的最高等级"是不是用户想要的规则；附近没有地图怪时（例如前期地图或空地）目前保持 0 级。
+- 用户确认（09:40）：召唤出来的怪"这下正常了"。
+
+## v0.36.8：附近没有地图怪时沿用上次的等级（2026-11-01）
+
+- spawn_level.lua：每次扫到地图怪，就把最高的等级字段和单位名记下来，并写入 `Runtime/spawn-level.tsv`（`SpawnLevelV1\t<等级>\t<单位>`），值变了才写。召唤时附近和已加载地图都没有地图怪，就沿用这条记录，日志写"沿用上次记录的等级"；从没扫到过就保持原等级（0）。文件损坏则忽略。
+- 离线：test_spawn_level 新增"扫到后保存、无地图怪时沿用、重载后从文件沿用、换区域后更新、坏文件忽略"；全部 Lua 测试、后端 57 项、界面脚本测试通过。48 个 Lua 部署哈希一致，BUILD=v0.36.8-spawn-level。备份 `影之刃0-backups/v0368-spawn-level-20261101-094055`（含 v0.36.7 实机日志）。测试版助手 dist/PhantomGladiator-0.36.8，桌面快捷方式已指向它。沿用路径还没有实机读回。

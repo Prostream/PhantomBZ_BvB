@@ -39,6 +39,8 @@ local KeyRouter = require('key_router')
 local SpawnDifficulty=require('spawn_difficulty')
 local AIDifficulty=require('ai_difficulty')
 local Companion=require('companion')
+local FunFeatures=require('fun_features')
+local SpawnLevel=require('spawn_level')
 
 local MOD = "[PhantomGladiator]"
 local runLogPath=Config.RuntimePath..'/run-'..os.date('%Y%m%d-%H%M%S')..'.log'
@@ -61,7 +63,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.35.0-companions"
+local BUILD = "v0.36.8-spawn-level"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -105,8 +107,10 @@ local arenaActivity
 local arenaGrabs
 local statMatch
 local spawnDifficulty
+local spawnLevel
 local companions
 local aiDifficulty
+local funFeatures
 local BeginArenaObservation
 local spawnAudit=SpawnAudit.new(Config.RuntimePath.."/spawn-attempts.tsv",log)
 local spawnGuard=SpawnGuard.new()
@@ -499,6 +503,11 @@ local function FinishSpawnViaAILib(pawn,t,world)
         local applied=spawnDifficulty:prepare(pawn,objectName(pawn))
         -- Its AI asks for the difficulty while it initialises, so the hooks must be in place first.
         if applied and applied.applied and aiDifficulty then aiDifficulty:ensure(pawn,spawnDifficulty:levelOf(pawn)) end
+    end
+    -- Map NPCs get their Level from their spawner before they start; a summoned one gets it here.
+    if route=='npc' and spawnLevel then
+        local leveled,levelError=pcall(function()spawnLevel:prepare(pawn,objectName(pawn))end)
+        if not leveled then log('[SpawnLevel] 出生前失败: '..tostring(levelError)) end
     end
     local lib=route=='npc' and GetAILib() or StaticFindObject('/Script/Engine.Default__GameplayStatics')
     if not safeValid(lib) then return false,"FinishSpawn函数库不可用，保留清理记录" end
@@ -1218,6 +1227,11 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
         log("召唤激活读回 ControllerAI="..tostring(ai~=nil).." HP="..tostring(hp))
         local verified,verifyError=pcall(function()spawnDifficulty:verify(actor,unitPath)end)
         if not verified then log('[SpawnDifficulty] 生成后读回失败: '..tostring(verifyError)) end
+        -- What the level written before FinishSpawn changed, next to a map NPC of that level (read only).
+        if activationRequested==true and spawnLevel then
+            local compared,compareError=pcall(function()spawnLevel:verify(actor)end)
+            if not compared then log('[SpawnLevel] 出生后读回失败: '..tostring(compareError)) end
+        end
         if team=='companion' and companions then
             local checked,checkError=pcall(function()companions:afterActivate(actor,unitPath)end)
             if not checked then log('[Companion] 激活后读回失败: '..tostring(checkError)) end
@@ -1292,6 +1306,12 @@ local arenaSupport={}
 statMatch=StatMatch.new({path=Config.RuntimePath,log=log})
 spawnDifficulty=SpawnDifficulty.new({path=Config.RuntimePath,log=log,getWorld=UEHelpers.GetWorld,
     ready=function()return runtimeSession:status().game_ready==true end})
+spawnLevel=SpawnLevel.new({log=log,path=Config.RuntimePath,getPlayer=GetPlayerPawn,getLocation=GetLocation,collect=CollectNPCs,
+    ours=function()
+        local keys={}
+        for _,entry in ipairs(arena:members())do local key=UEObserve.key(entry.actor);if key then keys[key]=true end end
+        return keys
+    end})
 local grabStudy=Config.EnableGrabStudy and GrabStudy.new({path=Config.RuntimePath,log=log,ready=function()return runtimeSession:status().game_ready==true end}) or nil
 arenaGrabs=ArenaGrabs.new({path=Config.RuntimePath,log=log,hp=GetHP,ready=function()return runtimeSession:status().game_ready==true end})
 function arenaSupport:discover()
@@ -1306,6 +1326,10 @@ companions=Companion.new({log=log,getPlayer=GetPlayerPawn,getWorld=UEHelpers.Get
 aiDifficulty=AIDifficulty.new({log=log,getWorld=UEHelpers.GetWorld,
     ready=function()return runtimeSession:status().game_ready==true end,members=function()return arena:members()end,
     levelOf=function(actor)return spawnDifficulty:levelOf(actor)end})
+-- Infinite Shachi and auto deflect/dodge for the player only; paused while the free camera observes.
+funFeatures=FunFeatures.new({log=log,path=Config.RuntimePath,getPlayer=GetPlayerPawn,getController=GetRealPlayerController,
+    members=function()return arena:members()end,
+    ready=function()return runtimeSession:status().game_ready==true end,paused=function()return freeCamera:isActive()end})
 -- A support tick slower than this is logged with the time of each step, to find the source of stutter.
 local SLOW_TICK_MS,slowTicks=10,0
 function arenaSupport:tick()
@@ -1320,6 +1344,7 @@ function arenaSupport:tick()
     end)
     step('aiDifficulty',function()aiDifficulty:tick()end)
     step('companions',function()companions:tick()end)
+    step('fun',function()funFeatures:tick()end)
     step('freeCamera',function()freeCamera:recover()end)
     if grabStudy then step('grabStudy',function()grabStudy:tick()end) end
     step('summonLinks',function()self:discover()end)
@@ -1374,7 +1399,7 @@ RegisterKeyBind(Key.F9,{ModifierKey.SHIFT},function()
 end)
 end
 panelRuntime=PanelRuntime.new({arena=arena,exporter=exporter,path=Config.RuntimePath,
-    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,spawnDifficulty=spawnDifficulty,aiDifficulty=aiDifficulty,companions=companions,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
+    build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,spawnDifficulty=spawnDifficulty,aiDifficulty=aiDifficulty,companions=companions,funFeatures=funFeatures,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
     router=keyRouter,camera={status=function()return {active=freeCamera:isActive(),pending=freeCamera:hasPending()}end,
         toggle=ToggleFreeCam,exit=ForceExitFreeCam},
     spawnCatalog=SpawnCatalog.new({log=log,path=Config.RuntimePath,getWorld=UEHelpers.GetWorld}),
@@ -1390,6 +1415,7 @@ if ModRef then
         probe:silence("Mod卸载")
         aiDifficulty:silence("Mod卸载")
         companions:silence()
+        funFeatures:silence()
         battle:cancel("Mod卸载")
         if battle:pendingCount()>0 or #arenaActors>0 then
             log("卸载时仍有参赛者或恢复记录；重载不会替代停止清理")

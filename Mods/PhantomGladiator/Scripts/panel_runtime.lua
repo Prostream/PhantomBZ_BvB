@@ -56,6 +56,11 @@ function Runtime.new(options)
             if not options.spawnDifficulty then return {ok=false,message='召唤难度模块未加载',spawned_count=0} end
             return options.spawnDifficulty:set(command.key_spawn)
         end,
+        -- Feature token (SHACHI, DEFLECT, DODGE) in key_spawn, ON or OFF in key_start.
+        set_fun_feature=function(command)
+            if not options.funFeatures then return {ok=false,message='趣味功能模块未加载',spawned_count=0} end
+            return options.funFeatures:set(command.key_spawn,command.key_start)
+        end,
         start=function()
             local why=readyError(); if why then return {ok=false,message=why,spawned_count=0} end
             return options.arena:start()
@@ -182,6 +187,19 @@ function Runtime.new(options)
         out.spawn_difficulty_ai=ai.state or ''
         out.spawn_difficulty_ai_verified=ai.verified or 0
         out.spawn_difficulty_ai_failed=ai.failed or 0
+        local fun=options.funFeatures and options.funFeatures:status() or {}
+        out.fun_supported=not not options.funFeatures
+        out.fun_shachi=fun.shachi==true
+        out.fun_deflect=fun.deflect==true
+        out.fun_dodge=fun.dodge==true
+        out.fun_shachi_state=fun.shachi_state or 'off'
+        out.fun_shachi_failures=fun.shachi_failures or 0
+        out.fun_guard_state=fun.guard_state or 'off'
+        out.fun_guard_message=fun.guard_message or ''
+        out.fun_deflect_pressed=fun.deflect_pressed or 0
+        out.fun_deflect_received=fun.deflect_received or 0
+        out.fun_dodge_pressed=fun.dodge_pressed or 0
+        out.fun_perfect_dodges=fun.perfect_dodges or 0
         local unitKeys=options.unitKeys and options.unitKeys:status() or {}
         out.unit_keys_epoch=unitKeys.epoch or ''
         out.unit_keys_revision=unitKeys.revision or 0
