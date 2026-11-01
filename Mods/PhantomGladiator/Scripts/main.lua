@@ -72,7 +72,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.37.3-icons"
+local BUILD = "v0.37.4-friendly"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -1206,9 +1206,27 @@ local runtimeSession=RuntimeSession.new({valid=safeValid,getWorld=UEHelpers.GetW
     getPlayer=GetPlayerPawn,isDestroying=actorIsDestroying,hp=GetHP})
 local spectatorTargets=SpectatorTargets.new({log=log})
 local spectatorExcluded={}
+-- The player's side: companions (their adopted summons included) and anything carrying the player's faction tag.
+-- No-aggro leaves these alone and never brings back the relation one had before it joined.
+local sideKeys,sideAt={},-1
+local function IsPlayerSide(npc)
+    local now=os.clock()
+    if now-sideAt>=0.5 or now<sideAt then
+        sideAt,sideKeys=now,{}
+        for _,member in ipairs(arena and arena:members() or {})do
+            local key=member.team=='companion' and UEObserve.key(member.actor)
+            if key then sideKeys[key]=true end
+        end
+    end
+    local key=UEObserve.key(npc)
+    if key and sideKeys[key] then return true end
+    local tag=ReadFactionTag(npc)
+    return tag~='?' and tag~='无阵营组件' and tag==ReadFactionTag(GetPlayerPawn())
+end
 spectator=SpectatorMode.new({log=log,valid=engineValid,getPlayer=GetPlayerPawn,path=Config.RuntimePath,
     isActorDestroying=actorIsDestroying,
     isObserverActive=function()return freeCamera:isActive()end,
+    isPlayerSide=IsPlayerSide,
     releasePlayerTarget=function(npc,player)return spectatorTargets:release(npc,player)end,
     getNPCs=function()
         spectatorTargets:refresh()
@@ -1241,7 +1259,13 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
     finishSpawn=FinishSpawnViaAILib,
     activate=function(actor,unitPath,team)
         if spawnRoutes[actor]=='actor' then return safeValid(actor),'通用Actor初始化完成；未调用PBZ战斗AI，不保证具有血量或战斗能力' end
-        spectator:applyTo(actor)
+        -- A companion is never handed to no-aggro: up to v0.37.3 it was recorded here while still the enemy, and
+        -- turning no-aggro off (leaving the free camera) set that back, so its attacks hit the player.
+        if team~='companion' then spectator:applyTo(actor)
+        elseif spectator:status().enabled_requested then
+            log('[Spectator] 随从不交给无仇恨接管 unit='..objectName(actor)..' 召唤时对玩家关系='..RelationName(ReadRelation(actor,GetPlayerPawn()))
+                ..'（v0.37.3 及以前会记下这个关系，关闭无仇恨时改回去）')
+        end
         -- Companions get the official follow state, the player's faction and a friendly relation before their AI starts.
         if team=='companion' and companions then
             local prepared,prepareError=pcall(function()companions:prepare(actor,unitPath)end)
@@ -1249,7 +1273,7 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
         end
         local activationRequested=FinishEntrance(actor)
         if spectator:status().enabled_requested then spectatorTargets:refresh(true) end
-        spectator:applyTo(actor)
+        if team~='companion' then spectator:applyTo(actor) end
         local ai=GetAIComp(actor)
         local hp=GetHP(actor)
         log("召唤激活读回 ControllerAI="..tostring(ai~=nil).." HP="..tostring(hp))

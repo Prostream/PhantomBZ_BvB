@@ -1383,6 +1383,23 @@
 
   // ---------- Update flow ----------
   const LINE_IDS = ["auto", "cn1", "cn2", "github"];
+  const versionParts = v => String(v || "").split(".").map(n => parseInt(n, 10) || 0);
+  const compareVersions = (a, b) => {
+    const x = versionParts(a), y = versionParts(b);
+    for (let i = 0; i < Math.max(x.length, y.length); i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+    return 0;
+  };
+  // Every released version this copy of the app has received (changelog.js), newest first, in the app's language.
+  function releaseHistoryHTML() {
+    const list = (window.PG_CHANGELOG || []).filter(r => compareVersions(r.version, S.appVersion) <= 0);
+    if (!list.length) return "";
+    const items = list.map(r => {
+      const notes = r.notes?.[I18N.lang] || r.notes?.en || r.notes?.zh || [];
+      const current = compareVersions(r.version, S.appVersion) === 0 ? `<span class="chip chip-green">${esc(t("update.history.current"))}</span>` : "";
+      return `<div class="release-item"><div class="release-head"><strong>v${esc(r.version)}</strong><span class="muted">${esc(fmtDate(r.date))}</span>${current}</div><ul class="notes">${notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul></div>`;
+    }).join("");
+    return `<details class="release-history"><summary>${icon("history", "icon-sm")}<span>${esc(t("update.history"))}</span><span class="muted">${esc(t("update.history.count", { n: list.length }))}</span>${icon("chevron-down", "icon-sm release-chevron")}</summary><div class="release-list">${items}</div></details>`;
+  }
   function lineFor(info, id) { return id === "auto" ? [...info.lines].filter(l => l.ms !== null).sort((a, b) => a.ms - b.ms)[0] : info.lines.find(l => l.id === id); }
   function updateHTML() {
     const u = ui.update, info = u.info;
@@ -1392,9 +1409,9 @@
       case "checking":
         return head(t("update.title")) + `<div class="dialog-body">${state('<span class="state-badge"><span class="spinner spinner-lg"></span></span>', t("update.checking"), t("update.checking.sub"))}</div>`;
       case "latest":
-        return head(t("update.title")) + `<div class="dialog-body">${state(`<span class="state-badge ok">${icon("check")}</span>`, t("update.latest.title"), t("update.latest.body", { v: S.appVersion }))}</div><div class="dialog-foot"><button class="btn btn-primary" type="button" data-action="dialog-close">${esc(t("common.done"))}</button></div>`;
+        return head(t("update.title")) + `<div class="dialog-body">${state(`<span class="state-badge ok">${icon("check")}</span>`, t("update.latest.title"), t("update.latest.body", { v: S.appVersion }))}${releaseHistoryHTML()}</div><div class="dialog-foot"><button class="btn btn-primary" type="button" data-action="dialog-close">${esc(t("common.done"))}</button></div>`;
       case "error":
-        return head(t("update.title")) + `<div class="dialog-body">${state(`<span class="state-badge err">${icon("cloud-off")}</span>`, t("update.error.title"), t("update.error.body"), `<p class="muted" style="font-size:12px">${esc(t("update.error.tried", { list: u.error.tried.map(s => t("update.source." + s)).join(" · ") }))}</p>`)}</div>
+        return head(t("update.title")) + `<div class="dialog-body">${state(`<span class="state-badge err">${icon("cloud-off")}</span>`, t("update.error.title"), t("update.error.body"), `<p class="muted" style="font-size:12px">${esc(t("update.error.tried", { list: u.error.tried.map(s => t("update.source." + s)).join(" · ") }))}</p>`)}${releaseHistoryHTML()}</div>
           <div class="dialog-foot"><a class="btn btn-ghost" href="${REPO}/releases" target="_blank" rel="noopener noreferrer">${icon("external", "icon-sm")}${esc(t("update.manual"))}</a><button class="btn btn-primary" type="button" data-action="update-check">${icon("refresh", "icon-sm")}${esc(t("common.retry"))}</button></div>`;
       case "available": {
         const best = lineFor(info, "auto");
@@ -1410,6 +1427,7 @@
             <ul class="notes">${(info.notes?.length ? info.notes : [1, 2, 3].map(i => t("update.note" + i))).map(n => `<li>${esc(n)}</li>`).join("")}</ul>
             <div class="section-label">${esc(t("update.line"))}</div>
             <div class="line-list" role="radiogroup" aria-label="${esc(t("update.line"))}">${lines}</div>
+            ${releaseHistoryHTML()}
           </div>
           <div class="dialog-foot"><span class="muted grow" style="font-size:12px;display:flex;gap:6px;align-items:center">${icon("shield", "icon-sm")}${esc(t("update.safe"))}</span><button class="btn btn-ghost" type="button" data-action="dialog-close">${esc(t("update.later"))}</button><button class="btn btn-primary" type="button" data-action="update-download" data-autofocus>${icon("download", "icon-sm")}${esc(t("update.download"))}</button></div>`;
       }

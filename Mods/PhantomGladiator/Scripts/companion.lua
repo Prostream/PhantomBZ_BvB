@@ -6,7 +6,9 @@
 --           set up the story's helpers;
 --   side    the player's faction tag on the unit's Faction Component, plus a friendly relation both ways;
 --           a companion's own summons get the same once they are adopted into its team, and lose the player
---           from their hatred list;
+--           from their hatred list; afterwards, every second, anything that changed it is put back and logged,
+--           for the mount a rider companion is on as well (a separate pawn with its own faction:
+--           BP_RenewalNPC.BP_SGameDriverComponent.DrivingVehicle);
 --   assist  BP_SGameAIFunctionLibrary.SyncHatredList(player -> companion), the call summons use to share
 --           their summoner's targets, only while the player has enemies on its own hatred list.
 -- Every write is read back and logged. Nothing shared is changed: class defaults, assets and the player
@@ -16,6 +18,8 @@ local Companion={}
 local FOLLOW='/SGameAI/Data/IdleStateData_Follow.IdleStateData_Follow_C'
 local FRIENDLY=0 -- ETeamAttitude
 local ASSIST_SECONDS,WATCH_SECONDS,WATCH_EVERY=2,90,5
+-- Always friendly: checked every second; a unit that refused the last repair is tried every 10 s.
+local GUARD_SECONDS,GUARD_RETRY_SECONDS,REPAIR_LINES=1,10,40
 -- Keeping up (metres, the user's numbers): the official follow starts at 5 m; walk within 10 m, run beyond,
 -- teleport beside the player from 100 m unless a boss fight is on. Without progress for 3 s the engine's
 -- SimpleMoveToActor takes over.
@@ -71,7 +75,7 @@ function Companion.new(options)
     local log=options.log or function()end
     local clock=options.clock or os.time
     local self={alive=true,count=0,prepared=0,follow=0,side=0,friendly=0,assists=0,failures=0,message='还没有随从',
-        moves=0,teleports=0,gaits=0,stateLines=0}
+        moves=0,teleports=0,gaits=0,stateLines=0,repairs=0,repairLines=0}
     local units,serial,followClass,inspected={},0,nil,false
     local function say(m)log('[Companion] '..m)end
 
@@ -162,8 +166,38 @@ function Companion.new(options)
         record.sideOk=sideOk and friendOk
         if sideOk then self.side=self.side+1 end
         if friendOk then self.friendly=self.friendly+1 end
-        if not record.sideOk and record.sideTries>=3 then self.failures=self.failures+1 end
+        -- Given up after three tries: counted once; the always-friendly check keeps trying every 10 s.
+        if not record.sideOk and record.sideTries>=3 then self.failures=self.failures+1;record.guardFailed=true end
         say('召唤物加入玩家一方 unit='..tostring(record.path)..' 第'..record.sideTries..'次 '..text..' 原本在仇恨玩家='..tostring(before)..removed)
+    end
+
+    -- Always friendly to the player: a companion (or adopted summon) whose relation either way, faction tag or
+    -- hatred has drifted is put back, with what it had become in the log. Up to v0.37.3 the no-aggro switch did
+    -- this to companions summoned while it was on; whatever else does it shows up here.
+    local function keepFriendly(record,actor,player)
+        local mine,theirs=U.field(actor,'Faction Component'),U.field(player,'Faction Component')
+        if not U.valid(mine) or not U.valid(theirs) then return end
+        local there,back=relation(mine,player),relation(theirs,actor)
+        local wanted,tag=faction(theirs),tagName(faction(mine))
+        local tagOk=wanted==nil or tag==tagName(wanted)
+        local hating=onHatredList(actor,player)
+        if there==FRIENDLY and back==FRIENDLY and tagOk and not hating then record.guardFailed=nil;return end
+        self.repairs=self.repairs+1
+        local sideOk,friendOk,text=joinSide(actor,player)
+        local removed=''
+        if hating then
+            local hm=U.field(actor,'BP_PBZHatredManagerComponent')
+            local ok=U.valid(hm) and pcall(function()hm:RemoveActorFromHatredList(player)end)
+            removed='；移出玩家仇恨 调用='..tostring(ok)
+        end
+        local fixed=sideOk and friendOk and not onHatredList(actor,player)
+        if not fixed and not record.guardFailed then self.failures=self.failures+1 end
+        record.guardFailed=not fixed or nil
+        if self.repairLines<REPAIR_LINES then
+            self.repairLines=self.repairLines+1
+            say('随从对玩家不再是友好，改回 unit='..tostring(record.path)..' 改回前 随从→玩家='..tostring(there)..' 玩家→随从='..tostring(back)
+                ..' 阵营='..tag..' 仇恨里有玩家='..tostring(hating)..'；'..text..removed..' 结果='..tostring(fixed))
+        end
     end
 
     -- Before ActivateAI: follow state, faction and relation. A step that does not read back is logged;
@@ -565,6 +599,18 @@ function Companion.new(options)
             end
             if record.adopted and not record.sideOk and (record.sideTries or 0)<3 and U.valid(player) then
                 adoptSide(record,member.actor,player)
+            elseif U.valid(player) and (not record.guardAt or now-record.guardAt>=(record.guardFailed and GUARD_RETRY_SECONDS or GUARD_SECONDS)) then
+                record.guardAt=now
+                keepFriendly(record,member.actor,player)
+                -- A rider's mount is a pawn of its own, still on the enemy's side unless it is put on the player's too.
+                local mount=U.field(U.field(member.actor,'BP_SGameDriverComponent'),'DrivingVehicle')
+                local mountKey=U.valid(mount) and U.key(mount)
+                if mountKey and mountKey~=key and mountKey~=U.key(player) then
+                    if record.mountKey~=mountKey then
+                        record.mountKey,record.mount=mountKey,{actor=mount,path='坐骑 '..className(mount)..'（随从 '..tostring(record.path)..'）'}
+                    end
+                    keepFriendly(record.mount,mount,player)
+                end
             end
             if U.valid(player) and (not record.assistAt or now-record.assistAt>=ASSIST_SECONDS) then
                 record.assistAt=now
@@ -629,7 +675,8 @@ function Companion.new(options)
     function self:silence()self.alive=false end
     function self:status()
         return {count=self.count,prepared=self.prepared,follow=self.follow,side=self.side,friendly=self.friendly,
-            assists=self.assists,failures=self.failures,moves=self.moves,teleports=self.teleports,gaits=self.gaits,message=self.message}
+            assists=self.assists,failures=self.failures,moves=self.moves,teleports=self.teleports,gaits=self.gaits,repairs=self.repairs,
+            message=self.message}
     end
     return self
 end

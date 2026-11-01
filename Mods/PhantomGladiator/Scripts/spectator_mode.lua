@@ -1,6 +1,8 @@
 -- 观战免仇恨请求。仅在游戏线程调用；不修改镜头、标签或NPC互相仇恨，不调用ForceOffCombat。
 -- 头文件：BP_SGameHatredManagerComponent.hpp:8-10,23；SGameCombatSystem.hpp:1783-1788。
 -- 原覆盖是否存在不可读，关闭仅验证有效关系；不会宣称恢复了未知覆盖结构。
+-- 玩家一方（options.isPlayerSide：随从、随从的召唤物、玩家阵营）不接管；之后才加入玩家一方的，关闭时设为友好，
+-- 不恢复它当敌人时的关系（v0.37.3 及以前：开着无仇恨召唤的随从，关闭后对玩家变回敌对）。
 local Spectator = {}
 
 local function limit(value, default, low, high)
@@ -24,8 +26,9 @@ function Spectator.new(options)
     local counters = { overrides_verified = 0, removed_player_entries = 0, readFailures = 0,
         effective_restored = 0, override_structure_unknown = 0, arena_preserved = 0, flag_writes_verified = 0,
         flag_restores_verified = 0, invalid_records_discarded = 0, destroying_records_discarded = 0,
-        destroying_actors_skipped = 0, npc_truncated = false }
+        destroying_actors_skipped = 0, npc_truncated = false, player_side_skipped = 0, player_side_released = 0 }
     local message, playerFlagReadback, currentPlayerKey = "未请求免仇恨", "unknown", nil
+    local sideNoted, sideNotedCount = {}, 0
     local instance = {}
 
     local function log(text)
@@ -213,6 +216,12 @@ function Spectator.new(options)
         if ok and (value == 0 or value == 1 or value == 2) then return value end
     end
 
+    local function player_side(npc)
+        if not options.isPlayerSide then return false end
+        local ok, side = pcall(options.isPlayerSide, npc)
+        return ok and side == true
+    end
+
     local function set_relation(npc, fc, player, value)
         if actor_valid(npc) ~= true or actor_valid(player) ~= true then return false, nil end
         if valid(fc) ~= true then return false, nil end
@@ -288,6 +297,14 @@ function Spectator.new(options)
         end
         local npcKey = key(npc)
         if not npcKey or npcKey == playerKey then return end
+        if player_side(npc) then
+            counters.player_side_skipped = counters.player_side_skipped + 1
+            if not sideNoted[npcKey] and sideNotedCount < 50 then
+                sideNoted[npcKey], sideNotedCount = true, sideNotedCount + 1
+                log("NPC=" .. npcKey .. " 是玩家一方（随从、其召唤物或玩家阵营）；不改关系、不记录旧关系")
+            end
+            return
+        end
         if options.releasePlayerTarget then
             local ok,released=pcall(options.releasePlayerTarget,npc,player)
             if not ok or released~=true then fail('玩家AI目标释放未确认') end
@@ -375,6 +392,13 @@ function Spectator.new(options)
                 discarded(relations, id, "invalid")
             elseif npcValid ~= true or playerValid ~= true or fcValid ~= true then
                 fail("关系恢复对象有效性未知，保留快照")
+            elseif player_side(record.npc) then
+                -- Joined the player's side after it was recorded (a companion's summon, or a companion recorded by
+                -- an older version while it was still the enemy): friendly, never the relation it had back then.
+                local ok, actual = set_relation(record.npc, record.fc, record.player, 0)
+                log("关闭：NPC=" .. record.npcKey .. " 已是玩家一方，设为友好，不恢复旧关系=" .. record.original .. "；读回=" .. tostring(actual))
+                if ok then relations[id] = nil; counters.player_side_released = counters.player_side_released + 1
+                else fail("玩家一方单位友好关系未读回，保留快照") end
             else
                 local okPolicy, desired = desired_relation(record.npc, record.player)
                 if not okPolicy then fail("arena关系策略不可读，未清覆盖")

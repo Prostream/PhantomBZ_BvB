@@ -40,22 +40,30 @@ local function harness(opts)
             if opts.noFolder and dir:find('/codex%-icons$') then return end
             h.files[dir..'/'..name]=PNG
         end})
+    h.opens=0
     local fs={open=function(path,mode)
         if mode=='rb' then
+            h.opens=h.opens+1
             local f=h.files[path];if not f then return nil end
             return {seek=function()return #f end,close=function()end}
+        end
+        if mode=='r' then
+            local f=h.files[path];if not f then return nil end
+            return {read=function()return f end,close=function()end}
         end
         local text=''
         return {write=function(self,s)text=text..s;return self end,close=function()h.files[path]=text end}
     end}
-    h.icons=Icons.new({log=function(s)h.logs[#h.logs+1]=s end,io=fs,path='rt',clock=function()return h.now end,
+    local options={log=function(s)h.logs[#h.logs+1]=s end,io=fs,path='rt',clock=function()return h.now end,
         ready=function()return h.ready end,getWorld=function()return h.world end,
         findAll=function(name)assert(name=='PBZCodexSubsystem');return {h.codex} end,
         staticFind=function(path)
             if path=='/Script/Engine.Default__KismetRenderingLibrary' then return h.krl end
             return h.loaded[path] and h.textures[path] or nil
         end,
-        loadAsset=function(path)h.loaded[path]=true end})
+        loadAsset=function(path)h.loaded[path]=true end}
+    h.icons=Icons.new(options)
+    function h:reload()self.icons=Icons.new(options)end
     function h:run(times)for _=1,times do self.icons:tick() end end
     function h:line(pattern)for _,s in ipairs(self.logs)do if s:find(pattern,1,true) then return s end end end
     return h
@@ -104,4 +112,18 @@ test('a world change stops the pass; a missing codex stops before saving',functi
     local g=harness();g.codex.GetOuter=function()return object({})end;g:run(1);g.now=10;g:run(1)
     assert(g:line('未导出：当前World的图鉴子系统没找到') and #g.exports==0)
 end)
-print('codex_icons: PASS ('..count..' timing, saving, index, fallback and stop regressions)')
+test('a later load takes the index on trust once one listed file checks out; without that file every one is checked',function()
+    local h=harness();h:run(1);h.now=10;h:run(3)
+    assert(h:line('完成：图标 3 张（本次新存 3'))
+    h:reload();h.opens,h.exports,h.logs=0,{},{}
+    h.now=20;h:run(1);h.now=30;h:run(1)
+    assert(h:line('图鉴 3 张图标，已有 3，待导出 0；其中按索引认定 3'),h.logs[1])
+    assert(h.opens==1 and #h.exports==0,'one file opened at load, nothing saved')
+    assert(h:line('对应单位 5 个，索引写入=true'))
+    -- The folder deleted (what the README suggests to export again): every file is checked and saved again.
+    for path in pairs(h.files)do if path:find('/codex-icons/',1,true) then h.files[path]=nil end end
+    h:reload();h.exports,h.logs={},{}
+    h.now=40;h:run(1);h.now=50;h:run(3)
+    assert(h:line('已有 0，待导出 3；其中按索引认定 0') and #h.exports==3)
+end)
+print('codex_icons: PASS ('..count..' timing, saving, index, fallback, stop and index-trust regressions)')

@@ -288,4 +288,36 @@ assert(f.player.BP_PBZHatredManagerComponent.CanBeHatredNow==true and files['mem
 rejectWrite=true;f.mode=Spectator.new(f.opts);f.mode:on();f.mode:tick()
 assert(f.fc.override==nil and f.player.BP_PBZHatredManagerComponent.CanBeHatredNow,
     'a failed journal write must gate mutations on retries as well as first attempts')
-print("spectator_mode: PASS (pending destruction, unknown state retention, reversible relations, immediate spawn, camera hold, persisted reload recovery)")
+-- v0.37.4: the player's side. A companion recorded while it was still the enemy (what v0.37.3 did when one was
+-- summoned with no-aggro on) is left alone once it has joined, and on exit is set friendly, not back to hostile.
+f=fixture()
+local side={}
+f.opts.isPlayerSide=function(n)return side[n]==true end
+f.mode=Spectator.new(f.opts);f.mode:on()
+local compFC,compHM=faction(2),hatred({},true)
+local companion=object({['Faction Component']=compFC,BP_PBZHatredManagerComponent=compHM})
+f.mode:applyTo(companion)
+assert(compFC.override==1,'recorded and made neutral while still the enemy')
+compFC.natural,compFC.override,side[companion]=0,0,true -- joins the player's side: the player's faction, friendly
+f.npcs[#f.npcs+1]=companion
+for _=1,3 do f.mode:tick() end
+assert(compFC.override==0,'the player\'s side is not made neutral again')
+local sideOff=f.mode:off()
+assert(sideOff.ok and sideOff.pending_relations==0 and compFC.override==0,'set friendly on exit, never back to hostile')
+assert(sideOff.player_side_released==1 and sideOff.player_side_skipped>=1 and f.fc.override==nil,'map NPCs are restored as before')
+local skippedLine,releasedLine
+for _,s in ipairs(f.logs)do
+    if s:find('是玩家一方（随从、其召唤物或玩家阵营）；不改关系',1,true) then skippedLine=true end
+    if s:find('已是玩家一方，设为友好，不恢复旧关系=2；读回=0',1,true) then releasedLine=true end
+end
+assert(skippedLine and releasedLine)
+-- Already on the player's side when no-aggro comes on: left alone entirely, hatred included.
+f=fixture();f.opts.isPlayerSide=function(n)return n==f.npc end;f.mode=Spectator.new(f.opts)
+local leftAlone=f.mode:on()
+assert(f.fc.override==nil and #f.hm.HatredList==2 and leftAlone.overrides_verified==0 and leftAlone.player_side_skipped>=1)
+assert(f.mode:off().ok and f.fc.override==nil)
+-- A check that errors counts as not the player's side: the NPC is handled as before.
+f=fixture();f.opts.isPlayerSide=function()error('unreadable')end;f.mode=Spectator.new(f.opts)
+assert(f.mode:on().overrides_verified==1 and f.fc.override==1)
+assert(f.mode:off().ok and f.fc.override==nil)
+print("spectator_mode: PASS (pending destruction, unknown state retention, reversible relations, immediate spawn, camera hold, persisted reload recovery, player's side left alone and never restored hostile)")

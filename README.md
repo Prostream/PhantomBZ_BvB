@@ -130,7 +130,7 @@ v0.36 之前，召唤出来的单位一律是 0 级，拿的是游戏里最低�
 ### 随从：让 BOSS 跟着你打
 召唤时阵营选「随从」，召出来的怪就成了你的随从，数量不限，召唤难度照样生效：
 - **跟着你走**：用的是游戏自带的助战 NPC 跟随行为。离你 10 米内走路，超过 10 米加速追上；超过 100 米，或者你在地图上快速移动后，会直接传送到你身边。正在和 BOSS 打的时候不会传送。
-- **帮你打**：和你同一阵营，互相不伤害。会主动去打附近的敌人，投技对地图上原有的怪也能用。随从自己召唤出来的单位也站在你这边。
+- **帮你打**：和你同一阵营，互相不伤害。会主动去打附近的敌人，投技对地图上原有的怪也能用。随从自己召唤出来的单位也站在你这边。随从对你始终友好：开着自由观战或无仇恨时召唤也一样；Mod 每秒核对一次随从（以及骑兵随从的坐骑）对你的关系，被改动会立刻改回。
 - **随时解散**：「停止并清理」不会带走随从，右侧随从区有单独的「解散随从」按钮。单位召唤键也可以直接召随从。
 
 目前的限制：随从加速追你时速度是对的，但很多怪仍然是走路的动作；换地图或读档后随从会消失，需要重新召唤；个别单位在复杂地形上可能找不到路，离远了会靠传送回来。
@@ -157,6 +157,7 @@ v0.36 之前，召唤出来的单位一律是 0 级，拿的是游戏里最低�
 - **浅色 / 深色主题**。
 - **操作记录**：每条操作都等游戏回执后才显示成功；没有回执就不算成功，也不会自动重发。
 - **诊断报告**：设置 → 高级里一键把日志打包到桌面，方便反馈问题。
+- **更新记录**：「检查更新」窗口里可以展开查看每个版本更新了什么，不联网也能看。
 
 ![深色主题](docs/images/arena-dark.png)
 
@@ -180,6 +181,7 @@ v0.36 之前，召唤出来的单位一律是 0 级，拿的是游戏里最低�
 - 趣味功能已实测：无限杀气一直锁满；自动格挡的每次按键游戏都收到了，轻攻击 9 次全是完美格挡；红光会自动按闪避。没有预告、或者预告来得太晚的攻击接不住。
 - v0.37 已实测：自定义数值的 223 项属性逐项写入、隔 0.5 秒读回并恢复，全部成功；伤害按 1 级基准值计算：v0.37.0 里血量上限填 9999999 的单位每一下仍掉上限的 13.6%（和原数值时的比例相同），攻击填 99999 伤害也不变；v0.37.1 连 1 级值一起改后，血量上限 9999999 的双镐疯妇被 10 只同级怪围攻 50 秒只掉约 0.5%，攻击 99999 一下打倒一只；50 只小怪打魔渊，蓝方开不倒下后一只未倒；交战计时与日志里的游戏时间一致，画面顶部计时读回已显示；一次召唤 50 只约卡 1.4 秒；不死不休开启后小怪脱战会在下一帧被拉回，魔渊持续掉血，但仍有少数小怪会短暂走开；自由观战空格、Ctrl 升降。
 - v0.37.3 已实测：图鉴头像 177 张全部导出，失败 0，用时约 57 秒；助手里 177 个单位全部显示头像，读不出来的图会退回名字首字。随从召唤物站到玩家一方（会召唤的怪当随从时，它召出的单位改成玩家阵营、不再仇恨玩家）只做了离线测试，还没实机验证。
+- v0.37.4 的随从修复没有实机验证：原因（开着自由观战或无仇恨时召唤的随从，关闭后对玩家变回敌对）是从代码里找到的，作者这边复现不了反馈里的情况。随从每秒的自检会在日志里记下被改成了什么；如果还遇到随从打到自己，请附上诊断报告。
 - 可以尝试、但不保证：图鉴里的其他单位都能召唤，但不一定都能正常对打。个别单位有天生机制（例如机灵鬼天生无敌/穿透），不会因为召唤而改变。
 - 已知情况：清理时如果还有单位活着，游戏端第一遍会留下一条恢复记录。助手会在同一次点击里自动补做第二遍；在游戏里直接按「停止并清理」快捷键时，目前需要按两次。
 
@@ -232,6 +234,12 @@ v0.36 之前，召唤出来的单位一律是 0 级，拿的是游戏里最低�
 <summary><b>遇到问题怎么反馈？</b></summary>
 
 到 <a href="https://github.com/LingYi-Liang/PhantomGladiator/issues">Issues</a> 描述你做了什么、看到了什么，并附上设置 → 高级 →「导出诊断报告」生成在桌面上的压缩包。
+</details>
+
+<details>
+<summary><b>随从的攻击打到了我</b></summary>
+
+v0.37.4 修复了一个原因：开着自由观战或无仇恨时召唤的随从，关闭后会对你变回敌对，范围攻击就会打到你。更新后，随从（以及骑兵随从的坐骑）每秒自检一次，对你不是友好就立刻改回。已经召出来的随从，更新后重新召唤一次最稳妥。如果还会被打到，请在设置 → 高级里生成诊断报告发给我们，并说明是哪只怪、哪一招。
 </details>
 
 <details>
@@ -307,7 +315,7 @@ python tools/package/build.py --deps <下载目录> --seed <游戏的 Runtime �
 2. Run `PhantomGladiator.exe`. The first-run guide finds the game in your Steam library and installs UE4SS and the mod in one click.
 3. Start the game, load a save, wait for the green "Connected" badge, then summon and fight.
 
-**Features**: 177 codex characters (75 bosses), shown with their codex portraits once the mod has saved them from your own copy of the game (the first time you enter a map, in about a minute; no game images ship with the app) · Blue / Red / No team (fight a boss yourself) · 1–100 per summon (1, 5, 10 or 50 in one click), no total cap · unit stats: the game's own, equal to the first unit (107 combat attributes), or custom — set any of the game's 223 attributes (max and current HP, shield, Sha-Chi, damage and resistance multipliers, status buildup, execution thresholds, movement speed, level…) for units you summon next, each one read back. Damage is worked out from level-1 base values (a hit takes attacker's level-1 attack × move multiplier ÷ target's level-1 HP of the target's max HP), so custom HP, Sha-Chi, attack and Sha-Chi damage move those by the same ratio and equal stats copies them · summon difficulty: new units play at Wayfarer, Pathbreaker, Hellwalker or Sixty-Six Days (stats and the AI's difficulty checks) while the game, map enemies and your save keep their own difficulty · summon level: new units spawn at the level of the map enemies around you, so the same unit is stronger in later areas (final stat = base × (1 + level curve) × difficulty modifier × unit-type modifier; for example 9,000 HP at level 1 becomes 109,881 at level 19) · fun features for your own character: infinite Sha-Chi, auto perfect deflect and auto-dodge for attacks that can't be deflected (experimental) · undying switch per side (takes hits, never goes down) and fights that time themselves, also shown at the top of the game screen on request · blue and red no longer drift out of a fight and walk home · free camera (Space/E up, Ctrl/Q down) and no-aggro spectating · all 8 function keys rebindable (none bound by default) · per-unit summon keys that remember their own team and amount · companions: summon any unit to follow you and fight on your side (no limit, teleports back from 100 m or after fast travel, grabs work on map enemies, their own summons join your side, dismiss any time) · rematch with the last lineup · six UI languages chosen from your time zone · light and dark themes · update checks with mirrors and SHA-256 verification.
+**Features**: 177 codex characters (75 bosses), shown with their codex portraits once the mod has saved them from your own copy of the game (the first time you enter a map, in about a minute; no game images ship with the app) · Blue / Red / No team (fight a boss yourself) · 1–100 per summon (1, 5, 10 or 50 in one click), no total cap · unit stats: the game's own, equal to the first unit (107 combat attributes), or custom — set any of the game's 223 attributes (max and current HP, shield, Sha-Chi, damage and resistance multipliers, status buildup, execution thresholds, movement speed, level…) for units you summon next, each one read back. Damage is worked out from level-1 base values (a hit takes attacker's level-1 attack × move multiplier ÷ target's level-1 HP of the target's max HP), so custom HP, Sha-Chi, attack and Sha-Chi damage move those by the same ratio and equal stats copies them · summon difficulty: new units play at Wayfarer, Pathbreaker, Hellwalker or Sixty-Six Days (stats and the AI's difficulty checks) while the game, map enemies and your save keep their own difficulty · summon level: new units spawn at the level of the map enemies around you, so the same unit is stronger in later areas (final stat = base × (1 + level curve) × difficulty modifier × unit-type modifier; for example 9,000 HP at level 1 becomes 109,881 at level 19) · fun features for your own character: infinite Sha-Chi, auto perfect deflect and auto-dodge for attacks that can't be deflected (experimental) · undying switch per side (takes hits, never goes down) and fights that time themselves, also shown at the top of the game screen on request · blue and red no longer drift out of a fight and walk home · free camera (Space/E up, Ctrl/Q down) and no-aggro spectating · all 8 function keys rebindable (none bound by default) · per-unit summon keys that remember their own team and amount · companions: summon any unit to follow you and fight on your side (no limit, teleports back from 100 m or after fast travel, grabs work on map enemies, their own summons and a rider's mount join your side, and they stay friendly even when summoned with the free camera or no aggro on, dismiss any time) · rematch with the last lineup · six UI languages chosen from your time zone · light and dark themes · update checks with mirrors, SHA-256 verification and a release history of every version.
 
 **Requirements**: Windows 10/11 64-bit, WebView2 runtime (built in), Steam version of *Phantom Blade Zero* build 26266538 (other builds untested).
 

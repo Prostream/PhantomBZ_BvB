@@ -1077,6 +1077,17 @@ body.has-dock.has-dialog .toasts { right: 20px; }
 .update-head h3 { font-size: 17px; color: var(--text); }
 .notes { margin: 6px 0 16px; padding: 12px 14px 12px 32px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); font-size: 13px; line-height: 1.7; }
 .section-label { font-size: 12px; font-weight: 650; color: var(--text-3); letter-spacing: .03em; margin: 4px 0 8px; }
+/* Release history in the update dialog (changelog.js), collapsed until opened. */
+.release-history { margin-top: 14px; padding-top: 6px; border-top: 1px solid var(--border); text-align: left; }
+.release-history > summary { display: flex; align-items: center; gap: 8px; padding: 8px 2px; cursor: pointer; list-style: none; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.release-history > summary::-webkit-details-marker { display: none; }
+.release-history > summary .muted { font-weight: 500; font-size: 12px; }
+.release-history > summary .release-chevron { margin-left: auto; transition: transform .15s ease; }
+.release-history[open] > summary .release-chevron { transform: rotate(180deg); }
+.release-list { max-height: 46vh; overflow: auto; padding: 2px 2px 4px; }
+.release-head { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 13px; color: var(--text); }
+.release-head .muted { font-size: 12px; }
+.release-item .notes { margin: 6px 0 8px; }
 .line-list { display: flex; flex-direction: column; gap: 6px; }
 .line { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 11px; border: 1px solid var(--border-strong); background: var(--surface); text-align: left; transition: all var(--t-fast); }
 .line:hover:not(:disabled) { border-color: var(--text-3); }

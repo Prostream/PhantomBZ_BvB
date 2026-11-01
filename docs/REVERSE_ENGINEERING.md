@@ -1150,3 +1150,36 @@ B站反馈：怪物当随从时，范围攻击会打到主角；不只 BOSS，�
 - 真实助手 0.37.18（22:13 打开）：后端 `/api/codex-icons` 返回 181 条，units.js 的 177 个单位全部有图；多出的 4 条是助手列表里没有的图鉴别名（EMei_Sword_JianZhen、MoTian_LongZhu_02/03/04）。`/codex-icons/<名>.png` 返回 image/png、max-age=86400。
 - 导出期间游戏是否卡顿，用户没有描述。随从召唤物换边（0.37.16）用户说不用测，未实机验证。
 - v0.37.3 发布：头像、随从召唤物换边、三个实验开关关闭。BUILD 保持 v0.37.3-icons。
+
+## 随从攻击打到玩家：无仇恨把随从改回敌对（v0.37.4，2026-11-02）
+
+玩家发视频反馈 v0.37.3 仍然被随从打到；用户自己复现不了。
+
+### 0.37.3 + 随从命中探查实机读回（23:31，鬼差 GuiChai_Yellow_MoDao 当随从打地图弓箭手）
+
+- 阵营读回：随从=Faction.Player，组件关系双向友好，阵营表友好。随从用过的 3 种攻击（GA_GuiChai_Yellow_MoDao_Skill_03 的挥砍）都是"只打敌人"、不能打同阵营。
+- 玩家掉血 7 次（多数 -118.1，另有 -147.6、-354.3），每次"此刻能打到玩家的攻击=无（命中可能已结束）"；同时出现地图弓箭手的箭（BulletData_ArrowMan_Bow_NormalArrow，只打敌人）。探针每秒扫一次，抓不到已结束的命中，不能归因；没有证据是随从打的。
+- 攻击扫描（attack-faction-scan.tsv，2482 条，只覆盖当时加载过的 14 族）里"只打友方/都打"的只有：B_Hun_KnockPush（怪物通用被动推挤，物理伤害 0，只打友方）、Bullet_SceneInteract（都打，场景交互）、玩家饰品毒雾。
+
+### 代码里找到的原因（未实机复现）
+
+- main.lua 的召唤激活先 `spectator:applyTo(actor)` 再 `companions:prepare`。开着无仇恨（自由观战自带）时，spectator 记下这只怪当时对玩家的关系（还是敌对=2），设单向中立；随后 prepare 把它改成玩家阵营、双向友好。
+- 关闭无仇恨时 restore_relations 先 ClearFactionRelationOverride，读回是友好（阵营表），和记录的 2 不同，就用覆盖强行设回 2。结果随从对玩家单向敌对：还跟随、还帮玩家打怪，但它的"只打敌人"攻击把玩家算作敌人。随从被接管的召唤物同理（spectator 在接管前就记下了它的敌对关系）。
+- 用户的复现都没有在自由观战里召唤，所以复现不了。
+
+### 头文件排查（子代理，CXXHeaderDump）
+
+- 骑兵和坐骑是两个 Pawn：`BP_RenewalNPC.BP_SGameDriverComponent.DrivingVehicle`（AActor*）是正在骑的坐骑，坐骑有自己的阵营组件，不在随从名单里。
+- 能在出生后改阵营的：`AIScript_OverrideFaction_C`（AI 脚本初始化时重设）、`AITask_OverrideFaction_C`（AI 配置任务、GE、触发体积）、GE_SummonFactionOverride（召唤物）。AI 在慢电脑上可能延后启动（UPBZFrameSlicedSpawnSubsystem::StartDeferredAI），初始化顺序不同。没有 ResetFaction/OnFactionChanged。
+- 子弹的阵营取自所属角色，由攻击模块缓存（UBulletAttackModule.SetAttackerFaction、IBulletAttackDataHolder::RuntimeUpdateFaction）；改阵营前已经存在的子弹可能保留旧阵营。"只打友方/都打"的攻击在随从变成玩家阵营后会包含玩家。
+- 不经过子弹阵营过滤的伤害：格挡/弹反路径（BPL_DeflectUtils Deal Deflect Damage、Play Knockback）、GE 伤害（SharedGE、UBulletEvent_GameplayEffect）、光环（UAuraGameplayEffectComponent）、径向推（UBulletEvent_RootmotionSource）。被敌人弹反的随从投射物可能改归敌人（UBulletEvent_DeflectSubBullet）。
+- 可能的归因挂钩：`Uwb_damagehud_C:EventReceived_*`（玩家受击方向提示 HUD，Payload 带 Instigator）、BP_PlayerDeflectPassive、UAttributeComponent::TakeDamage（原生，只能抓 BP/Lua 发起的调用）。以后要精确归因可以从受击 HUD 事件入手。
+- 备用手段（未试）：UBulletSubsystem::DestroyBulletsOfActor 清掉换边前的子弹；玩家 UAttributeComponent::RegisterPreTakeModification 按来源标签免伤；控制器 BlueprintSetGenericTeamId。
+
+### v0.37.4 修改（全部未实机验证，用户决定直接发布）
+
+- spectator_mode.lua：`options.isPlayerSide`（main.lua IsPlayerSide：随从名单半秒缓存 + 阵营标签等于玩家）为真的单位不接管、不记录；之后才加入玩家一方的记录，关闭时设为友好，不恢复旧关系。召唤随从时不再交给无仇恨，开着无仇恨时日志记下"召唤时对玩家关系"（旧版会记下的值）。
+- companion.lua：每秒核对随从双向关系、阵营标签、仇恨里有没有玩家，不对就 joinSide + 移出仇恨，日志"随从对玩家不再是友好，改回 … 改回前 …"（最多 40 行，status.repairs 计数）；改不动的每 10 秒再试，只记一次失败。骑兵随从的坐骑（DrivingVehicle）同样处理。
+- codex_icons.lua：0.37.3 冷启动时第一次检查 177 张图卡了 523 ms（Restart All Mods 后同一步只要 11 ms），推测是冷启动时逐个打开 PNG。现在先读 codex-icons.tsv，抽查一张存在就整份认定，不再逐个打开；抽查的那张不在才逐个检查。
+- 助手：检查更新窗口加"更新记录"（changelog.js，打包内置，0.30.0 起 11 个版本的六语说明，取自历次 release/latest.json），已是最新、联网失败、有新版本三种状态都能展开看。原有的 historyHTML 是"操作记录"抽屉，同名函数后定义的覆盖前面的，新函数改名 releaseHistoryHTML。
+- 测试：test_spectator_mode（玩家一方不接管、关闭设友好、检查出错按普通 NPC）、test_companion（恒等友好、改不动的退避、坐骑）、test_codex_icons（按索引认定、删文件夹后重新检查），Lua 54 项全部通过。BUILD=v0.37.4-friendly，随从命中探查关闭。

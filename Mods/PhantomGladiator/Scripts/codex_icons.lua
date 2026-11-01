@@ -6,6 +6,8 @@
 -- nothing in this game; REVERSE_ENGINEERING.md, 图鉴图片本地导出实验). Files go to Runtime/codex-icons/, or
 -- to Runtime/codex-icon-*.png if that folder cannot be written; Runtime/codex-icons.tsv maps every unit name,
 -- codex aliases included, to its file. Soft pointers are only read (GetObjectID/GetAssetPathName).
+-- A later load takes the files that index lists on trust once one of them checks out: opening every PNG at
+-- load stalled the game about 0.5 s on a cold start (v0.37.3).
 local U=require('ue_observe')
 local Icons={}
 local SIZE,PER_TICK,DELAY,FAIL_LINES=256,2,10,20
@@ -63,6 +65,19 @@ function Icons.new(options)
         local size=f:seek('end') or 0
         f:close()
         return size>0
+    end
+    -- Texture name -> file, from the index the last pass wrote.
+    local function readIndex()
+        local listed={}
+        local f=fs.open(root..'/codex-icons.tsv','r')
+        if not f then return listed end
+        local text=f:read('*a') or ''
+        f:close()
+        for file in text:gmatch('[^\t\r\n]*\t([^\r\n]+)')do
+            local name=file:match('([%w_]+)%.png$')
+            if name and not listed[name] then listed[name]=file end
+        end
+        return listed
     end
     local function subsystem(world)
         if not U.valid(world) then return nil end
@@ -162,16 +177,23 @@ function Icons.new(options)
             local found,why=collect(world)
             if not found then self.state='done';say('未导出：'..why);return end
             found.saved,found.queue,found.started,found.world={},{},now,world
+            local listed,sample,trusted=readIndex(),nil,0
+            for _,name in ipairs(found.order)do
+                if listed[name] then sample=listed[name];break end
+            end
+            if sample and not present(sample) then listed={} end
             for _,name in ipairs(found.order)do
                 local file=relative(name)
-                if present(file) or present('codex-icon-'..name..'.png') then
+                if listed[name] then
+                    found.saved[name]=listed[name];self.had=self.had+1;trusted=trusted+1
+                elseif present(file) or present('codex-icon-'..name..'.png') then
                     found.saved[name]=present(file) and file or ('codex-icon-'..name..'.png')
                     self.had=self.had+1
                 else found.queue[#found.queue+1]=name end
             end
             found.krl=staticFind('/Script/Engine.Default__KismetRenderingLibrary')
             self.job=found;self.state='saving'
-            say('图鉴 '..#found.order..' 张图标，已有 '..self.had..'，待导出 '..#found.queue)
+            say('图鉴 '..#found.order..' 张图标，已有 '..self.had..'，待导出 '..#found.queue..'；其中按索引认定 '..trusted)
             if #found.queue>0 and not U.valid(found.krl) then self.failed=#found.queue;found.queue={};say('渲染函数库不可用') end
         end
         local job=self.job

@@ -215,4 +215,54 @@ test('out of combat it engages the nearest live hostile it perceives near the pl
     here:tick();assert(#fought==1,'at most once a second')
     aiF.CurrentStateTag=tag('AI.State.Combat');now=2002;here:tick();assert(#fought==1,'not while already fighting')
 end)
-print('companion: PASS (official follow state, player faction, friendly relation, AI restart, gated assist, follow watch, roster, missing class, follow keys, walk/run, stuck fallback, teleport and boss fights)')
+test('a companion is always friendly: a relation, faction or hatred that drifts is put back and logged',function()
+    local g=unit(false)
+    local hm=g.BP_PBZHatredManagerComponent
+    hm.RemoveActorFromHatredList=function(self,target)
+        local kept={};for _,entry in ipairs(self.HatredList)do if entry~=target then kept[#kept+1]=entry end end
+        self.HatredList=kept
+    end
+    local list={{actor=g,team='companion'}}
+    local here=Companion.new({log=function(s)lines[#lines+1]=s end,getPlayer=function()return player end,members=function()return list end,
+        clock=function()return now end,getLocation=function(a)return locations[a] or {X=0,Y=0,Z=0} end})
+    player.BP_PBZHatredManagerComponent.HatredList={}
+    now=3000;here:prepare(g,'/Mobs/G.G_C');here:tick()
+    assert(here:status().repairs==0,'nothing to put back right after it joined')
+    -- What leaving the free camera did up to v0.37.3: hostile to the player, one way.
+    g['Faction Component'].relations[player]=2
+    now=3001;here:tick()
+    assert(g['Faction Component'].relations[player]==0 and here:status().repairs==1)
+    assert(all():find('随从对玩家不再是友好，改回 unit=/Mobs/G.G_C 改回前 随从→玩家=2 玩家→随从=0 阵营=Faction.Player 仇恨里有玩家=false',1,true))
+    assert(all():find('结果=true',1,true))
+    now=3002;here:tick();assert(here:status().repairs==1,'nothing more once it reads back friendly')
+    -- The faction tag and the hatred list are kept too.
+    g['Faction Component'].faction=tag('Faction.Monster');hm.HatredList={player}
+    now=3003;here:tick()
+    assert(g['Faction Component'].faction.TagName=='Faction.Player' and #hm.HatredList==0 and here:status().repairs==2)
+    assert(all():find('阵营=Faction.Monster 仇恨里有玩家=true',1,true) and all():find('移出玩家仇恨 调用=true',1,true))
+    -- A unit that refuses is counted as a failure and tried again every ten seconds, not every second.
+    local failures=here:status().failures
+    g['Faction Component'].SetFactionRelationOverride=function()end
+    g['Faction Component'].relations[player]=2
+    now=3004;here:tick();assert(here:status().repairs==3 and here:status().failures==failures+1)
+    now=3005;here:tick();assert(here:status().repairs==3,'waits after a failed repair')
+    now=3014;here:tick();assert(here:status().repairs==4)
+end)
+test("a rider companion's mount, a pawn of its own, is put on the player's side as well",function()
+    local r=unit(false)
+    local horse=unit(false)
+    local horseClass=object({},'BP_Monster_Horse_C');horse.GetClass=function()return horseClass end
+    r.BP_SGameDriverComponent=object({DrivingVehicle=horse},'BP_SGameDriverComponent')
+    local list={{actor=r,team='companion'}}
+    local here=Companion.new({log=function(s)lines[#lines+1]=s end,getPlayer=function()return player end,members=function()return list end,
+        clock=function()return now end,getLocation=function(a)return locations[a] or {X=0,Y=0,Z=0} end})
+    now=4000;here:prepare(r,'/Mobs/Rider.Rider_C');here:tick()
+    assert(horse['Faction Component'].faction.TagName=='Faction.Player')
+    assert(horse['Faction Component'].relations[player]==0 and player['Faction Component'].relations[horse]==0)
+    assert(all():find('改回 unit=坐骑 BP_Monster_Horse_C（随从 /Mobs/Rider.Rider_C） 改回前 随从→玩家=2',1,true))
+    local repairs=here:status().repairs
+    now=4001;here:tick();assert(here:status().repairs==repairs,'once friendly, left alone')
+    r.BP_SGameDriverComponent.DrivingVehicle=nil;now=4002;here:tick()
+    assert(here:status().repairs==repairs,'no mount, nothing to do')
+end)
+print('companion: PASS (official follow state, player faction, friendly relation, AI restart, gated assist, follow watch, roster, missing class, follow keys, walk/run, stuck fallback, teleport and boss fights, always friendly, mounts)')
