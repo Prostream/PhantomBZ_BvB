@@ -102,10 +102,32 @@ test('follow is watched for ninety seconds, then companions that left are forgot
     c:tick();assert(c:status().count==1)
     members={};c:tick();assert(c:status().count==0 and c:status().message=='随从已全部离场')
 end)
-test('an adopted companion is registered, and a missing follow class is reported without blocking',function()
+test('an adopted companion (its summoner\'s summon) joins the player\'s side and stops hating the player',function()
     local child=unit(false)
+    local hm=child.BP_PBZHatredManagerComponent
+    hm.HatredList={player}
+    hm.RemoveActorFromHatredList=function(self,target)
+        local kept={};for _,entry in ipairs(self.HatredList)do if entry~=target then kept[#kept+1]=entry end end
+        self.HatredList=kept
+    end
     members={{actor=child,team='companion',class_path='/Mobs/Child.Child_C'}};c:tick()
     assert(all():find('登记随从（未经召唤准备',1,true))
+    assert(child['Faction Component'].faction.TagName=='Faction.Player')
+    assert(child['Faction Component'].relations[player]==0 and player['Faction Component'].relations[child]==0)
+    for _,entry in ipairs(hm.HatredList)do assert(entry~=player,'the player is off its hatred list (the assist may add the player\'s enemies)')end
+    assert(all():find('召唤物加入玩家一方 unit=/Mobs/Child.Child_C 第1次 阵营 Faction.Monster -> Faction.Player 写入=true 读回=true',1,true))
+    assert(all():find('原本在仇恨玩家=true 移出玩家仇恨 调用=true 读回仍在=false',1,true))
+    local tries=select(2,all():gsub('召唤物加入玩家一方',''))
+    now=now+1;c:tick();assert(select(2,all():gsub('召唤物加入玩家一方',''))==tries,'done once it reads back')
+    -- A summon that will not change sides is tried three times, then counted as a failure.
+    local stubborn=unit(false)
+    stubborn['Faction Component'].SetFaction=function()error('refused')end
+    local failures=c:status().failures
+    members={{actor=stubborn,team='companion',class_path='/Mobs/Stubborn.Stubborn_C'}}
+    for _=1,5 do now=now+1;c:tick() end
+    assert(select(2,all():gsub('召唤物加入玩家一方 unit=/Mobs/Stubborn',''))==3 and c:status().failures==failures+1)
+end)
+test('a missing follow class is reported without blocking',function()
     local d=unit(false);loaded=false;LoadAsset=function()end
     local fresh=Companion.new({log=function(s)lines[#lines+1]=s end,getPlayer=function()return player end})
     local r=fresh:prepare(d,'/Mobs/D.D_C')

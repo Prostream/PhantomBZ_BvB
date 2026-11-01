@@ -1063,3 +1063,90 @@ v0.37.2 实机（run-20261101-125613.log）：50 只双锄女暴徒召唤用时�
 - 结论：伤害读的是属性集里的 Health_Max_Lv1（受击方）和 Attack_Lv1（攻击方），不是角色配置里的基础值；写这两个属性就能改实际伤害。杀气相关的 Shachi_Max_Lv1、ShachiAttack_Lv1 按同理联动，没有单独量化。
 - 统一成第一只复制 1 级值，走的是同一套写入和读回，只做了离线测试；用户这轮没测统一模式。
 - v0.37.1 发布：README 改正"数值统一读回一致"的说法，写明伤害公式和 1 级值联动。
+
+## v0.37.3（测试版 0.37.15）：随从范围攻击打到玩家——只读探查（2026-11-01）
+
+B站反馈：怪物当随从时，范围攻击会打到主角；不只 BOSS，攻击范围大的杂兵随从的普通攻击也会。v0.35.0 实机只确认过魔渊随从和玩家"互相不造成伤害"，当时没专门看范围攻击，日志也不记录玩家血量，所以现有记录无法确认或排除。
+
+头文件依据：
+- 命中由每发子弹自己判断，不是看两个角色的关系。子弹基类 `UBulletObjectBase`（扫掠 `PBZ_SweepTraceBullet`、范围 `PBZ_OverlapBullet`）和 `ABulletActorBase`（特效 `PBZ_ParticleBullet`、飞行物 `PBZ_ProjectileBullet`、发射器 `PBZ_ProjectileEmitter`）都有 `BulletOwnerAvatar`、`BulletData`、`BulletStatus`（Running=2）、`Modules`。
+- 伤害数据 `UPBZ_DamageBulletDataBase` 带 `FactionTarget`（`EBulletFactionTarget`：Enemy=0/Ally=1/Both=2/None=3）和 `FactionCanTargetSelf`；攻击模块 `UBulletAttackModule` 带 `TargetRequiredTags`、`TargetIgnoredTags`、`FactionCalculator`（`UFactionRelationCalculator_Map`：按阵营标签查关系表）、`SetAttackerFaction`、`IsValidTarget`。
+- 随从只改了自己 Faction Component 上的阵营标签（Faction.Enemy→Faction.Player）和对玩家的双向友好覆盖（`SetFactionRelationOverride`），而且是在 FinishSpawn 之后、激活前改的。
+- 旧探查（10-30/31 的 attack_profile）读过 1547 次小怪扫掠子弹：FactionTarget 0 有 1348 次、1 有 125 次、3 有 74 次，从没出现 2；FactionCanTargetSelf 全为 false。没读过范围子弹。
+
+三种可能：①范围攻击的 FactionTarget=Both；②FactionCanTargetSelf=true，随从和玩家同为 Faction.Player，于是算作同阵营可打；③子弹记下的攻击方阵营还是随从原来的 Faction.Enemy（阵营在出生后才改），或不看单位的关系覆盖。
+
+`companion_hit_probe.lua`（`Config.EnableCompanionHitProbe`，测试版开，只读）：
+- 随从在场时每秒用 FindAllOf 扫 BulletObjectBase/BulletActorBase（每类最多 2500 个，轮换起点；逐个只做 IsValid 和读 owner，属于随从的才做完整检查），找出随从拥有的运行中子弹。
+- 每种攻击（所属类 + 子弹数据）记一行：子弹类型、招式（BulletSourceAbility 的类）、数据名、打谁、能否打同阵营、必需/忽略标签、阵营计算器，以及 `IsValidTarget(玩家)` 和 `IsValidTarget(随从当前仇恨目标)`。玩家答案每 10 秒重问一次，变了再记。
+- 每个随从记一次阵营：随从和玩家的阵营标签、组件关系（双向）、阵营表里两个标签的关系（`FactionSubSystem.GetFactionRelationFromTags`，不含单位覆盖）。
+- 玩家每次掉血：立刻扫一遍所有拥有者的运行中子弹，列出此刻 `IsValidTarget(玩家)=true` 的攻击（随从的标"随从"），附最近随从和距离。
+- 每 10 秒汇总：随从活动攻击次数、随从用过几种攻击、能打到玩家的有哪几种、玩家掉血次数和总量、扫描规模。
+- 离线：test_companion_hit_probe 4 项（描述一次、两个目标答案、掉血归因含其他单位、汇总只算随从、无随从不动作、全程零写入）；Lua 50 个测试文件、启动测试两种模式、后端 63 项通过。BUILD=v0.37.3-hitprobe。
+
+待实机：用户召一只范围攻击多的随从，在地图怪附近打一会儿，看日志里哪些随从攻击"能打玩家=true"、打谁和同阵营各是什么，再按结果修。
+
+### 0.37.15 实机读回（20:53 起，阿花随从，地图怪 PengMeng/HuaShan）
+
+- 用户："我这里测试没这个问题"。阵营读回：随从阵营=Faction.Player，玩家阵营=Faction.Player，组件关系双向友好，阵营表（不含覆盖）也是友好。
+- 阿花 20 种伤害类攻击（挥砍、范围 `PBZ_OverlapBullet_GuiTouBlade_Explosion_C`、特效 `PBZ_ParticleBullet`、追踪花弹等）全部是"只打敌人"、不能打同阵营。`IsValidTarget(玩家)` 都是 false，`IsValidTarget(当前敌人)` 基本是 true（`BD_AHua_Flower_Explode` 对当时的目标是 false）。花弹数据 `BD_AHua_Flower_Base(_Big)` 没有 FactionCanTargetSelf 字段（读成 TrivialObject）。所以阿花的伤害攻击按游戏判定打不到玩家，和用户画面一致。
+- 唯一"能打玩家=true"的随从攻击：`B_Hun_KnockPush`（挥砍型子弹，招式 `GA_MobUtilitiesPassive_C`，怪物通用被动），打谁="只打友方"，对当前敌人为 false。阵营计算器 `PBZ_FactionCalculator_Compiled`。约 4 分钟出现 13 次。它在正常游戏里只作用于怪的友军（别的怪）；怪当了随从后，友军包括玩家。是否带伤害、推开幅度多大，没有读到。
+- 玩家掉血：303.7（20:56:36，当时能打玩家的活动攻击只有地图怪 PengMeng 的 `BD_GA_PengMeng_Special_05_01`）；253.1（20:56:52，随从 7.3 m，查到时攻击已结束）；20:57:59–20:58:04 连续 -0.8/-1.2 共约 35（随从走远到 25 m 仍在掉，像持续伤害，来源不明）。没有一次能确定是随从造成的。
+
+结论（可解释评论里的情况的两条）：
+1. 攻击按"打谁"设置判定，不看两个角色是不是朋友。"只打友方""都打"或允许打同阵营的攻击，在正常游戏里只会碰到怪自己的友军；怪变成随从后，玩家就是它的友军，这类攻击会落到玩家身上。阿花只有通用被动的推挤是这种；别的怪是否有带伤害的这类攻击，要看各自数据，评论者的怪可能有。
+2. 代码缺口：随从自己召出的召唤物会被接管进随从队（arena adoptSummon → team=companion），但 companion.lua 只登记（"未经召唤准备"），不改阵营、不设友好，它们仍是玩家的敌人，会直接攻击玩家。日志里从没出现过随从召唤物（用户没用过会召唤的随从），未实测。
+
+### v0.37.3（测试版 0.37.16）：随从召唤物换边 + 攻击数据全面扫描
+
+- 召唤物换边（companion.lua）：prepare 里的"阵营+双向友好"抽成 joinSide()。随从队里没经过召唤准备的单位（arena adoptSummon 接管的随从召唤物）在 tick 里执行同一步，读回成功为止，最多3次（3次都失败计 failures）。之后读它的 HatredList，玩家在里面就 `RemoveActorFromHatredList(玩家)` 并读回。日志："召唤物加入玩家一方 unit=… 第N次 阵营 A -> B 写入/读回；友好关系…；原本在仇恨玩家=… 移出玩家仇恨 调用=… 读回仍在=…"。test_companion 新增：换阵营、双向友好、移出玩家仇恨（协助仍可同步玩家的敌人）、读回后不再重复、改不动时3次后记失败。
+- 过去日志里会召唤的 BOSS（arena 接管记录）：苦叶寺：碧海大师残躯（BP_Monster_CanQu_BiHai，召 Stand/火铜人/火铁人/火金人 ForBiHai）、沐小葵：铁玉女王（MuXiaoKui_P2，召 Yuu_Stand/TieGui_Stand）、鬼差队长：火流星（GuiChai_Red，召 GuiChai_Black_TwinBlade_Summon_01/02）。这些都没当过随从。
+- `attack_faction_scan.lua`（`Config.EnableAttackFactionScan`，测试版开，只读）：游戏就绪 15 s 后每分钟一轮，FindAllOf("BulletDataBase") 列出已加载的子弹数据，每 tick 读 400 个；本次加载内没见过的才读：FactionTarget、FactionCanTargetSelf、DamageData（TMap 标签=数值）、AttackType、DamageCause、类名、族（路径里 /Mobs/ 后一段）。每条追加到 `Runtime/attack-faction-scan.tsv`（首行表头），"只打友方/都打/能打同阵营"的另记日志（最多150行）；每轮有新增时汇总各类数量和"能打到友方且带伤害"的个数。test_attack_faction_scan 3项（等待就绪和首轮延迟、分块读取、记录和表格、只加新增、无新增不出声、零写入）。
+- 全部 Lua 51 个测试文件、启动两种模式、后端 63 项通过。BUILD=v0.37.3-summons。
+
+## 图鉴图片本地导出实验（测试版 0.37.17，2026-11-01）
+
+用户问助手卡片为什么只有一个字。官方图鉴每条 `FCodexEnemyRow`（ProjectPBZ.hpp）都有三张图的软引用：`WhiteIcon`（白色图标）、`HighPrecisionTexture`（高清图）、`HalfBodyTexture`（半身像），另有揭示后的 `Revealed*` 一套。助手从没显示过怪物图片：图是游戏美术资源，按 DESIGN.md 只能在玩家本机导出、不能进安装包或仓库，所以卡片一直用名字首字。
+
+游戏里有现成的存图函数：`ImageWriteBlueprintLibrary.ExportToDisk(Texture, Filename, FImageWriteOptions)`（EDesiredImageFormat PNG=0）、`KismetRenderingLibrary.ExportTexture2D/ExportRenderTarget`，以及画布函数 `CreateRenderTarget2D`（RTF_RGBA8=2）、`BeginDrawCanvasToRenderTarget`、`Canvas.K2_DrawTexture`、`EndDrawCanvasToRenderTarget`、`ReleaseRenderTarget2D`。
+
+`codex_art_probe.lua`（`Config.EnableCodexArtProbe`，测试版开）：游戏就绪 20 s 后运行一次。取当前 World 的 PBZCodexSubsystem，调用 GetAllEnemyCodexEntries；软引用只读 GetObjectID/GetAssetPathName。优先挑阿花、魔渊、双镐疯妇、暴徒、鬼差、碧海残躯，凑满 6 只。每张图先 StaticFindObject，找不到再 LoadAsset，然后：
+- A：直接 ExportToDisk 存 PNG；
+- A 没写出文件时走 B：画到不超过 1024 的渲染目标上再导出，用完释放。
+
+文件 `Runtime/codex-art-<序号>-<类>-<种类>[-drawn].png`，清单 `codex-art-probe.tsv`，日志 `[CodexArt]` 记尺寸、调用结果、读回字节数。离线测试 test_codex_art_probe 3 项；Lua 52 个测试文件全部通过。BUILD=v0.37.3-art。待实机：两种导法哪种能写出文件，以及三种图分别是什么样。
+
+### 0.37.17 实机读回（21:36）与改用 ExportRenderTarget
+
+- 图鉴 177 条有图。六只（新娘阿花、金面具黑衣人〔MoTian 关键词匹配到的 MoTian_LongZhu_01〕、双镐疯妇、暴徒、鬼差火枪骑兵、碧海大师残躯）的三张图全部加载成功。贴图都在 `/Game/PBZContent/UI/InGame/Literature/Gallery/`：白色图标 `T_<类>_w` 256×256，高清图 `T_<类>` 2048×2048，半身像 `T_<类>_H` 2048×2048（双镐疯妇 2200×2048）。
+- 失败：ImageWriteBlueprintLibrary.ExportToDisk 两种用法都没写出任何文件——直接导贴图，以及画到 RTF_RGBA8 渲染目标后再导。Lua 调用都返回成功，UE4SS 日志没有错误，整个游戏目录里也找不到输出文件。画布那一步（Begin/K2_DrawTexture/End）调用成功。原因未确定：可能是 FImageWriteOptions 结构参数（含委托字段）没被正确转换，也可能是 ExportToDisk 在这个构建里对贴图不可用。
+- 改用 `KismetRenderingLibrary.ExportRenderTarget(World, RT, 目录, 文件名)`：只有字符串参数，按引擎实现，RGBA8 目标会同步写 PNG。目标格式改用 RTF_RGBA8_SRGB，第一只另外试线性 RGBA8 和 `ExportTexture2D`（老引擎写 HDR）。每个文件读回前几个字节判断 PNG/HDR/EXR。BUILD 不变（v0.37.3-art），只换脚本。
+
+### 实机读回（21:42）：画布 + ExportRenderTarget 可以本地导出图鉴图片
+
+- 18 张全部写出 PNG（8 位 RGBA，CRC 正确，有 IEND），每张约 0.1–1 MB。IEND 后有填充字节（文件大小是 4096 的倍数），解码器会忽略。`ExportTexture2D` 写出 0 字节，排除。
+- 颜色：sRGB 目标的阿花图标平均亮度 51，线性目标只有 13，所以用 RTF_RGBA8_SRGB。透明度正常：背景 alpha=0，人物不透明，没有反转。
+- 三种图的构图：
+  - 白色图标：其实是头肩像，已按头像构好图（阿花 256 图内人物范围 28,15–222,255，底部渐隐）；
+  - 高清图：全身站姿，在 1024 图里只占中间一小块（阿花 203,322–671,784）；
+  - 半身像：半身大特写，偏下偏左（阿花 54,305–662,1023），用作卡片要按人物范围裁切。
+- 用 scratchpad 里的 art_sheet.py 按助手卡片的 3:2 区域和 64 px 方形头像各拼了一版发给用户比较。图是用户本机导出的游戏美术，只发给用户本人看，不进仓库、不发布。
+- 选匹配用的 "MoTian" 碰上的是"金面具黑衣人"（MoTian_LongZhu_01），不是魔渊本体。
+
+## 卡片头像：图鉴白色图标（测试版 0.37.18，2026-11-01）
+
+用户选白色图标。图仍只在玩家本机导出，安装包和仓库里没有图（0.37.18 包内无任何游戏图片，已查）。
+
+- `codex_icons.lua`（`Config.EnableCodexIcons`，默认开）：每次加载 Mod 后、游戏就绪 10 s 运行一遍。取当前 World 的 PBZCodexSubsystem，GetAllEnemyCodexEntries；每条只读 `WhiteIcon` 的软引用路径，`EnemyClass` 和 `AliasEnemyClasses` 的类短名（助手的单位 id）都对到这张图，同一张图可对应多个单位。
+- `Runtime/codex-icons/<贴图名>.png` 已有（文件大小 > 0）就跳过；其余每个支持 tick 存 2 张：一个 256 的 RTF_RGBA8_SRGB 渲染目标反复用，ClearRenderTarget2D 后用画布按比例底对齐画（256 图正好画满），ExportRenderTarget 写文件，读回文件大小 > 0 才算成功。第一张写不进 codex-icons 文件夹时改存 Runtime 根目录 `codex-icon-<贴图名>.png`。做完释放渲染目标，写 `Runtime/codex-icons.tsv`（unit、file 两列），日志 `[CodexIcons]` 汇总：图标数、本次新存、已有、失败、对应单位数、索引是否写入、用时。World 变了就停，下次加载接着补。
+- 后端：`GET /api/codex-icons` 读索引，只列文件确实存在的单位；`GET /codex-icons/<贴图名>.png` 只接受 `T_[A-Za-z0-9_]+` 的名字，只从 Runtime 里找文件。
+- 助手：单位卡片、选中栏、数值基准、快捷键列表的头像在有图时显示图，没有图或加载失败时退回名字首字。卡片里整张图底对齐；方形小头像裁上半部（脸）。图标列表在还没有图时每 15 s 问一次后端，有图后每分钟一次，所以游戏导出期间卡片会陆续出现图。
+- 离线：test_codex_icons 4 项（等待、两张一批、sRGB、索引含别名、已有的不重存、文件夹写不进改存根目录、World 变化停止、没找到图鉴子系统不导出）；后端 64 项；Lua 53 个测试文件（启动两种模式）全部通过。原型预览里注入 6 张已导出的图：卡片和选中栏显示正常；故意给一个不存在的地址，图被移除、首字恢复。BUILD=v0.37.3-icons，同时关掉了三个实验开关（EnableCompanionHitProbe、EnableAttackFactionScan、EnableCodexArtProbe）。
+
+### 0.37.18 实机读回（22:11）与 v0.37.3 发布
+
+- 22:11:04 加载 v0.37.3-icons，11 s 后 `图鉴 177 张图标，已有 0，待导出 177`；22:12:12 `完成：图标 177 张（本次新存 177、已有 0、失败 0），对应单位 181 个，索引写入=true；用时 56.9 秒`。这段日志没有错误。codex-icons 文件夹里 177 个文件，没有用到 Runtime 根目录的兜底。
+- 抽看最后导出的两张（ZuoShang_P2、MengHua）：都是单张人物、透明底，没有叠上前一张，复用渲染目标前的 ClearRenderTarget2D 生效。
+- 真实助手 0.37.18（22:13 打开）：后端 `/api/codex-icons` 返回 181 条，units.js 的 177 个单位全部有图；多出的 4 条是助手列表里没有的图鉴别名（EMei_Sword_JianZhen、MoTian_LongZhu_02/03/04）。`/codex-icons/<名>.png` 返回 image/png、max-age=86400。
+- 导出期间游戏是否卡顿，用户没有描述。随从召唤物换边（0.37.16）用户说不用测，未实机验证。
+- v0.37.3 发布：头像、随从召唤物换边、三个实验开关关闭。BUILD 保持 v0.37.3-icons。

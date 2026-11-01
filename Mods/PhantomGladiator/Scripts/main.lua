@@ -43,6 +43,10 @@ local FunFeatures=require('fun_features')
 local SpawnLevel=require('spawn_level')
 local StatFormulaProbe=require('stat_formula_probe')
 local StatFieldProbe=require('stat_field_probe')
+local CompanionHitProbe=require('companion_hit_probe')
+local AttackFactionScan=require('attack_faction_scan')
+local CodexArtProbe=require('codex_art_probe')
+local CodexIcons=require('codex_icons')
 local ImmortalTeams=require('immortal_teams')
 local BattleClockHUD=require('battle_clock_hud')
 local CombatLock=require('combat_lock')
@@ -68,7 +72,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.37.1-lv1"
+local BUILD = "v0.37.3-icons"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -115,6 +119,10 @@ local spawnDifficulty
 local spawnLevel
 local statProbe
 local fieldProbe
+local companionHitProbe
+local attackScan
+local codexArt
+local codexIcons
 local companions
 local aiDifficulty
 local funFeatures
@@ -1388,6 +1396,18 @@ function arenaSupport:discover()
 end
 companions=Companion.new({log=log,getPlayer=GetPlayerPawn,getWorld=UEHelpers.GetWorld,aiLib=GetAILib,getLocation=GetLocation,hp=GetHP,
     members=ArenaMembers})
+-- Read-only: which of a companion's attacks may hit the player, and why (companion_hit_probe.lua).
+companionHitProbe=Config.EnableCompanionHitProbe and CompanionHitProbe.new({log=log,getPlayer=GetPlayerPawn,hp=GetHP,location=GetLocation,
+    members=ArenaMembers,factionSubsystem=function()local ok,found=pcall(FindFirstOf,'FactionSubSystem');return ok and found or nil end}) or nil
+-- Read-only: every loaded attack that can reach the attacker's own allies (attack_faction_scan.lua).
+attackScan=Config.EnableAttackFactionScan and AttackFactionScan.new({log=log,path=Config.RuntimePath,
+    ready=function()return runtimeSession:status().game_ready==true end}) or nil
+-- Experiment: save a few codex pictures as PNG on this PC (codex_art_probe.lua).
+codexArt=Config.EnableCodexArtProbe and CodexArtProbe.new({log=log,path=Config.RuntimePath,getWorld=UEHelpers.GetWorld,
+    ready=function()return runtimeSession:status().game_ready==true end}) or nil
+-- The codex busts for the app's unit cards, saved on this PC from the player's own game (codex_icons.lua).
+codexIcons=Config.EnableCodexIcons and CodexIcons.new({log=log,path=Config.RuntimePath,getWorld=UEHelpers.GetWorld,
+    ready=function()return runtimeSession:status().game_ready==true end}) or nil
 -- Units summoned at a chosen difficulty also get that difficulty when their AI asks for it.
 aiDifficulty=AIDifficulty.new({log=log,getWorld=UEHelpers.GetWorld,
     ready=function()return runtimeSession:status().game_ready==true end,members=ArenaMembers,
@@ -1427,6 +1447,10 @@ local function supportSteps(self)
     step('freeCamera',function()freeCamera:recover()end)
     if grabStudy then step('grabStudy',function()grabStudy:tick()end) end
     if fieldProbe then step('fieldProbe',function()fieldProbe:tick()end) end
+    if companionHitProbe then step('companionHit',function()companionHitProbe:tick()end) end
+    if attackScan then step('attackScan',function()attackScan:tick()end) end
+    if codexArt then step('codexArt',function()codexArt:tick()end) end
+    if codexIcons then step('codexIcons',function()codexIcons:tick()end) end
     step('summonLinks',function()self:discover()end)
     -- Before reinforcements: a unit joining an immortal team is locked before it is sent at the enemy.
     step('immortal',function()immortalTeams:tick()end)

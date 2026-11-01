@@ -5,6 +5,8 @@
 --           put into the unit's SGameAIComponent.SpawnInfo before its AI starts, the way level spawners
 --           set up the story's helpers;
 --   side    the player's faction tag on the unit's Faction Component, plus a friendly relation both ways;
+--           a companion's own summons get the same once they are adopted into its team, and lose the player
+--           from their hatred list;
 --   assist  BP_SGameAIFunctionLibrary.SyncHatredList(player -> companion), the call summons use to share
 --           their summoner's targets, only while the player has enemies on its own hatred list.
 -- Every write is read back and logged. Nothing shared is changed: class defaults, assets and the player
@@ -118,6 +120,52 @@ function Companion.new(options)
     end
     local function idleData(ai)return U.struct(U.field(ai,'SpawnInfo'),'IdleStateData')end
 
+    -- The player's side: faction tag, then a friendly relation both ways. Returns both readbacks and the log text.
+    local function joinSide(actor,player)
+        local parts={}
+        local mine,theirs=U.field(actor,'Faction Component'),U.field(player,'Faction Component')
+        local sideOk,friendOk=false,false
+        if not U.valid(mine) or not U.valid(theirs) then parts[#parts+1]='阵营=阵营组件不可用'
+        else
+            local wanted,before=faction(theirs),faction(mine)
+            if wanted~=nil then
+                local wrote=pcall(function()mine:SetFaction(wanted)end)
+                sideOk=tagName(faction(mine))==tagName(wanted)
+                parts[#parts+1]='阵营 '..tagName(before)..' -> '..tagName(wanted)..' 写入='..tostring(wrote)..' 读回='..tostring(sideOk)
+            else parts[#parts+1]='阵营=玩家阵营不可读' end
+            local wrote=pcall(function()mine:SetFactionRelationOverride(player,FRIENDLY,true)end)
+            local there,back=relation(mine,player),relation(theirs,actor)
+            friendOk=there==FRIENDLY and back==FRIENDLY
+            parts[#parts+1]='友好关系写入='..tostring(wrote)..' 随从→玩家='..tostring(there)..' 玩家→随从='..tostring(back)
+        end
+        return sideOk,friendOk,table.concat(parts,'；')
+    end
+    local function onHatredList(actor,target)
+        local key=U.key(target)
+        for _,entry in ipairs(U.array(U.field(U.field(actor,'BP_PBZHatredManagerComponent'),'HatredList')) or {})do
+            if U.key(entry)==key then return true end
+        end
+        return false
+    end
+    -- A summon adopted into a companion's team was spawned by the game on its summoner's side, which is the
+    -- enemy's: it may already be after the player.
+    local function adoptSide(record,actor,player)
+        record.sideTries=(record.sideTries or 0)+1
+        local sideOk,friendOk,text=joinSide(actor,player)
+        local hm=U.field(actor,'BP_PBZHatredManagerComponent')
+        local before=onHatredList(actor,player)
+        local removed=''
+        if before and U.valid(hm) then
+            local ok=pcall(function()hm:RemoveActorFromHatredList(player)end)
+            removed=' 移出玩家仇恨 调用='..tostring(ok)..' 读回仍在='..tostring(onHatredList(actor,player))
+        end
+        record.sideOk=sideOk and friendOk
+        if sideOk then self.side=self.side+1 end
+        if friendOk then self.friendly=self.friendly+1 end
+        if not record.sideOk and record.sideTries>=3 then self.failures=self.failures+1 end
+        say('召唤物加入玩家一方 unit='..tostring(record.path)..' 第'..record.sideTries..'次 '..text..' 原本在仇恨玩家='..tostring(before)..removed)
+    end
+
     -- Before ActivateAI: follow state, faction and relation. A step that does not read back is logged;
     -- the unit is still summoned and stays the player's companion on the steps that did.
     function self:prepare(actor,unitPath)
@@ -152,21 +200,8 @@ function Companion.new(options)
             end
         end
         -- 2. the player's side: faction tag, then a friendly relation both ways
-        local mine,theirs=U.field(actor,'Faction Component'),U.field(player,'Faction Component')
-        local sideOk,friendOk=false,false
-        if not U.valid(mine) or not U.valid(theirs) then parts[#parts+1]='阵营=阵营组件不可用'
-        else
-            local wanted,before=faction(theirs),faction(mine)
-            if wanted~=nil then
-                local wrote=pcall(function()mine:SetFaction(wanted)end)
-                sideOk=tagName(faction(mine))==tagName(wanted)
-                parts[#parts+1]='阵营 '..tagName(before)..' -> '..tagName(wanted)..' 写入='..tostring(wrote)..' 读回='..tostring(sideOk)
-            else parts[#parts+1]='阵营=玩家阵营不可读' end
-            local wrote=pcall(function()mine:SetFactionRelationOverride(player,FRIENDLY,true)end)
-            local there,back=relation(mine,player),relation(theirs,actor)
-            friendOk=there==FRIENDLY and back==FRIENDLY
-            parts[#parts+1]='友好关系写入='..tostring(wrote)..' 随从→玩家='..tostring(there)..' 玩家→随从='..tostring(back)
-        end
+        local sideOk,friendOk,sideText=joinSide(actor,player)
+        parts[#parts+1]=sideText
         if followOk then self.follow=self.follow+1 end
         if sideOk then self.side=self.side+1 end
         if friendOk then self.friendly=self.friendly+1 end
@@ -527,6 +562,9 @@ function Companion.new(options)
                 record={actor=member.actor,path=member.class_path,at=now,adopted=true}
                 units[key]=record
                 say('登记随从（未经召唤准备，例如随从自己的召唤物） unit='..tostring(member.class_path))
+            end
+            if record.adopted and not record.sideOk and (record.sideTries or 0)<3 and U.valid(player) then
+                adoptSide(record,member.actor,player)
             end
             if U.valid(player) and (not record.assistAt or now-record.assistAt>=ASSIST_SECONDS) then
                 record.assistAt=now

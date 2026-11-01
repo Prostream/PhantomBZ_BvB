@@ -320,7 +320,7 @@ class Bridge:
 
     def _path(self, name):
         # All caller-supplied unit IDs stay inside TSV fields, never file paths.
-        if name not in {"stat-custom-request.tsv", "stat-match-settings.tsv", "catalog.tsv", "catalog.tsv.partial", "codex.tsv", "codex-locations.tsv", "status.tsv", "inbox.tsv", "inbox.session.tsv", "ack.tsv", "inventory-report.json", "unit-evidence.json", "native-table-catalog.tsv", "decrypted-directory.tsv", "decrypted-directory-report.json", "unit-keybinds.tsv", "unit-keybinds-state.tsv", "function-keybinds.tsv", "function-keybinds.tsv.bak", "function-keybinds-state.tsv", "keybinds.tsv"}:
+        if name not in {"codex-icons.tsv", "stat-custom-request.tsv", "stat-match-settings.tsv", "catalog.tsv", "catalog.tsv.partial", "codex.tsv", "codex-locations.tsv", "status.tsv", "inbox.tsv", "inbox.session.tsv", "ack.tsv", "inventory-report.json", "unit-evidence.json", "native-table-catalog.tsv", "decrypted-directory.tsv", "decrypted-directory-report.json", "unit-keybinds.tsv", "unit-keybinds-state.tsv", "function-keybinds.tsv", "function-keybinds.tsv.bak", "function-keybinds-state.tsv", "keybinds.tsv"}:
             raise ValidationError("unknown runtime file")
         path = self.runtime / name
         if path.resolve().parent != self.runtime:
@@ -1036,6 +1036,32 @@ class Bridge:
         return {'available':bool(game['online'] and game.get('game_session') and values.get('function_keys_schema')=='2' and epoch),
                 'bindings':bindings,'revision':revision,'errors':errors}
 
+    # A codex icon's texture name (codex_icons.lua): the only thing an icon URL or index row may carry.
+    ICON_NAME = re.compile(r"T_[A-Za-z0-9_]{1,160}")
+    UNIT_NAME = re.compile(r"[A-Za-z0-9_]{1,160}")
+
+    def codex_icon_file(self, name):
+        """The saved PNG for one icon texture, in Runtime/codex-icons/ or flat in Runtime; None if absent."""
+        if not self.ICON_NAME.fullmatch(name or ""):
+            return None
+        for path in (self.runtime / "codex-icons" / f"{name}.png", self.runtime / f"codex-icon-{name}.png"):
+            if path.is_file() and path.resolve().is_relative_to(self.runtime):
+                return path
+        return None
+
+    def codex_icons(self):
+        """Unit id -> icon URL for every icon the mod has saved on this PC (Runtime/codex-icons.tsv)."""
+        text = bounded_read(self._path("codex-icons.tsv"), 262144) or ""
+        icons = {}
+        for line in text.replace("\r\n", "\n").split("\n")[1:]:
+            unit, _, file = line.partition("\t")
+            leaf = file.rsplit("/", 1)[-1]
+            name = leaf[len("codex-icon-"):] if leaf.startswith("codex-icon-") else leaf
+            name = name[:-4] if name.endswith(".png") else ""
+            if self.UNIT_NAME.fullmatch(unit) and self.codex_icon_file(name):
+                icons[unit] = f"/codex-icons/{name}.png"
+        return {"icons": icons, "count": len(icons)}
+
     def stat_settings(self):
         """The spawn stat mode and custom values the mod saved (stat_match.lua, Runtime/stat-match-settings.tsv)."""
         # Lua writes this file in text mode, so on Windows its lines end in CRLF.
@@ -1105,13 +1131,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         return
 
-    def _reply(self, status, data, content_type="application/json; charset=utf-8"):
+    def _reply(self, status, data, content_type="application/json; charset=utf-8", cache="no-store"):
         if not isinstance(data, bytes):
             data = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'")
@@ -1146,6 +1172,16 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.bridge.keybinds()
             elif path == "/api/stat-settings":
                 result = self.server.bridge.stat_settings()
+            elif path == "/api/codex-icons":
+                result = self.server.bridge.codex_icons()
+            elif path.startswith("/codex-icons/"):
+                # A codex bust the mod saved on this PC; never shipped with the app.
+                name = path[len("/codex-icons/"):]
+                file = self.server.bridge.codex_icon_file(name[:-4]) if name.endswith(".png") else None
+                if file is None:
+                    self._reply(404, {"error": "icon not found"}); return
+                self._reply(200, file.read_bytes(), "image/png", cache="max-age=86400")
+                return
             elif path == '/api/disk-directory':
                 query=parse_qs(urlsplit(self.path).query)
                 result=self.server.bridge.disk_directory(query.get('q',[''])[0],query.get('kind',[''])[0],

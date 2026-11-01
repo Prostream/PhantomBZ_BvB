@@ -410,8 +410,8 @@
     ].join("");
     return `<div class="unit-card${sel ? " is-selected" : ""}" role="listitem" data-id="${u.id}">
       <button class="card-main" type="button" data-action="select" data-id="${u.id}" tabindex="${focusable ? 0 : -1}" aria-pressed="${sel}" aria-keyshortcuts="B R N" aria-label="${esc(u.name)}${u.boss ? " · BOSS" : ""}">
-        <span class="avatar sp-${u.species}${u.boss ? " is-boss" : ""}">
-          <span class="avatar-initial" aria-hidden="true">${esc(u.initial)}</span>
+        <span class="avatar sp-${u.species}${u.boss ? " is-boss" : ""}${artClass(u)}">
+          ${avatarArt(u)}<span class="avatar-initial" aria-hidden="true">${esc(u.initial)}</span>
           ${u.boss ? `<span class="avatar-tag">${icon("crown")}BOSS</span>` : ""}
           ${key ? `<span class="avatar-key${key.team ? " key-" + key.team : ""}">${kbd(vkLabel(key.code, key.mods))}</span>` : ""}
           ${sel ? `<span class="avatar-check">${icon("check")}</span>` : ""}
@@ -428,6 +428,10 @@
       </div>
     </div>`;
   }
+  // The codex bust the mod saved on this PC (codex_icons.lua), over the species colour; the name's first
+  // character until it exists, or if it fails to load (see the error listener below).
+  const artClass = u => (S.icons?.[u.id] ? " has-art" : "");
+  const avatarArt = u => (S.icons?.[u.id] ? `<img class="avatar-art" src="${esc(S.icons[u.id])}" alt="" loading="lazy" decoding="async" draggable="false">` : "");
   function renderGrid({ animate = false } = {}) {
     const grid = $("#grid");
     if (!grid) return;
@@ -557,7 +561,7 @@
     const key = S.unitKeys[u.id], capturing = ui.capture?.kind === "unit" && ui.capture.id === u.id;
     el.innerHTML = `<div class="dock-title">${esc(t("sel.title"))}${u.boss ? `<span class="chip chip-gold">${icon("crown")}BOSS</span>` : ""}</div>
       <div class="sel-head">
-        <span class="avatar sp-${u.species}${u.boss ? " is-boss" : ""}"><span class="avatar-initial" aria-hidden="true">${esc(u.initial)}</span></span>
+        <span class="avatar sp-${u.species}${u.boss ? " is-boss" : ""}${artClass(u)}">${avatarArt(u)}<span class="avatar-initial" aria-hidden="true">${esc(u.initial)}</span></span>
         <div style="min-width:0"><div class="sel-name">${esc(u.name)}</div>
           <div class="sel-meta"><span>${esc(speciesName(u.species))}</span><span>·</span><span>${esc(u.ch === 0 ? chapterName(0) : `${chapterName(u.ch)} ${u.map}`)}</span>${u.variant ? `<span class="chip">${esc(t("badge.variant", { i: u.variant, n: u.variants }))}</span>` : ""}</div>
         </div>
@@ -848,7 +852,7 @@
       card = base
         ? `<div class="match-card">
             <div class="match-base">
-              <span class="avatar sp-${base.species}${base.boss ? " is-boss" : ""}"><span class="avatar-initial" aria-hidden="true">${esc(base.initial)}</span></span>
+              <span class="avatar sp-${base.species}${base.boss ? " is-boss" : ""}${artClass(base)}">${avatarArt(base)}<span class="avatar-initial" aria-hidden="true">${esc(base.initial)}</span></span>
               <div class="match-base-main"><div class="match-base-name">${esc(base.name)}</div><div class="match-base-sub">${esc(t("match.baseline.sub"))}</div></div>
               <span class="chip chip-green">${icon("scale")}${esc(t("match.baseline"))}</span>
             </div>
@@ -1250,7 +1254,7 @@
       <section class="card"><div class="card-head"><h2 class="card-title">${esc(t("keys.unit"))}</h2><span class="chip">${fmtNum(unitKeys.length)}</span></div><p class="card-desc">${esc(t("keys.unit.desc"))}</p>
         <div class="rows" style="margin-top:10px">${unitKeys.length ? unitKeys.map(([id, k]) => {
           const u = byId.get(id);
-          return `<div class="row unitkey-item"><span class="avatar sp-${u?.species || "GuaiMian"}"><span class="avatar-initial">${esc(u?.initial || "?")}</span></span><div class="row-main"><div class="row-title">${esc(u?.name || id)}</div><div class="row-desc">${k.team ? `<span class="team-dot" style="background:var(--${k.team})"></span>` : ""}${esc(unitKeyUses(k))}</div></div><div class="row-side">${kbd(vkLabel(k.code, k.mods), "kbd-lg")}<button class="icon-btn icon-btn-sm" type="button" data-action="unitkey-remove" data-id="${id}" aria-label="${esc(t("keys.unit.remove"))}" title="${esc(t("keys.unit.remove"))}">${icon("x", "icon-sm")}</button></div></div>`;
+          return `<div class="row unitkey-item"><span class="avatar sp-${u?.species || "GuaiMian"}${u ? artClass(u) : ""}">${u ? avatarArt(u) : ""}<span class="avatar-initial">${esc(u?.initial || "?")}</span></span><div class="row-main"><div class="row-title">${esc(u?.name || id)}</div><div class="row-desc">${k.team ? `<span class="team-dot" style="background:var(--${k.team})"></span>` : ""}${esc(unitKeyUses(k))}</div></div><div class="row-side">${kbd(vkLabel(k.code, k.mods), "kbd-lg")}<button class="icon-btn icon-btn-sm" type="button" data-action="unitkey-remove" data-id="${id}" aria-label="${esc(t("keys.unit.remove"))}" title="${esc(t("keys.unit.remove"))}">${icon("x", "icon-sm")}</button></div></div>`;
         }).join("") : `<div class="row"><div class="row-main"><div class="row-desc">${esc(t("keys.unit.empty"))}</div></div><div class="row-side"><button class="btn btn-secondary btn-sm" type="button" data-action="nav" data-page="arena">${icon("swords", "icon-sm")}${esc(t("keys.unit.go"))}</button></div></div>`}</div></section>
       <details class="advanced"><summary><span class="row-icon">${icon("scan")}</span><div class="row-main"><div class="row-title">${esc(t("keys.advanced"))}</div><div class="row-desc">${esc(t("keys.advanced.desc"))}</div></div>${icon("chevron-down", "chev")}</summary>
         <div class="rows">${keyRowHTML("refresh_catalog")}</div></details>
@@ -2105,6 +2109,14 @@
     }
     if (ui.demoOpen) renderDemo();
   });
+
+  // A codex bust that fails to load leaves the name's first character in its place.
+  document.addEventListener("error", e => {
+    const img = e.target;
+    if (!img?.classList?.contains("avatar-art")) return;
+    img.closest(".avatar")?.classList.remove("has-art");
+    img.remove();
+  }, true);
 
   // ---------- Boot ----------
   if (!RT.demo) $("#demo-fab")?.remove();

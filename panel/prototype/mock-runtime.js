@@ -60,6 +60,7 @@ const MockRuntime = (() => {
     spectator: false,
     spectatorPhase: "",         // "" | "switching" | "restoring"
     // baseline: { id, hp, shachi, atk, satk } spawn stats; reset: cleared because the field emptied
+    icons: {},                  // the prototype has no game pictures: cards show the first character
     statMatch: { enabled: savedMatch, mode: savedMatch ? "match" : "game", modeSupported: true, baseline: null, matched: 0, failures: 0, reset: false, customCount: 0, customized: 0, rejected: [], rejectedCount: 0, values: {} },
     // level: FOLLOW | EASY | NORMAL | HARD | NIGHTMARE for new units; game: the game's own level
     difficulty: { level: savedDiff, game: "Easy", supported: true, failures: 0, skipped: 0, aiFailed: 0 },

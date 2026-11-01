@@ -12,6 +12,7 @@ const RealRuntime = (() => {
   const TEAMS = ["blue", "red", "neutral", "companion"];
 
   const s = {
+    icons: {},                  // unit id -> codex bust URL (codex_icons.lua, backend.py /api/codex-icons)
     game: "offline",            // offline | connecting | notInMap | ready | mismatch
     gameRunning: false,
     appVersion: "",
@@ -52,7 +53,7 @@ const RealRuntime = (() => {
   };
   const jobs = [], jobById = new Map(), waiters = new Map();
   let csrf = "", owned = 0, launching = 0, failedPolls = 0;
-  let teamRev = null, session = "", catalogKey = "", lastSig = {};
+  let teamRev = null, session = "", catalogKey = "", lastSig = {}, iconsAt = 0;
   let toGame = new Map(), toShort = new Map();
 
   // ---------- Native host ----------
@@ -106,6 +107,18 @@ const RealRuntime = (() => {
     s.unitKeys = unitKeys;
     s.synced = s.synced && { ...s.synced };
     emit({ type: "state", parts: new Set(["sel", "keys", "grid"]) });
+  }
+
+  // The codex busts the mod has saved on this PC. They appear while the game exports them, so the list is
+  // asked for again every 15 s until there are some, then every minute.
+  async function loadIcons() {
+    iconsAt = Date.now();
+    const r = await fetch("/api/codex-icons", { cache: "no-store" });
+    if (!r.ok) return;
+    const icons = (await r.json()).icons || {};
+    if (JSON.stringify(icons) === JSON.stringify(s.icons)) return;
+    s.icons = icons;
+    emit({ type: "state", parts: new Set(["sel", "grid", "match", "keys"]) });
   }
 
   // ---------- Status ----------
@@ -228,6 +241,7 @@ const RealRuntime = (() => {
     // Catalog: once per session, after a scan, and when unit keys change.
     const key = [g.game_session || "", data.catalog?.total || 0, v.unit_keys_revision || "", v.unit_keys_epoch || ""].join("|");
     if (key !== catalogKey) { catalogKey = key; loadCatalog().catch(() => { catalogKey = ""; }); }
+    if (Date.now() - iconsAt > (Object.keys(s.icons).length ? 60000 : 15000)) loadIcons().catch(() => {});
 
     // Events, in the same shapes MockRuntime sends.
     if (s.game !== was.game) emit({ type: "game" });

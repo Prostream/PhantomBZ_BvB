@@ -1050,6 +1050,36 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/styles.css")[1]["Content-Type"], "text/css; charset=utf-8")
         self.assertEqual(self.request("GET", "/")[1]["Content-Type"], "text/html; charset=utf-8")
 
+    def test_codex_icons_saved_by_the_mod_are_listed_and_served_by_texture_name_only(self):
+        runtime = self.bridge.runtime
+        runtime.mkdir(exist_ok=True)
+        (runtime / "codex-icons").mkdir()
+        png = b"\x89PNG\r\n\x1a\nicon"
+        (runtime / "codex-icons" / "T_BP_Monster_AHua_GuiTouDao_w.png").write_bytes(png)
+        (runtime / "codex-icon-T_BP_Monster_MaleThug_Sword_w.png").write_bytes(png + b"flat")
+        (runtime / "codex-icons.tsv").write_text(
+            "unit\tfile\n"
+            "BP_Monster_AHua_GuiTouDao\tcodex-icons/T_BP_Monster_AHua_GuiTouDao_w.png\n"
+            "BP_Monster_AHua_Story\tcodex-icons/T_BP_Monster_AHua_GuiTouDao_w.png\n"
+            "BP_Monster_MaleThug_Sword\tcodex-icon-T_BP_Monster_MaleThug_Sword_w.png\n"
+            "BP_Missing\tcodex-icons/T_Missing_w.png\n"
+            "../evil\tcodex-icons/T_BP_Monster_AHua_GuiTouDao_w.png\n"
+            "BP_Traversal\tcodex-icons/../../outside.png\n", encoding="utf-8")
+        status, _, raw = self.request("GET", "/api/codex-icons")
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw), {"count": 3, "icons": {
+            "BP_Monster_AHua_GuiTouDao": "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png",
+            "BP_Monster_AHua_Story": "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png",
+            "BP_Monster_MaleThug_Sword": "/codex-icons/T_BP_Monster_MaleThug_Sword_w.png"}})
+        status, headers, raw = self.request("GET", "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png")
+        self.assertEqual((status, headers["Content-Type"], raw), (200, "image/png", png))
+        self.assertEqual(headers["Cache-Control"], "max-age=86400")
+        self.assertEqual(self.request("GET", "/codex-icons/T_BP_Monster_MaleThug_Sword_w.png")[2], png + b"flat", "a flat file is served too")
+        for path in ("/codex-icons/T_Missing_w.png", "/codex-icons/..%2fcodex-icons.tsv", "/codex-icons/%2e%2e%2foutside.png",
+                     "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.tsv", "/codex-icons/X_BP.png"):
+            self.assertEqual(self.request("GET", path)[0], 404, path)
+        self.assertEqual(self.request("GET", "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png", headers={"Host": "evil.example"})[0], 403)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

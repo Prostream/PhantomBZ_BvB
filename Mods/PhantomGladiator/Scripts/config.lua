@@ -41,6 +41,14 @@ Config.EnableGrabStudy = false
 Config.EnableStatFormulaProbe = false
 -- 召唤的第一只蓝/红方单位把223项属性逐项写入测试值、隔0.5秒读回再恢复，每项一行日志，约15秒；核对自定义数值时再开。
 Config.EnableStatFieldProbe = false
+-- 随从在场时只读记录它的每种攻击（类型、打谁、能否打同阵营、能否打到玩家）和玩家掉血；查随从范围攻击误伤玩家时再开。
+Config.EnableCompanionHitProbe = false
+-- 每分钟把已加载的全部攻击数据过一遍，列出设成「打友方/都打/能打同阵营」的（只读，明细写入 Runtime/attack-faction-scan.tsv）。
+Config.EnableAttackFactionScan = false
+-- 进游戏20秒后，把几只怪的图鉴图片（图标/高清图/半身像）存成 PNG 到 Runtime，看能不能本地导出给助手显示。
+Config.EnableCodexArtProbe = false
+-- 进游戏后在后台把图鉴头像（白色图标，头肩像）存到本机 Runtime/codex-icons/，给助手的单位卡片用；游戏图片不随助手发布。
+Config.EnableCodexIcons = true
 
 -- 历史碰撞复制实验，默认关；响应差异不证明实际攻击查询通道。
 Config.CopyPlayerHurtChannels = false
