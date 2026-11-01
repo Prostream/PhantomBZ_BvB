@@ -1,64 +1,52 @@
 {
-  "version": "0.37.0",
-  "date": "2026-11-01T15:13:11+08:00",
-  "size": 20698814,
-  "sha256": "3c2e1441c522f0b6633580d68b69677da3ac9cc5e16d42e14d35a3485ff78d37",
+  "version": "0.37.1",
+  "date": "2026-11-01T15:29:48+08:00",
+  "size": 20700775,
+  "sha256": "6bf8f7460db03d827ddcfdb8a2469fcc0d080ba86229776dd67762bf1250fff9",
   "notes": {
     "zh": [
-      "数值设定：按游戏、统一成第一只、自定义三种模式。自定义可以改血量、杀气、攻击等，「全部属性」里能改游戏全部 223 项属性",
-      "新增「不倒下」开关：这一方照常挨打但不会倒下；交战显示用时，也可以显示在游戏画面正上方",
-      "交战中的单位不再脱战走回原地；每次召唤 1–100 只；自由观战空格上升、Ctrl 下降",
-      "修复功能开得多时部分开关状态显示不出来（v0.36.0 有这个问题）",
+      "修复自定义数值没有真正改到伤害：游戏按「1级基准值」算伤害，现在改血量、杀气、攻击、削杀气时，1级值会按同样比例一起改。实测血量上限 9999999 的单位被 10 只怪围攻 50 秒只掉约 0.5%",
+      "「统一成第一只」也一起统一1级值，两只单位挨打和出手的伤害才真正一样",
       "更新后请按助手提示更新游戏内模组"
     ],
     "en": [
-      "Unit stats: Game, Equal stats or Custom. Custom sets HP, Sha-Chi, attack and more, and All stats covers all 223 of the game's attributes",
-      "New Undying switch: that side takes hits but never goes down. Fights show how long they took, also at the top of the game screen if you like",
-      "Units no longer drop out of a fight and walk back; summon 1–100 at a time; free camera: Space goes up, Ctrl goes down",
-      "Fixed: with many features on, some switches didn't show their state (affects v0.36.0)",
+      "Fixed: custom stats didn't change damage. The game works out damage from level-1 base values; changing HP, Sha-Chi, attack or Sha-Chi damage now scales those by the same ratio. Tested: a unit with 9,999,999 max HP lost about 0.5% in 50 seconds against ten attackers",
+      "Equal stats now matches the level-1 values too, so matched units really take and deal the same damage",
       "After updating, follow the prompt in the app to update the in-game mod"
     ],
     "ja": [
-      "ステータス設定：ゲーム準拠・1体目に統一・カスタムの3モード。カスタムでは体力・殺気・攻撃などを変更でき、「全ステータス」ではゲームの全223属性を変更できます",
-      "「倒れない」スイッチを追加：その陣営は攻撃を受けても倒れません。戦闘の経過時間を表示し、ゲーム画面の上中央にも表示できます",
-      "戦闘中のユニットが離脱して元の位置に戻らなくなりました。1回に1〜100体召喚できます。自由観戦でスペースで上昇、Ctrlで下降",
-      "修正：多くの機能をオンにすると一部のスイッチの状態が表示されなかった問題（v0.36.0で発生）",
+      "修正：カスタム数値がダメージに反映されていませんでした。ゲームはダメージを「Lv1 基準値」で計算するため、体力・殺気・攻撃・殺気削りを変えると Lv1 値も同じ比率で変わるようにしました。実測：最大体力 9999999 のユニットは 10 体に 50 秒囲まれても約 0.5% しか減りません",
+      "「1体目に統一」も Lv1 値まで統一するので、受けるダメージと与えるダメージが本当に同じになります",
       "更新後はアプリの案内に従ってゲーム内Modも更新してください"
     ],
     "fr": [
-      "Stats des unités : Du jeu, Égalisées ou Perso. Perso règle les PV, le Sha-Chi, l'attaque, etc., et Toutes les stats couvre les 223 attributs du jeu",
-      "Nouvel interrupteur Immortel : ce camp encaisse les coups sans jamais tomber. Les combats affichent leur durée, aussi en haut de l'écran de jeu si vous le souhaitez",
-      "Les unités ne quittent plus le combat pour rentrer ; invocation de 1 à 100 à la fois ; caméra libre : Espace pour monter, Ctrl pour descendre",
-      "Corrigé : avec beaucoup de fonctions actives, certains interrupteurs n'affichaient pas leur état (concerne la v0.36.0)",
+      "Corrigé : les stats perso ne changeaient pas les dégâts. Le jeu calcule les dégâts à partir des valeurs de base niv. 1 ; changer les PV, le Sha-Chi, l'attaque ou les dégâts Sha-Chi les ajuste désormais dans la même proportion. Testé : une unité à 9 999 999 PV max n'a perdu qu'environ 0,5 % en 50 secondes face à dix attaquants",
+      "Égalisées aligne aussi les valeurs niv. 1 : les unités encaissent et infligent vraiment les mêmes dégâts",
       "Après la mise à jour, suivez l'invite de l'application pour mettre à jour le mod en jeu"
     ],
     "de": [
-      "Einheitenwerte: Spiel, Angleichen oder Eigene. Eigene setzt LP, Sha-Chi, Angriff und mehr, und „Alle Werte“ umfasst alle 223 Attribute des Spiels",
-      "Neuer Schalter Unsterblich: Diese Seite steckt Treffer ein, fällt aber nie. Kämpfe zeigen ihre Dauer, auf Wunsch auch oben im Spielbild",
-      "Einheiten verlassen den Kampf nicht mehr und laufen zurück; 1–100 pro Beschwörung; freie Kamera: Leertaste hoch, Strg runter",
-      "Behoben: Bei vielen aktiven Funktionen zeigten manche Schalter ihren Zustand nicht an (betrifft v0.36.0)",
+      "Behoben: Eigene Werte änderten den Schaden nicht. Das Spiel berechnet Schaden aus den Basiswerten der Stufe 1; LP, Sha-Chi, Angriff und Sha-Chi-Schaden ändern diese jetzt im selben Verhältnis. Getestet: Eine Einheit mit 9.999.999 max. LP verlor gegen zehn Angreifer in 50 Sekunden nur etwa 0,5 %",
+      "Angleichen gleicht jetzt auch die Stufe-1-Werte an, damit Einheiten wirklich denselben Schaden einstecken und austeilen",
       "Nach dem Update dem Hinweis in der App folgen, um den Mod im Spiel zu aktualisieren"
     ],
     "es": [
-      "Estadísticas: Del juego, Igualar o Propias. Propias ajusta vida, Sha-Chi, ataque y más, y Todas las estadísticas cubre los 223 atributos del juego",
-      "Nuevo interruptor Inmortal: ese bando recibe golpes pero nunca cae. Los combates muestran su duración, también arriba en la pantalla del juego si quieres",
-      "Las unidades ya no abandonan el combate para volver atrás; invoca de 1 a 100 a la vez; cámara libre: Espacio sube, Ctrl baja",
-      "Corregido: con muchas funciones activas, algunos interruptores no mostraban su estado (afecta a la v0.36.0)",
+      "Corregido: los valores propios no cambiaban el daño. El juego calcula el daño a partir de los valores base de nivel 1; ahora, al cambiar vida, Sha-Chi, ataque o daño Sha-Chi, esos valores cambian en la misma proporción. Probado: una unidad con 9 999 999 de vida máxima perdió solo un 0,5 % en 50 segundos contra diez atacantes",
+      "Igualar ahora también iguala los valores de nivel 1, así que las unidades reciben y hacen de verdad el mismo daño",
       "Después de actualizar, sigue el aviso de la aplicación para actualizar el mod del juego"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.0/PhantomGladiator-0.37.0-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.1/PhantomGladiator-0.37.1-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.0/PhantomGladiator-0.37.0-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.1/PhantomGladiator-0.37.1-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.0/PhantomGladiator-0.37.0-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.1/PhantomGladiator-0.37.1-win64.zip"
     }
   ]
 }
