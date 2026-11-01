@@ -1,4 +1,5 @@
 """Offline protocol and loopback HTTP tests; never opens the game runtime."""
+import mimetypes
 import http.client
 import importlib.util
 import json
@@ -943,6 +944,21 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(self.request("GET", "/backend.py")[0], 403)
         self.assertEqual(self.request("OPTIONS", "/api/command")[0], 403)
         self.assertEqual(self.request("GET", "/")[0], 200)
+
+    def test_static_types_ignore_the_windows_registry(self):
+        # Other software often registers .js as text/plain; passed on, the browser refuses every script.
+        (self.static / "app.js").write_text("void 0;")
+        (self.static / "styles.css").write_text("body{}")
+        mimetypes.add_type("text/plain", ".js")
+        try:
+            status, headers, _ = self.request("GET", "/app.js")
+        finally:
+            mimetypes.add_type("text/javascript", ".js")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "text/javascript; charset=utf-8")
+        self.assertEqual(headers["X-Content-Type-Options"], "nosniff")
+        self.assertEqual(self.request("GET", "/styles.css")[1]["Content-Type"], "text/css; charset=utf-8")
+        self.assertEqual(self.request("GET", "/")[1]["Content-Type"], "text/html; charset=utf-8")
 
 
 if __name__ == "__main__":
