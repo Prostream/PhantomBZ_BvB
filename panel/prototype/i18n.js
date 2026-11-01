@@ -498,6 +498,7 @@ I18N.add("zh", {
   "match.rules.5": "只影响之后由助手或快捷键召唤的单位；场上已有的单位、BOSS 用技能召出的随从不受影响。",
   "match.rules.6": "关闭后不再对齐，场上单位保持当前数值；重新开启会重新选基准。",
   "match.rules.7": "个别单位如果没能对齐，会保留原生数值照常参战，可以在操作记录里看到。",
+  "match.rules.8": "游戏按「1级基准值」算伤害，所以1级血量、1级攻击等也一起统一成基准的，挨打和出手的伤害才真正一样。",
   "common.gotIt": "知道了",
   "toast.match.on": "数值统一已开启",
   "toast.match.on.body": "下一只召唤的单位会成为基准；场上已有的单位不受影响。",
@@ -751,7 +752,7 @@ I18N.add("zh", {
   "stats.group.execution": "处决",
   "stats.group.movement": "移动速度",
   "stats.group.other": "其他",
-  "stats.group.lv1": "1级基准值",
+  "stats.group.lv1": "1级基准值（伤害按它计算）",
   "stats.family.ElementalAccumulation": "元素异常积累",
   "stats.family.Ignite": "灼烧积累",
   "stats.family.Poison": "中毒积累",
@@ -815,6 +816,7 @@ I18N.add("zh", {
   "stats.filter.none": "没有匹配的属性",
   "stats.rejected": "上一只有 {n} 项游戏没接受，已恢复原值：{names}",
   "stats.rules.custom.6": "游戏不接受的项（例如超过上限的当前值）会恢复原值，并在卡片里列出；其余的项照常生效。",
+  "stats.rules.custom.7": "游戏按「1级基准值」算伤害：每一下扣掉对方血量上限的比例 = 攻击方的1级攻击 × 招式倍率 ÷ 受击方的1级血量。所以改血量上限、杀气上限、攻击、削杀气时，对应的1级值按同样比例一起改；在「全部属性」里自己填了1级值的，以你填的为准。",
 });
 
 I18N.add("en", {
@@ -1250,6 +1252,7 @@ I18N.add("en", {
   "match.rules.5": "Only units summoned afterwards by the app or its hotkeys are affected — not units already on the field, and not minions a boss calls in with its skills.",
   "match.rules.6": "Turning it off stops matching, and units on the field keep their current stats. Turning it back on picks a new baseline.",
   "match.rules.7": "If a unit can't be matched, it keeps its own stats and still fights. You'll see it under Activity.",
+  "match.rules.8": "The game works out damage from level-1 base values, so those are matched to the baseline too; that is what makes units take and deal the same hits.",
   "common.gotIt": "Got it",
   "toast.match.on": "Equal stats on",
   "toast.match.on.body": "The next unit you summon becomes the baseline. Units already on the field aren't affected.",
@@ -1503,7 +1506,7 @@ I18N.add("en", {
   "stats.group.execution": "Execution",
   "stats.group.movement": "Movement speed",
   "stats.group.other": "Other",
-  "stats.group.lv1": "Level-1 base values",
+  "stats.group.lv1": "Level-1 base values (damage uses these)",
   "stats.family.ElementalAccumulation": "Elemental buildup",
   "stats.family.Ignite": "Burn buildup",
   "stats.family.Poison": "Poison buildup",
@@ -1567,4 +1570,5 @@ I18N.add("en", {
   "stats.filter.none": "No matching stats",
   "stats.rejected": { one: "The game didn't take {n} field on the last unit, so it kept its own value: {names}", other: "The game didn't take {n} fields on the last unit, so they kept their own values: {names}" },
   "stats.rules.custom.6": "If the game doesn't take a value (a current value above its maximum, for example), that field goes back to the unit's own value and is listed on the card; the rest still apply.",
+  "stats.rules.custom.7": "The game works out damage from level-1 base values: each hit takes the attacker's level-1 attack × the move's multiplier ÷ the target's level-1 HP, as a share of the target's max HP. So changing max HP, max Sha-Chi, attack or Sha-Chi damage scales the matching level-1 value by the same ratio; a level-1 value you fill in yourself under All stats wins.",
 });

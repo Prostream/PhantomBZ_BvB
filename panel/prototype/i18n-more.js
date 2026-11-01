@@ -434,6 +434,7 @@ I18N.add("ja", {
   "match.rules.5": "対象は、これ以降にアプリやショートカットキーで召喚したユニットだけです。戦場にいるユニットや、ボスが技で呼び出した手下は対象外です。",
   "match.rules.6": "オフにすると統一をやめ、戦場のユニットは今のステータスのままです。もう一度オンにすると基準を選び直します。",
   "match.rules.7": "統一できなかったユニットは元のステータスのまま参戦します。操作履歴で確認できます。",
+  "match.rules.8": "ゲームはダメージを「Lv1 基準値」で計算するため、Lv1 体力・Lv1 攻撃なども基準に統一します。これで受けるダメージと与えるダメージが本当に同じになります。",
   "common.gotIt": "わかりました",
   "toast.match.on": "ステータス統一をオンにしました",
   "toast.match.on.body": "次に召喚するユニットが基準になります。戦場にいるユニットには影響しません。",
@@ -687,7 +688,7 @@ I18N.add("ja", {
   "stats.group.execution": "処刑",
   "stats.group.movement": "移動速度",
   "stats.group.other": "その他",
-  "stats.group.lv1": "Lv1 基準値",
+  "stats.group.lv1": "Lv1 基準値（ダメージ計算に使用）",
   "stats.family.ElementalAccumulation": "属性蓄積",
   "stats.family.Ignite": "炎上蓄積",
   "stats.family.Poison": "毒蓄積",
@@ -751,6 +752,7 @@ I18N.add("ja", {
   "stats.filter.none": "一致する項目はありません",
   "stats.rejected": "前回のユニットでは {n} 項目が受け付けられず、元の値に戻しました：{names}",
   "stats.rules.custom.6": "ゲームが受け付けない値（上限を超える現在値など）はその項目だけ元に戻り、カードに表示されます。ほかの項目はそのまま適用されます。",
+  "stats.rules.custom.7": "ゲームはダメージを「Lv1 基準値」で計算します：1回の攻撃で減る割合（最大体力に対して）＝攻撃側のLv1攻撃×技の倍率÷受ける側のLv1体力。そのため最大体力・最大殺気・攻撃・殺気削りを変えると、対応するLv1値も同じ比率で変わります。「全ステータス」でLv1値を自分で入力した場合はその値が優先されます。",
 });
 
 I18N.add("fr", {
@@ -1186,6 +1188,7 @@ I18N.add("fr", {
   "match.rules.5": "Seules les unités invoquées ensuite par l'application ou ses raccourcis sont concernées\u00a0: ni celles déjà sur le terrain, ni les sbires qu'un boss appelle avec ses techniques.",
   "match.rules.6": "Une fois désactivée, l'option n'aligne plus rien et les unités sur le terrain gardent leurs stats actuelles. La réactiver choisit une nouvelle référence.",
   "match.rules.7": "Une unité qui n'a pas pu être alignée garde ses stats et combat normalement. Vous la verrez dans Activité.",
+  "match.rules.8": "Le jeu calcule les dégâts à partir des valeurs de base niv. 1 : elles sont donc aussi alignées sur la référence, ce qui fait que les unités encaissent et infligent vraiment les mêmes coups.",
   "common.gotIt": "Compris",
   "toast.match.on": "Stats égalisées activées",
   "toast.match.on.body": "La prochaine unité invoquée servira de référence. Les unités déjà sur le terrain ne sont pas affectées.",
@@ -1439,7 +1442,7 @@ I18N.add("fr", {
   "stats.group.execution": "Exécution",
   "stats.group.movement": "Vitesse de déplacement",
   "stats.group.other": "Autres",
-  "stats.group.lv1": "Valeurs de base niv. 1",
+  "stats.group.lv1": "Valeurs de base niv. 1 (servent aux dégâts)",
   "stats.family.ElementalAccumulation": "Accumulation élémentaire",
   "stats.family.Ignite": "Accumulation de brûlure",
   "stats.family.Poison": "Accumulation de poison",
@@ -1503,6 +1506,7 @@ I18N.add("fr", {
   "stats.filter.none": "Aucune stat correspondante",
   "stats.rejected": { one: "Le jeu a refusé {n} champ sur la dernière unité, qui garde sa valeur : {names}", other: "Le jeu a refusé {n} champs sur la dernière unité, qui gardent leur valeur : {names}" },
   "stats.rules.custom.6": "Si le jeu refuse une valeur (une valeur actuelle au-dessus de son maximum, par exemple), ce champ reprend la valeur de l'unité et s'affiche sur la carte ; les autres s'appliquent quand même.",
+  "stats.rules.custom.7": "Le jeu calcule les dégâts à partir des valeurs de base niv. 1 : chaque coup retire, en part des PV max de la cible, l'attaque niv. 1 de l'attaquant × le multiplicateur du coup ÷ les PV niv. 1 de la cible. Changer les PV max, le Sha-Chi max, l'attaque ou les dégâts Sha-Chi change donc la valeur niv. 1 correspondante dans la même proportion ; une valeur niv. 1 saisie vous-même dans Toutes les stats l'emporte.",
 });
 
 I18N.add("de", {
@@ -1938,6 +1942,7 @@ I18N.add("de", {
   "match.rules.5": "Betroffen sind nur Einheiten, die danach über die App oder ihre Tasten beschworen werden – nicht die, die schon auf dem Feld stehen, und keine Schergen, die ein Boss mit Techniken herbeiruft.",
   "match.rules.6": "Ausgeschaltet wird nichts mehr angeglichen, und Einheiten auf dem Feld behalten ihre aktuellen Werte. Erneutes Einschalten wählt eine neue Referenz.",
   "match.rules.7": "Kann eine Einheit nicht angeglichen werden, behält sie ihre Werte und kämpft normal mit. Du siehst das unter „Aktivität“.",
+  "match.rules.8": "Das Spiel berechnet Schaden aus den Basiswerten der Stufe 1, darum werden auch sie an die Basis angeglichen; erst so stecken Einheiten dieselben Treffer ein und teilen sie aus.",
   "common.gotIt": "Verstanden",
   "toast.match.on": "Gleiche Werte an",
   "toast.match.on.body": "Die nächste beschworene Einheit wird zur Referenz. Einheiten auf dem Feld bleiben unberührt.",
@@ -2191,7 +2196,7 @@ I18N.add("de", {
   "stats.group.execution": "Hinrichtung",
   "stats.group.movement": "Bewegungstempo",
   "stats.group.other": "Sonstiges",
-  "stats.group.lv1": "Basiswerte Stufe 1",
+  "stats.group.lv1": "Basiswerte Stufe 1 (für den Schaden)",
   "stats.family.ElementalAccumulation": "Elementaraufbau",
   "stats.family.Ignite": "Brandaufbau",
   "stats.family.Poison": "Giftaufbau",
@@ -2255,6 +2260,7 @@ I18N.add("de", {
   "stats.filter.none": "Keine passenden Werte",
   "stats.rejected": { one: "Das Spiel hat bei der letzten Einheit {n} Feld nicht angenommen; es behält seinen Wert: {names}", other: "Das Spiel hat bei der letzten Einheit {n} Felder nicht angenommen; sie behalten ihre Werte: {names}" },
   "stats.rules.custom.6": "Nimmt das Spiel einen Wert nicht an (etwa einen aktuellen Wert über dem Maximum), bekommt dieses Feld wieder den Wert der Einheit und wird auf der Karte genannt; die übrigen gelten trotzdem.",
+  "stats.rules.custom.7": "Das Spiel berechnet Schaden aus den Basiswerten der Stufe 1: Jeder Treffer nimmt den Anteil Angriff Stufe 1 des Angreifers × Angriffsmultiplikator ÷ LP Stufe 1 des Ziels von dessen max. LP. Änderst du max. LP, max. Sha-Chi, Angriff oder Sha-Chi-Schaden, ändert sich der passende Stufe-1-Wert im selben Verhältnis; einen Stufe-1-Wert, den du unter „Alle Werte“ selbst einträgst, hat Vorrang.",
 });
 
 I18N.add("es", {
@@ -2690,6 +2696,7 @@ I18N.add("es", {
   "match.rules.5": "Solo afecta a las unidades invocadas después con la aplicación o sus atajos: no a las que ya están en el campo ni a los esbirros que un jefe llama con sus técnicas.",
   "match.rules.6": "Al desactivarlo deja de igualar, y las unidades en el campo conservan sus estadísticas actuales. Al volver a activarlo se elige una nueva referencia.",
   "match.rules.7": "Si una unidad no se puede igualar, conserva sus estadísticas y combate con normalidad. Lo verás en Actividad.",
+  "match.rules.8": "El juego calcula el daño a partir de los valores base de nivel 1, así que también se igualan a la referencia; solo así las unidades reciben y hacen los mismos golpes.",
   "common.gotIt": "Entendido",
   "toast.match.on": "Estadísticas iguales activadas",
   "toast.match.on.body": "La próxima unidad que invoques será la referencia. Las unidades que ya están en el campo no se ven afectadas.",
@@ -2943,7 +2950,7 @@ I18N.add("es", {
   "stats.group.execution": "Ejecución",
   "stats.group.movement": "Velocidad de movimiento",
   "stats.group.other": "Otros",
-  "stats.group.lv1": "Valores base de nivel 1",
+  "stats.group.lv1": "Valores base de nivel 1 (para el daño)",
   "stats.family.ElementalAccumulation": "Acumulación elemental",
   "stats.family.Ignite": "Acumulación de quemadura",
   "stats.family.Poison": "Acumulación de veneno",
@@ -3007,4 +3014,5 @@ I18N.add("es", {
   "stats.filter.none": "No hay estadísticas que coincidan",
   "stats.rejected": { one: "El juego no aceptó {n} campo en la última unidad; conserva su valor: {names}", other: "El juego no aceptó {n} campos en la última unidad; conservan su valor: {names}" },
   "stats.rules.custom.6": "Si el juego no acepta un valor (por ejemplo, un valor actual por encima de su máximo), ese campo vuelve al valor de la unidad y aparece en la tarjeta; el resto se aplica igualmente.",
+  "stats.rules.custom.7": "El juego calcula el daño a partir de los valores base de nivel 1: cada golpe quita, como parte de la vida máxima del objetivo, el ataque de nivel 1 del atacante × el multiplicador del golpe ÷ la vida de nivel 1 del objetivo. Por eso, al cambiar la vida máxima, el Sha-Chi máximo, el ataque o el daño Sha-Chi, el valor de nivel 1 correspondiente cambia en la misma proporción; un valor de nivel 1 que rellenes tú en Todas las estadísticas tiene prioridad.",
 });

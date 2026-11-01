@@ -7,6 +7,9 @@
 -- One write per field at spawn, read back. Matching is all or nothing: any failure rolls the unit back to
 -- its own numbers. Custom goes field by field: a field the game does not take is rolled back and named, the
 -- rest stay. Never follows damage or heals on a tick.
+-- Damage comes from the level-1 values (character_stats.lua Stats.levelOne), so matching copies those too,
+-- and a custom HP, Sha-Chi, attack or Sha-Chi damage scales its level-1 value by the same ratio unless the
+-- player set that one as well.
 local Attributes=require('character_stats')
 local Match={}
 local RESOURCES={{'Health','Health_Max'},{'Shachi','Shachi_Max'}}
@@ -26,6 +29,9 @@ function Match.new(options)
     local adapter=options.adapter or Attributes.new()
     local fields=options.fields or Attributes.fields
     local customFields=options.customFields or Attributes.allFields
+    local levelOne=options.levelOne or Attributes.levelOne
+    local levelOneFields=options.levelOneFields or Attributes.levelOneFields
+    local isLevelOne={};for _,field in pairs(levelOne)do isLevelOne[field]=true end
     local log=options.log or function()end
     local fs=options.io or io
     local settings=options.path..'/stat-match-settings.tsv'
@@ -35,9 +41,10 @@ function Match.new(options)
     for current,max in pairs(BOUND)do bound[current]=max;bounded[max]=current end
     for _,field in ipairs(customFields)do if field:match('_Accumulation$') then bound[field]='Infliction_Max' end end
     local function phase(field)
-        if bounded[field] or field=='Infliction_Max' then return 1 end
-        if field=='Health_Min' or field=='Shachi_Min' then return 3 end
-        return bound[field] and 4 or 2
+        if isLevelOne[field] then return 1 end
+        if bounded[field] or field=='Infliction_Max' then return 2 end
+        if field=='Health_Min' or field=='Shachi_Min' then return 4 end
+        return bound[field] and 5 or 3
     end
     local self={mode='game',custom={},enabled=false,baseline=nil,matched=0,customized=0,failures=0,owned=0,
         rejected={},message='按游戏数值'}
@@ -226,10 +233,22 @@ function Match.new(options)
     -- (field and native getter), and rolled back on its own if the game does not take it; a rolled-back
     -- maximum restores its current value as well.
     local function applyCustom(actor,unitPath)
-        local targets,ordered={},{}
-        for step=1,4 do
+        local targets,ordered,linked={},{},{}
+        -- A custom value moves its level-1 value by the same ratio, so the unit takes and deals hits to match.
+        for _,field in ipairs(customFields)do
+            local lv1=levelOne[field]
+            if lv1 and self.custom[field]~=nil and self.custom[lv1]==nil then
+                local own,base=adapter:read(actor,field),adapter:read(actor,lv1)
+                if own and base and own.current>0 and Attributes.finite(base.current) then
+                    targets[lv1]=base.current*self.custom[field]/own.current
+                    linked[#linked+1]=lv1..' '..string.format('%.6g',base.current)..'→'..string.format('%.6g',targets[lv1])
+                end
+            end
+        end
+        for step=1,5 do
             for _,field in ipairs(customFields)do
-                if self.custom[field]~=nil and phase(field)==step then targets[field]=self.custom[field];ordered[#ordered+1]=field end
+                if self.custom[field]~=nil and phase(field)==step then targets[field]=self.custom[field] end
+                if targets[field]~=nil and phase(field)==step then ordered[#ordered+1]=field end
             end
         end
         -- A new HP or Sha-Chi maximum comes with a full bar.
@@ -282,7 +301,8 @@ function Match.new(options)
         self.message='自定义数值已写入并读回 '..#verified..'/'..#ordered..' 项'..(#rejected>0 and ('；'..#rejected..' 项游戏没接受，已恢复原值') or '')
             ..'；已写入 '..self.customized..' 只'
         log('[StatMatch] 自定义应用并读回 unit='..tostring(unitPath)..' verified='..#verified..'/'..#ordered
-            ..' rejected='..#rejected..' 回滚读回='..tostring(restored)..' '..describe(self.custom))
+            ..' rejected='..#rejected..' 回滚读回='..tostring(restored)..' '..describe(self.custom)
+            ..(#linked>0 and (' 联动1级值：'..table.concat(linked,'、')) or ''))
         return {ok=true,applied=true,message=self.message,rejected=self.rejected}
     end
     function self:onSpawn(actor,unitPath)
@@ -301,12 +321,15 @@ function Match.new(options)
         if not self.baseline then
             local snapshot={}
             for _,field in ipairs(fields)do snapshot[field]=original[field].current end
+            for _,field in ipairs(levelOneFields)do snapshot[field]=original[field].current end
             self.baseline={unit=unitPath,values=snapshot}
             self.message='已读取首只单位的出生属性，后续召唤按此对齐'
             log('[StatMatch] 基准已捕获 unit='..tostring(unitPath)..' HPmax='..snapshot.Health_Max..' ShachiMax='..snapshot.Shachi_Max
-                ..' Attack='..snapshot.Attack..' ShachiAttack='..snapshot.ShachiAttack..' fields='..#fields)
+                ..' Attack='..snapshot.Attack..' ShachiAttack='..snapshot.ShachiAttack..' fields='..#fields
+                ..' 1级值 HP='..tostring(snapshot.Health_Max_Lv1)..' Attack='..tostring(snapshot.Attack_Lv1))
             return {ok=true,baseline=true,message=self.message}
         end
+        for _,field in ipairs(levelOneFields)do targets[field]=self.baseline.values[field];ordered[#ordered+1]=field end
         for _,field in ipairs(fields)do targets[field]=self.baseline.values[field];ordered[#ordered+1]=field end
         for _,pair in ipairs(RESOURCES)do targets[pair[1]]=targets[pair[2]];ordered[#ordered+1]=pair[1] end
         local failed=apply(actor,unitPath,original,targets,ordered,'数值统一')
@@ -314,7 +337,8 @@ function Match.new(options)
         self.matched=self.matched+1
         self.message='后续单位出生属性已读回一致；已有单位不会跟随基准的残血变化'
         log('[StatMatch] 应用并读回 unit='..tostring(unitPath)..' baseline='..self.baseline.unit..' verified='..#ordered..'/'..#ordered
-            ..' HP='..targets.Health..' Shachi='..targets.Shachi..' Attack='..targets.Attack..' ShachiAttack='..targets.ShachiAttack)
+            ..' HP='..targets.Health..' Shachi='..targets.Shachi..' Attack='..targets.Attack..' ShachiAttack='..targets.ShachiAttack
+            ..' 1级值 HP='..tostring(targets.Health_Max_Lv1)..' Attack='..tostring(targets.Attack_Lv1))
         return {ok=true,applied=true,message=self.message}
     end
     function self:status()

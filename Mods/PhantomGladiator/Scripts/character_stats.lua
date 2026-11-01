@@ -94,6 +94,12 @@ Stats.allFields={
     'ExecutionTargetNormalHealthThreshold','ExecutionTargetBreakHealthThreshold','MindDustAdditiveMultiplier',
     'Health_Min','WalkSpeed','JogSpeed','SprintSpeed','CrouchSpeed','FinalWalkSpeed','Awakening','Awakening_Max',
     'PowerScore','XP','Coin','Corrosion'}
+-- The level-1 values the game works out damage from (v0.37.1, from fight readbacks): a hit takes the share
+-- attacker Attack_Lv1 x move multiplier / target Health_Max_Lv1 of the target's Health_Max, so Health_Max and
+-- Attack alone change the bar and the numbers shown but not how many hits a unit takes or deals.
+Stats.levelOne={Health_Max='Health_Max_Lv1',Shachi_Max='Shachi_Max_Lv1',Attack='Attack_Lv1',ShachiAttack='ShachiAttack_Lv1',
+    Infliction_Max='Infliction_Max_Lv1'}
+Stats.levelOneFields={'Health_Max_Lv1','Shachi_Max_Lv1','Attack_Lv1','ShachiAttack_Lv1','Infliction_Max_Lv1'}
 -- No GE_MA_<field>_1_Override among the game's assets (asset-index.tsv): these are written on the set's own
 -- FGameplayAttributeData (base and current) and read back from it; the other 209 go through the native effect.
 Stats.direct={}
@@ -145,6 +151,10 @@ function Stats.new()
             result[field]=entry
         end
         for _,field in ipairs({'Health','Shachi'})do
+            local entry,why=self:read(actor,field);if not entry then return nil,why end
+            result[field]=entry
+        end
+        for _,field in ipairs(Stats.levelOneFields)do
             local entry,why=self:read(actor,field);if not entry then return nil,why end
             result[field]=entry
         end

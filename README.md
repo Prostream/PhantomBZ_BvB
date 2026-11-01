@@ -69,8 +69,14 @@
 ### 数值设定
 对战页右侧的「数值设定」有三种模式，只影响之后召唤的单位：
 - **按游戏**：用游戏本来的数值，随召唤等级和难度变化。
-- **统一成第一只**：第一只召唤的单位成为「基准」，之后召唤的单位把生命和杀气上限、攻击、削杀气、攻防倍率统一成基准的数值（共 107 项战斗属性，满生命满杀气入场）。招式、体型、速度和 AI 不变，适合看「同样的数值下谁更会打」。
+- **统一成第一只**：第一只召唤的单位成为「基准」，之后召唤的单位把生命和杀气上限、攻击、削杀气、攻防倍率统一成基准的数值（共 107 项战斗属性，满生命满杀气入场），游戏算伤害用的 1 级基准值也一起统一。招式、体型、速度和 AI 不变，适合看「同样的数值下谁更会打」。
 - **自定义**：自己填数值。卡片上直接有血量上限、杀气上限、攻击、削杀气四项；「全部属性」里是游戏的全部 223 项属性，按类别分组、可以搜索，包括当前血量和下限、护盾、杀气回复、各类伤害与抗性倍率、杀器抗性、异常状态积累、绝技与觉醒、处决血量阈值、移动速度、等级等。空着的项保留单位自己的数值；填了的项会覆盖召唤等级和难度带来的变化，改了血量或杀气上限的单位满血满杀气入场。每项写入后都会读回，游戏不接受的项（例如超过上限的当前值）恢复原值并在卡片上列出，其余照常生效。随从不受影响。
+
+**为什么要连 1 级基准值一起改**：游戏算伤害不看你看到的血量上限和攻击，而是看每只怪的「1 级基准值」：
+
+**每一下扣掉对方血量上限的比例 = 攻击方的 1 级攻击 × 招式倍率 ÷ 受击方的 1 级血量**
+
+所以只改血量上限，只会让血条和数字变大，挨几下倒下不变；只改攻击，伤害也不变。自定义改血量上限、杀气上限、攻击、削杀气时，助手会把对应的 1 级值按同样比例一起改（在「全部属性」里自己填了 1 级值的，以你填的为准）。v0.37.0 的自定义和更早版本的「数值统一」都漏了这一步：数值显示对了，实际挨打和出手的伤害没变；v0.37.1 起修正。
 
 ![数值统一](docs/images/stat-match.png)
 
@@ -166,12 +172,12 @@ v0.36 之前，召唤出来的单位一律是 0 级，拿的是游戏里最低�
 
 为了不误导，这里如实写明哪些经过了实机验证：
 
-- 已实测：普通持刀暴徒互斗；新娘阿花与暗魔天堡之主魔渊对战；数值统一（两轮 109 项数值读回全部一致）；BOSS 常驻血条和生命数字；自由观战的隐身、锁血、声音跟随与退出恢复；暂不配队单位的召唤与存活计数；全部 8 个功能键的保存与生效回执；单位召唤键按各自的阵营召唤。
+- 已实测：普通持刀暴徒互斗；新娘阿花与暗魔天堡之主魔渊对战；数值统一（两轮 109 项数值读回全部一致；但当时没统一 1 级基准值，实际伤害并不相同，v0.37.1 起修正）；BOSS 常驻血条和生命数字；自由观战的隐身、锁血、声音跟随与退出恢复；暂不配队单位的召唤与存活计数；全部 8 个功能键的保存与生效回执；单位召唤键按各自的阵营召唤。
 - 召唤难度已实测：游戏本身保持入阵者，阿花和魔渊按逆天者、六十六天召唤，数值读回与游戏配置表一致（攻击约 1.43 倍、杀气攻击约 3 倍、杀气上限 2 倍；这两个 BOSS 的血量在各难度相同）。AI 的两类难度检查（行为树分支、技能池条件）都按所选难度回答，地图上的其他怪和整个世界仍是游戏难度。
 - 随从已实测（魔渊、阿花）：跟随、远距离和快速移动后的传送、和地图怪战斗、投技抓地图怪、与玩家互不伤害、召唤后立刻进入战斗；同时召两只、开着召唤难度时不卡顿。
 - 召唤等级已实测（死镇，附近地图怪 18～19 级）：召唤的阿花从 0 级提到 18 级，血量从 9000 变成 104652。上面的数值算法在魔渊、阿花、白鹤门弟子身上逐项核对，16 项全部一致。已加载的地图怪一只都没有时沿用记录的等级，这一条还没实测。
 - 趣味功能已实测：无限杀气一直锁满；自动格挡的每次按键游戏都收到了，轻攻击 9 次全是完美格挡；红光会自动按闪避。没有预告、或者预告来得太晚的攻击接不住。
-- v0.37 已实测：自定义数值的 223 项属性逐项写入、隔 0.5 秒读回并恢复，全部成功；自定义血量上限 9999 等四项的单位出生读回 HP=9999，交战中照常掉血；50 只小怪打魔渊，蓝方开不倒下后一只未倒；交战计时与日志里的游戏时间一致，画面顶部计时读回已显示；一次召唤 50 只约卡 1.4 秒；不死不休开启后小怪脱战会在下一帧被拉回，魔渊持续掉血，但仍有少数小怪会短暂走开；自由观战空格、Ctrl 升降。
+- v0.37 已实测：自定义数值的 223 项属性逐项写入、隔 0.5 秒读回并恢复，全部成功；伤害按 1 级基准值计算：v0.37.0 里血量上限填 9999999 的单位每一下仍掉上限的 13.6%（和原数值时的比例相同），攻击填 99999 伤害也不变；v0.37.1 连 1 级值一起改后，血量上限 9999999 的双镐疯妇被 10 只同级怪围攻 50 秒只掉约 0.5%，攻击 99999 一下打倒一只；50 只小怪打魔渊，蓝方开不倒下后一只未倒；交战计时与日志里的游戏时间一致，画面顶部计时读回已显示；一次召唤 50 只约卡 1.4 秒；不死不休开启后小怪脱战会在下一帧被拉回，魔渊持续掉血，但仍有少数小怪会短暂走开；自由观战空格、Ctrl 升降。
 - 可以尝试、但不保证：图鉴里的其他单位都能召唤，但不一定都能正常对打。个别单位有天生机制（例如机灵鬼天生无敌/穿透），不会因为召唤而改变。
 - 已知情况：清理时如果还有单位活着，游戏端第一遍会留下一条恢复记录。助手会在同一次点击里自动补做第二遍；在游戏里直接按「停止并清理」快捷键时，目前需要按两次。
 
@@ -293,7 +299,7 @@ python tools/package/build.py --deps <下载目录> --seed <游戏的 Runtime �
 2. Run `PhantomGladiator.exe`. The first-run guide finds the game in your Steam library and installs UE4SS and the mod in one click.
 3. Start the game, load a save, wait for the green "Connected" badge, then summon and fight.
 
-**Features**: 177 codex characters (75 bosses) · Blue / Red / No team (fight a boss yourself) · 1–100 per summon (1, 5, 10 or 50 in one click), no total cap · unit stats: the game's own, equal to the first unit (107 combat attributes), or custom — set any of the game's 223 attributes (max and current HP, shield, Sha-Chi, damage and resistance multipliers, status buildup, execution thresholds, movement speed, level…) for units you summon next, each one read back · summon difficulty: new units play at Wayfarer, Pathbreaker, Hellwalker or Sixty-Six Days (stats and the AI's difficulty checks) while the game, map enemies and your save keep their own difficulty · summon level: new units spawn at the level of the map enemies around you, so the same unit is stronger in later areas (final stat = base × (1 + level curve) × difficulty modifier × unit-type modifier; for example 9,000 HP at level 1 becomes 109,881 at level 19) · fun features for your own character: infinite Sha-Chi, auto perfect deflect and auto-dodge for attacks that can't be deflected (experimental) · undying switch per side (takes hits, never goes down) and fights that time themselves, also shown at the top of the game screen on request · blue and red no longer drift out of a fight and walk home · free camera (Space/E up, Ctrl/Q down) and no-aggro spectating · all 8 function keys rebindable (none bound by default) · per-unit summon keys that remember their own team and amount · companions: summon any unit to follow you and fight on your side (no limit, teleports back from 100 m or after fast travel, grabs work on map enemies, dismiss any time) · rematch with the last lineup · six UI languages chosen from your time zone · light and dark themes · update checks with mirrors and SHA-256 verification.
+**Features**: 177 codex characters (75 bosses) · Blue / Red / No team (fight a boss yourself) · 1–100 per summon (1, 5, 10 or 50 in one click), no total cap · unit stats: the game's own, equal to the first unit (107 combat attributes), or custom — set any of the game's 223 attributes (max and current HP, shield, Sha-Chi, damage and resistance multipliers, status buildup, execution thresholds, movement speed, level…) for units you summon next, each one read back. Damage is worked out from level-1 base values (a hit takes attacker's level-1 attack × move multiplier ÷ target's level-1 HP of the target's max HP), so custom HP, Sha-Chi, attack and Sha-Chi damage move those by the same ratio and equal stats copies them · summon difficulty: new units play at Wayfarer, Pathbreaker, Hellwalker or Sixty-Six Days (stats and the AI's difficulty checks) while the game, map enemies and your save keep their own difficulty · summon level: new units spawn at the level of the map enemies around you, so the same unit is stronger in later areas (final stat = base × (1 + level curve) × difficulty modifier × unit-type modifier; for example 9,000 HP at level 1 becomes 109,881 at level 19) · fun features for your own character: infinite Sha-Chi, auto perfect deflect and auto-dodge for attacks that can't be deflected (experimental) · undying switch per side (takes hits, never goes down) and fights that time themselves, also shown at the top of the game screen on request · blue and red no longer drift out of a fight and walk home · free camera (Space/E up, Ctrl/Q down) and no-aggro spectating · all 8 function keys rebindable (none bound by default) · per-unit summon keys that remember their own team and amount · companions: summon any unit to follow you and fight on your side (no limit, teleports back from 100 m or after fast travel, grabs work on map enemies, dismiss any time) · rematch with the last lineup · six UI languages chosen from your time zone · light and dark themes · update checks with mirrors and SHA-256 verification.
 
 **Requirements**: Windows 10/11 64-bit, WebView2 runtime (built in), Steam version of *Phantom Blade Zero* build 26266538 (other builds untested).
 

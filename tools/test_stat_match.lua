@@ -12,7 +12,9 @@ local function harness()
     end}
     function h:actor(hp,shachi,attack)
         local actor={values={},mods={}}
-        for field,value in pairs({Health=hp,Health_Max=hp,Shachi=shachi,Shachi_Max=shachi,Attack=attack,ShachiAttack=15,Resistance_Physical=0.2})do
+        -- Level-1 values as a level-10ish unit would have them: what the game works out damage from.
+        for field,value in pairs({Health=hp,Health_Max=hp,Shachi=shachi,Shachi_Max=shachi,Attack=attack,ShachiAttack=15,Resistance_Physical=0.2,
+                Health_Max_Lv1=hp/10,Shachi_Max_Lv1=shachi/5,Attack_Lv1=attack/2,ShachiAttack_Lv1=10,Infliction_Max_Lv1=80})do
             actor.values[field]={base=value,current=value}
         end
         return actor
@@ -150,7 +152,28 @@ test('custom fields beyond the matched ones: maxima first, an explicit current k
     assert(r.ok and a.values.Health_Max.current==5000 and a.values.Health.current==100,'the maximum is written before the current value')
     assert(#r.rejected==1 and r.rejected[1]=='Shield','an attribute this unit cannot read is named, not fatal')
     local wrote={};for _,w in ipairs(h.writes)do wrote[#wrote+1]=w.field end
-    assert(table.concat(wrote,',')=='Health_Max,Health',table.concat(wrote,','))
+    assert(table.concat(wrote,',')=='Health_Max_Lv1,Health_Max,Health',table.concat(wrote,','))
+end)
+test('custom HP and attack move their level-1 values by the same ratio; an explicit level-1 value wins',function()
+    local h=harness()
+    h.files['memory/stat-custom-request.tsv']='StatCustomV1\tR1\nHealth_Max\t5000\nAttack\t33\n'
+    assert(h.match:setMode('CUSTOM','R1').ok)
+    local a=h:actor(100,80,20);local r=h.match:onSpawn(a,'A')
+    assert(r.ok and a.values.Health_Max_Lv1.current==500 and math.abs(a.values.Attack_Lv1.current-16.5)<1e-9,r.message)
+    assert(a.values.Shachi_Max_Lv1.current==16 and a.values.ShachiAttack_Lv1.current==10,'untouched values keep their level-1 values')
+    local linked;for _,s in ipairs(h.logs)do if s:find('联动1级值',1,true) then linked=s end end
+    assert(linked and linked:find('Health_Max_Lv1 10→500',1,true),linked)
+    h.files['memory/stat-custom-request.tsv']='StatCustomV1\tR2\nHealth_Max\t5000\nHealth_Max_Lv1\t7\n'
+    assert(h.match:setMode('CUSTOM','R2').ok)
+    local b=h:actor(100,80,20);assert(h.match:onSpawn(b,'B').ok and b.values.Health_Max_Lv1.current==7 and b.values.Health_Max.current==5000)
+end)
+test('equal stats copies the level-1 values, so matched units take and deal the same hits',function()
+    local h=harness();h.match:toggle()
+    local a=h:actor(100,80,20);assert(h.match:onSpawn(a,'A').baseline)
+    local b=h:actor(300,200,60);assert(h.match:onSpawn(b,'B').applied)
+    for _,field in ipairs({'Health_Max_Lv1','Shachi_Max_Lv1','Attack_Lv1','ShachiAttack_Lv1','Infliction_Max_Lv1'})do
+        assert(b.values[field].current==a.values[field].current,field)
+    end
 end)
 test('the v1 switch file still reads as matching',function()
     local h=harness();h.files['memory/stat-match-settings.tsv']='StatMatchV1\t1\n'

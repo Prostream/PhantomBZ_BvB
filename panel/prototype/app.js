@@ -716,6 +716,8 @@
   const buildupField = (prefix, family) => prefix + "_" + (prefix === "Amplification" || family === "ElementalAccumulation" ? family : family + "Accumulation");
   const STAT_GROUPS = [
     { key: "core", fields: STAT_CORE.map(([f]) => f) },
+    // Damage is worked out from these (stat_match.lua); the core four move them by the same ratio.
+    { key: "lv1", fields: ["Health_Max_Lv1", "Shachi_Max_Lv1", "Attack_Lv1", "ShachiAttack_Lv1", "Infliction_Max_Lv1"] },
     { key: "health", fields: ["Health", "Health_Min", "Shield", "Shield_Max"] },
     { key: "shachi", fields: ["Shachi", "Shachi_Min", "ShachiRegen", "ShachiRegenCooldown", "HeavyAttack_ShachiCostReduction", "BreakDurationAdditionalMultiplier"] },
     { key: "defense", fields: [...STAT_PREFIXES.slice(3).map(p => p + "_Poise"), "Resistance_BreakDamageAdditionalMultiplier", ...STAT_PREFIXES.slice(4).map(p => p + "_BreakDamage"), ...STAT_PREFIXES.map(p => p + "_DefenceShachi")] },
@@ -727,7 +729,6 @@
     { key: "execution", fields: ["ExecutionExecutorNormalHealthThreshold", "ExecutionExecutorBreakHealthThreshold", "ExecutionTargetNormalHealthThreshold", "ExecutionTargetBreakHealthThreshold"] },
     { key: "movement", fields: ["WalkSpeed", "JogSpeed", "SprintSpeed", "CrouchSpeed", "FinalWalkSpeed"] },
     { key: "other", fields: ["Level", "MindDustAdditiveMultiplier", "PowerScore", "XP", "Coin", "Corrosion"] },
-    { key: "lv1", fields: ["Health_Max_Lv1", "Shachi_Max_Lv1", "Attack_Lv1", "ShachiAttack_Lv1", "Infliction_Max_Lv1"] },
   ];
   const groupHeading = g => g.family ? "stats.family." + g.family : "stats.group." + g.key;
   // field -> [heading key or null, own key]: "family · multiplier", or a name of its own.
@@ -876,8 +877,8 @@
     openDialog("match", `<div class="dialog-head"><span class="row-icon">${icon("scale")}</span><h2 id="dlg-title">${esc(t("stats.rules.title"))}</h2><button class="icon-btn icon-btn-sm" type="button" data-action="dialog-close" aria-label="${esc(t("common.close"))}">${icon("x")}</button></div>
       <div class="dialog-body">
         <h3 class="rule-head">${esc(t("stats.mode.game"))}</h3><p class="rule-text">${esc(t("stats.rules.game"))}</p>
-        <h3 class="rule-head">${esc(t("stats.mode.match"))}</h3>${rules("match.rules.", 7)}
-        <h3 class="rule-head">${esc(t("stats.mode.custom"))}</h3>${rules("stats.rules.custom.", 6)}
+        <h3 class="rule-head">${esc(t("stats.mode.match"))}</h3>${rules("match.rules.", 8)}
+        <h3 class="rule-head">${esc(t("stats.mode.custom"))}</h3>${rules("stats.rules.custom.", 7)}
       </div>
       <div class="dialog-foot"><button class="btn btn-primary" type="button" data-action="dialog-close" data-autofocus>${esc(t("common.gotIt"))}</button></div>`, "dialog-sm");
   }
