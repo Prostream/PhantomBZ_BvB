@@ -474,22 +474,21 @@ namespace PhantomGladiator
             return false;
         }
 
-        // latest.json lives in the repository and is fetched through CDNs that work in mainland China first.
+        // latest.json lives in the repository and is fetched through every source at once (the CDNs that work
+        // in mainland China are listed first). A CDN can keep serving an old copy for hours after a release
+        // (jsDelivr did after v0.37.0), so the newest version any source reports wins; on a tie the source
+        // listed first is kept.
         public Dictionary<string, object> Check(string lang)
         {
-            var tried = new List<string>();
-            foreach (var entry in build.Manifests)
+            var sources = build.Manifests.Select(entry => entry.Split(new[] { '|' }, 2)).ToList();
+            var fetching = sources.Select(parts => Task.Run(() => Fetch(parts[1]))).ToArray();
+            manifest = null;
+            foreach (var task in fetching)
             {
-                var parts = entry.Split(new[] { '|' }, 2);
-                tried.Add(parts[0]);
-                try
-                {
-                    manifest = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(Get(parts[1], 6000));
-                    break;
-                }
-                catch (Exception) { manifest = null; }
+                var found = task.Result;
+                if (found != null && (manifest == null || Newer((string)found["version"], (string)manifest["version"]))) manifest = found;
             }
-            if (manifest == null) throw new HostError("offline", "", tried.ToArray());
+            if (manifest == null) throw new HostError("offline", "", sources.Select(parts => parts[0]).ToArray());
             var version = (string)manifest["version"];
             if (!Newer(version, build.AppVersion)) return new Dictionary<string, object> { { "latest", true }, { "version", build.AppVersion } };
             var lines = new List<object>();
@@ -499,6 +498,19 @@ namespace PhantomGladiator
             var all = manifest.ContainsKey("notes") ? manifest["notes"] as Dictionary<string, object> : null;
             if (all != null) notes = all.ContainsKey(lang) ? all[lang] : (all.ContainsKey("en") ? all["en"] : notes);
             return new Dictionary<string, object> { { "latest", false }, { "version", version }, { "date", manifest["date"] }, { "size", manifest["size"] }, { "notes", notes }, { "lines", lines } };
+        }
+
+        // A manifest an update can be installed from (version, size, SHA-256 and download lines), or null.
+        static Dictionary<string, object> Fetch(string url)
+        {
+            try
+            {
+                var found = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(Get(url, 6000));
+                if (found == null || !(found.ContainsKey("version") && found["version"] is string) || !(found.ContainsKey("sha256") && found["sha256"] is string)
+                    || !found.ContainsKey("size") || !(found.ContainsKey("downloads") && found["downloads"] is System.Collections.ArrayList)) return null;
+                return found;
+            }
+            catch (Exception) { return null; }
         }
 
         static object Latency(string url)
