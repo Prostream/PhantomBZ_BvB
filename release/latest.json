@@ -1,58 +1,58 @@
 {
-  "version": "0.37.4",
-  "date": "2026-11-02T00:07:04+08:00",
-  "size": 20738523,
-  "sha256": "fdfe30660351aec77aa6f6c4a29d0502d74e2568dcdfece1e5c6ba80b3214f73",
+  "version": "0.37.5",
+  "date": "2026-11-02T12:22:05+08:00",
+  "size": 20742814,
+  "sha256": "a4c5a511444830c1ae5fb0bf5631e730433ef29ab8ba0647e1c4e3214dddae3e",
   "notes": {
     "zh": [
-      "随从对玩家始终友好：开着自由观战或无仇恨时召唤的随从，关掉后会对玩家变回敌对，攻击会打到玩家。现在无仇恨不再改动随从，随从每秒自检，被改了会立刻改回",
-      "检查更新里新增「更新记录」，可以查看每个版本更新了什么",
-      "进地图后不再因为检查怪物头像卡顿一下",
+      "单位、章节和地图名称跟随游戏语言：带新模组进一次地图后，助手显示你游戏里的名称，游戏是英文就显示英文名",
+      "中文名称和游戏图鉴一致（例如「重弩客」「水行钓者」「大司乐」），旧名仍能搜到；两个同名的左殇会注明地图",
+      "游戏里 BOSS 血条上的单位名和队伍名也跟随游戏语言",
       "这一版需要更新游戏内模组，请按助手提示操作"
     ],
     "en": [
-      "Companions stay on your side: one summoned while the free camera or no aggro was on turned hostile to you when it was switched off, so its attacks hit you. No aggro now leaves companions alone, and they check every second that they are still friendly",
-      "Release history under Check for updates: see what each version changed",
-      "No more brief stutter from the portrait check after entering a map",
+      "Unit, chapter and map names follow your game's language: after you enter a map once with the new mod, the app shows the names from your own game, in English if your game is in English",
+      "Units the game gives the same name show their map; Chinese names still work in search",
+      "The in-game boss health bars show unit and team names in your game's language",
       "This version updates the in-game mod; follow the prompt in the app"
     ],
     "ja": [
-      "お供は常に味方に：自由視点やヘイト無効がオンのときに召喚したお供は、オフにすると敵対に戻り、攻撃が自分に当たっていました。ヘイト無効はお供に触れなくなり、お供は毎秒味方のままか確認します",
-      "アップデートの確認に「更新履歴」を追加：各バージョンの変更内容を確認できます",
-      "マップに入った後、アイコンの確認で一瞬止まることがなくなりました",
+      "ユニット・章・マップ名がゲームの言語に：新しいModで一度マップに入ると、アプリはあなたのゲームの名前をゲームの言語で表示します",
+      "ゲーム内で同じ名前のユニットはマップ名を添えて区別します。中国語名でも検索できます",
+      "ゲーム内のボスHPバーのユニット名とチーム名もゲームの言語で表示します",
       "今回はゲーム内Modの更新が必要です。アプリの案内に従ってください"
     ],
     "fr": [
-      "Les compagnons restent dans votre camp : un compagnon invoqué avec la caméra libre ou le mode sans aggro activés redevenait hostile à leur désactivation, et ses attaques vous touchaient. Le mode sans aggro ne touche plus aux compagnons, qui vérifient chaque seconde qu'ils sont toujours alliés",
-      "Historique des mises à jour dans « Rechercher des mises à jour » : voyez ce que chaque version a changé",
-      "Plus de brève saccade due à la vérification des portraits après l'entrée dans une carte",
+      "Les noms des unités, chapitres et cartes suivent la langue du jeu : après être entré une fois dans une carte avec le nouveau mod, l'application affiche les noms de votre jeu, dans sa langue",
+      "Les unités que le jeu nomme de la même façon indiquent leur carte ; les noms chinois restent utilisables dans la recherche",
+      "Les barres de vie des boss en jeu affichent les noms d'unité et d'équipe dans la langue du jeu",
       "Cette version met à jour le mod en jeu ; suivez l'invite de l'application"
     ],
     "de": [
-      "Begleiter bleiben auf deiner Seite: Wer bei aktiver freier Kamera oder ohne Aggro beschworen wurde, wurde beim Ausschalten wieder feindlich, und seine Angriffe trafen dich. Kein Aggro lässt Begleiter jetzt in Ruhe, und sie prüfen jede Sekunde, dass sie noch verbündet sind",
-      "Update-Verlauf unter „Nach Updates suchen“: sieh nach, was jede Version geändert hat",
-      "Kein kurzes Ruckeln mehr durch die Porträtprüfung nach dem Betreten einer Karte",
+      "Einheiten-, Kapitel- und Kartennamen folgen der Sprache deines Spiels: Sobald du mit dem neuen Mod einmal eine Karte betreten hast, zeigt die App die Namen aus deinem Spiel in dessen Sprache",
+      "Einheiten, die im Spiel gleich heißen, zeigen ihre Karte; chinesische Namen funktionieren weiter in der Suche",
+      "Die Boss-Lebensbalken im Spiel zeigen Einheiten- und Teamnamen in der Sprache deines Spiels",
       "Diese Version aktualisiert den Mod im Spiel; folge dem Hinweis in der App"
     ],
     "es": [
-      "Los compañeros siguen de tu lado: uno invocado con la cámara libre o sin aggro activados volvía a ser hostil al desactivarlos, y sus ataques te alcanzaban. Ahora sin aggro no toca a los compañeros, que comprueban cada segundo que siguen siendo aliados",
-      "Historial de actualizaciones en «Buscar actualizaciones»: consulta qué cambió en cada versión",
-      "Se acabó el breve tirón al comprobar los retratos tras entrar en un mapa",
+      "Los nombres de unidades, capítulos y mapas siguen el idioma de tu juego: tras entrar una vez en un mapa con el nuevo mod, la aplicación muestra los nombres de tu propio juego, en su idioma",
+      "Las unidades que el juego llama igual muestran su mapa; los nombres en chino siguen sirviendo para buscar",
+      "Las barras de vida de los jefes en el juego muestran los nombres de unidad y equipo en el idioma de tu juego",
       "Esta versión actualiza el mod del juego; sigue el aviso de la aplicación"
     ]
   },
   "downloads": [
     {
       "id": "cn1",
-      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.4/PhantomGladiator-0.37.4-win64.zip"
+      "url": "https://ghfast.top/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.5/PhantomGladiator-0.37.5-win64.zip"
     },
     {
       "id": "cn2",
-      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.4/PhantomGladiator-0.37.4-win64.zip"
+      "url": "https://gh-proxy.com/https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.5/PhantomGladiator-0.37.5-win64.zip"
     },
     {
       "id": "github",
-      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.4/PhantomGladiator-0.37.4-win64.zip"
+      "url": "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.5/PhantomGladiator-0.37.5-win64.zip"
     }
   ]
 }
