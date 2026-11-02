@@ -35,4 +35,32 @@ local failed=HUD.new({isBoss=function()return true end,hp=function()return 10 en
 for _=1,20 do failed:sync(members)end
 assert(calls==6,'failed construction must be bounded per actor')
 failed:clear();failed:sync(members);assert(calls==8,'manual cleanup resets failed registration attempts')
-print('arena_hud: PASS (independent ownership, rebind recovery, real HP/max, dead hide, bounded creation, cleanup)')
+
+-- Bosses and their names come from codex.tsv: up to v0.37.4 it ends at source, v0.37.5 adds name and name_lang.
+local codexPath='D:/unit-test/Runtime/codex.tsv'
+local realOpen,codexText,reads=io.open,nil,0
+io.open=function(path,mode)
+    assert(path==codexPath and mode=='rb');reads=reads+1
+    return {read=function()return codexText end,close=function()end}
+end
+blue.hp,red.hp=100,80
+local titles={}
+local bars=HUD.new({codexPath=codexPath,hp=function(a)return a.hp end,maxHP=function()return 100 end,renderer={
+    create=function(_,unit)return {widget=object(300),actor=unit.actor} end,
+    update=function(_,_,_,_,_,title)titles[#titles+1]=title;return {visible=true,health=true,names=true,numbers=true} end,
+    remove=function()return true end,syncNative=function()end}})
+local fight={{actor=blue,team='blue',class_path='/Game/Boss.Boss_C'},{actor=red,team='red',class_path='/Game/Mob.Mob_C'}}
+codexText='class_path\tzh_name\tis_boss\tenemy_type\tsource\r\n/Game/Boss.Boss_C\t舞狮尊主\t1\t5\tnative\r\n/Game/Mob.Mob_C\t暴徒\t0\t1\tnative\r\n'
+bars:sync(fight);assert(#titles==1 and titles[1]=='蓝队 · 舞狮尊主',table.concat(titles,','))
+codexText='class_path\tzh_name\tis_boss\tenemy_type\tsource\tname\tname_lang\r\n/Game/Boss.Boss_C\t舞狮尊主\t1\t5\tnative\tLion Dancer\ten\r\n/Game/Mob.Mob_C\t暴徒\t0\t1\tnative\tThug\ten\r\n'
+bars:sync(fight);assert(titles[2]=='蓝队 · 舞狮尊主' and reads==1,'the loaded list is kept until the export says the file changed')
+bars:reloadCodex();bars:sync(fight)
+assert(reads==2 and titles[3]=='Blue · Lion Dancer',tostring(titles[3]))
+codexText=codexText:gsub('\ten\r\n','\tko\r\n')
+bars:reloadCodex();bars:sync(fight);assert(titles[4]=='Blue · Lion Dancer','languages without team names fall back to English')
+codexText='class_path\tzh_name\tis_boss\tenemy_type\tsource\tname\tname_lang\r\n/Game/Boss.Boss_C\t舞狮尊主\t1\t5\tnative\t被面具控制的舞狮尊主：烈焰\tzh-Hans\r\n'
+bars:reloadCodex();bars:sync(fight);assert(titles[5]=='蓝队 · 被面具控制的舞狮尊主：烈焰',tostring(titles[5]))
+codexText='class_path\tzh_name\tis_boss\tenemy_type\tsource\tname\tname_lang\r\n/Game/Boss.Boss_C\t舞狮尊主\t1\t5\tnative\t\t\r\n'
+bars:reloadCodex();bars:sync(fight);assert(titles[6]=='蓝队 · 舞狮尊主','an empty name falls back to the Chinese one')
+io.open=realOpen
+print('arena_hud: PASS (independent ownership, rebind recovery, real HP/max, dead hide, bounded creation, cleanup, both codex formats, names and team labels in the game language)')

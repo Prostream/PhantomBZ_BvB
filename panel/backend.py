@@ -133,6 +133,9 @@ BINDING_NAMES = LEGACY_BINDING_NAMES + ("toggle_camera", "exit_camera", "cycle_t
 BINDING_LABELS = dict(zip(BINDING_NAMES, ("召唤所选单位", "开始交战", "停止并清理", "刷新单位目录", "自由观战（无仇恨＋隐身＋无敌锁血）", "退出自由观战并恢复", "切换召唤队伍", "单独切换无仇恨")))
 CATALOG_FIELDS = ("id", "name", "category", "class_path", "loaded", "spawnable", "reason")
 CODEX_FIELDS = ("class_path", "zh_name", "is_boss", "enemy_type", "source")
+# From v0.37.5 the mod adds the name in the game's current language and that language (codex_catalog_export.lua).
+CODEX_FIELDS_NAMED = CODEX_FIELDS + ("name", "name_lang")
+LANGUAGE_CODE = re.compile(r"[A-Za-z0-9-]{0,16}")
 LABEL_FIELDS = ("display_name", "internal_name", "category", "category_source", "category_special", "name_source", "name_source_label",
                 "traits", "trait_labels", "family_id", "untranslated_tokens", "species_label")
 CODEX_ENEMY_TYPES = {"None": "unknown", "Animal": "1", "GuaiMian": "2", "DragonModified": "3", "HumanMaster": "4", "Puppet": "5"}
@@ -350,7 +353,8 @@ class Bridge:
             if text is None:
                 return evidence, errors
             rows = tsv_rows(text)
-            if tuple(next(rows, [])) != CODEX_FIELDS:
+            fields = tuple(next(rows, []))
+            if fields not in (CODEX_FIELDS, CODEX_FIELDS_NAMED):
                 raise ValidationError("codex.tsv: unsupported header")
             for number, row in enumerate(rows, 2):
                 if not row:
@@ -362,9 +366,13 @@ class Bridge:
                         evidence.pop(path, None)
                         raise ValidationError("duplicate/contradictory class_path; all evidence for this path ignored")
                     seen.add(path)
-                    if len(row) != len(CODEX_FIELDS):
+                    if len(row) != len(fields):
                         raise ValidationError("wrong column count")
-                    item = dict(zip(CODEX_FIELDS, row))
+                    item = dict(zip(fields, row))
+                    if item.get("name"):
+                        clean_field(item["name"], "name", 512)
+                    if not LANGUAGE_CODE.fullmatch(item.get("name_lang", "")):
+                        raise ValidationError("invalid name_lang")
                     if not trusted_codex_source(item["source"]):
                         raise ValidationError("source is not a recognized game codex exporter source")
                     item["source_detail"] = item["source"]
@@ -1062,6 +1070,22 @@ class Bridge:
                 icons[unit] = f"/codex-icons/{name}.png"
         return {"icons": icons, "count": len(icons)}
 
+    def unit_names(self):
+        """Names in the player's game language by the app's unit id (the class's short name), with chapter and map
+        names; empty until a mod that exports them (v0.37.5+) has run. The app keeps its Chinese names until then."""
+        codex, _ = self._codex_evidence()
+        locations, _ = self._location_evidence(codex)
+        units, lang = {}, ""
+        for path, item in codex.items():
+            name = item.get("name") or ""
+            if not name or not item.get("name_lang"):
+                continue
+            lang = lang or item["name_lang"]
+            unit = path.rsplit("/", 1)[-1].split(".", 1)[0]
+            place = locations.get(path) or {}
+            units[unit] = {"name": name, "map": place.get("map_name") or "", "chapter": place.get("chapter_name") or ""}
+        return {"lang": lang, "units": units, "count": len(units)}
+
     def stat_settings(self):
         """The spawn stat mode and custom values the mod saved (stat_match.lua, Runtime/stat-match-settings.tsv)."""
         # Lua writes this file in text mode, so on Windows its lines end in CRLF.
@@ -1174,6 +1198,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.bridge.stat_settings()
             elif path == "/api/codex-icons":
                 result = self.server.bridge.codex_icons()
+            elif path == "/api/unit-names":
+                result = self.server.bridge.unit_names()
             elif path.startswith("/codex-icons/"):
                 # A codex bust the mod saved on this PC; never shipped with the app.
                 name = path[len("/codex-icons/"):]

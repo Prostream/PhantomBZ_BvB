@@ -13,6 +13,7 @@ const RealRuntime = (() => {
 
   const s = {
     icons: {},                  // unit id -> codex bust URL (codex_icons.lua, backend.py /api/codex-icons)
+    unitNames: null,            // names in the game's language (codex_catalog_export.lua, backend.py /api/unit-names)
     game: "offline",            // offline | connecting | notInMap | ready | mismatch
     gameRunning: false,
     appVersion: "",
@@ -119,6 +120,18 @@ const RealRuntime = (() => {
     if (JSON.stringify(icons) === JSON.stringify(s.icons)) return;
     s.icons = icons;
     emit({ type: "state", parts: new Set(["sel", "grid", "match", "keys"]) });
+  }
+
+  // Unit, chapter and map names in the player's game language, exported by the mod on every load; asked for with
+  // the icons. Until the game has run with v0.37.5+ the list is empty and the app keeps its Chinese names.
+  async function loadNames() {
+    const r = await fetch("/api/unit-names", { cache: "no-store" });
+    if (!r.ok) return;
+    const data = await r.json();
+    const names = data.count ? { lang: data.lang || "", units: data.units || {} } : null;
+    if (JSON.stringify(names) === JSON.stringify(s.unitNames)) return;
+    s.unitNames = names;
+    emit({ type: "state", parts: new Set(["names", "sel", "grid", "match", "keys", "solo", "companion"]) });
   }
 
   // ---------- Status ----------
@@ -241,7 +254,7 @@ const RealRuntime = (() => {
     // Catalog: once per session, after a scan, and when unit keys change.
     const key = [g.game_session || "", data.catalog?.total || 0, v.unit_keys_revision || "", v.unit_keys_epoch || ""].join("|");
     if (key !== catalogKey) { catalogKey = key; loadCatalog().catch(() => { catalogKey = ""; }); }
-    if (Date.now() - iconsAt > (Object.keys(s.icons).length ? 60000 : 15000)) loadIcons().catch(() => {});
+    if (Date.now() - iconsAt > (Object.keys(s.icons).length ? 60000 : 15000)) { loadIcons().catch(() => {}); loadNames().catch(() => {}); }
 
     // Events, in the same shapes MockRuntime sends.
     if (s.game !== was.game) emit({ type: "game" });

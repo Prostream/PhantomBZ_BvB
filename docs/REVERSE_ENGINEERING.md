@@ -1183,3 +1183,25 @@ B站反馈：怪物当随从时，范围攻击会打到主角；不只 BOSS，�
 - codex_icons.lua：0.37.3 冷启动时第一次检查 177 张图卡了 523 ms（Restart All Mods 后同一步只要 11 ms），推测是冷启动时逐个打开 PNG。现在先读 codex-icons.tsv，抽查一张存在就整份认定，不再逐个打开；抽查的那张不在才逐个检查。
 - 助手：检查更新窗口加"更新记录"（changelog.js，打包内置，0.30.0 起 11 个版本的六语说明，取自历次 release/latest.json），已是最新、联网失败、有新版本三种状态都能展开看。原有的 historyHTML 是"操作记录"抽屉，同名函数后定义的覆盖前面的，新函数改名 releaseHistoryHTML。
 - 测试：test_spectator_mode（玩家一方不接管、关闭设友好、检查出错按普通 NPC）、test_companion（恒等友好、改不动的退避、坐骑）、test_codex_icons（按索引认定、删文件夹后重新检查），Lua 54 项全部通过。BUILD=v0.37.4-friendly，随从命中探查关闭。
+
+## 单位、章节、地图名跟随游戏语言（v0.37.5，2026-11-02）
+
+为了上 Nexus Mods 面向海外玩家：助手的界面有六种语言，但单位名、章节名、地图名一直只有中文（units.js 是从中文游戏导出后打包的）。
+
+- 图鉴行 FCodexEnemyRow（ProjectPBZ.hpp）里名字有两份：`EnemyName`（FFlowLocText：Namespace、Key、ValueCache FText）和 `Enemy_CH_Hans_Name`（FString，固定简体中文）。codex_catalog_export.lua 原来只读后者，写进 codex.tsv 的 zh_name 列。地图、章节名（codex-locations.tsv）一直是游戏当前语言：WorldMapCatalog 用 GetMapNameTextFromMapID 和 EventPipelineManager.Conv_LocTextToString(FFlowLocText)。
+- v0.37.5：导出时 EnemyName 交给 WorldMapCatalog:localize（先读 ValueCache，空的再用 Conv_LocTextToString），codex.tsv 末尾加 `name`（游戏当前语言的名字，读不到就用中文名）和 `name_lang`（KismetInternationalizationLibrary.GetCurrentLanguage，只保留字母数字和连字符，最多 16 位）。日志多一段"游戏语言=…，本地化名称=n/总行数"。旧列不动。
+- 后端 backend.py：codex.tsv 同时接受 5 列（v0.37.4 及以前）和 7 列表头；`GET /api/unit-names` 按助手的单位 id（类路径的短名）返回 name、章节名、地图名，只有带 name_lang 的新导出才返回。
+- 助手：real-runtime.js 和头像一起轮询名称；app.js 拿到后替换单位名、章节名、地图名和首字，搜索同时匹配新名称和中文名；没有新导出（还没带新模组进过游戏）时保持 units.js 的中文。设置里"单位名称暂时显示中文"的说明改为跟随游戏语言。
+- 离线：test_codex_catalog_export（7 列、EnemyName 经地图目录解析、退回缓存文本、语言代码清理、别名同名）、test_backend（5 列/7 列、/api/unit-names、坏语言代码的行丢弃、路由）。端到端：用一份 7 列的英文样式 codex.tsv 启动真实后端和界面，卡片、分组标题、新手推荐都显示英文名，"thug"搜到 17 个、"暴徒"搜到 11 个。
+- 顺带看到（未改）：后端 CSP 是 default-src 'self'，界面里 data: 内嵌的 SVG（窗口图标、下拉框箭头）被拦截，下拉框没有箭头。
+- 实机（2026-11-02，中文游戏，测试版 0.37.20）：日志 `[CodexCatalog] … 游戏语言=zh-Hans，本地化名称=177/177`。分母是图鉴行数 177；导出的类路径是 181 条，别名和本体共用名字。codex.tsv 是 7 列，181 行的 name_lang 都是 zh-Hans。后端读这份真实文件返回 181 个名字，助手的 177 个单位全部有名字，章节名、地图名和原来一致。
+- 发现：EnemyName 是游戏图鉴里显示的正式名，和 Enemy_CH_Hans_Name 不完全一样，有 29 个单位不同。后者带开发备注，比如"重弩客——颜色，紫绿（重弩客）""白河钓者（水行钓者）"；前者是"重弩客""水行钓者"，另有"寒冰乐师偶"→"大司乐"、"龙体左殇"→"左殇：真龙之躯"、"舞狮尊主"→"被面具控制的舞狮尊主：烈焰"。所以中文玩家看到的名字也会变成游戏图鉴里的名字。旧名仍能搜到：搜"龙体左殇"得到"左殇：真龙之躯"。
+- 重名：游戏把序章和结局的两个左殇都叫"“组织”冥主：左殇"，units.js 原来靠"（银发）"区分。队伍列表只显示名字，两个会分不清。所以 applyNames 遇到不同单位同名时，在名字后面加地图名，变成"“组织”冥主：左殇（序章）"和"“组织”冥主：左殇（断魂山）"；中日文用全角括号，其它语言用半角括号。用这份真实导出在界面里验证过。
+- 未实机：英文游戏下的英文名。这次只测了中文游戏，英文显示只用合成数据验证过。
+- 发布前查出的回归：BOSS 血条（arena_hud.lua）读 codex.tsv 时要求表头正好是 5 列（`source` 后面直接换行）。7 列表头匹配失败，BOSS 名单为空，游戏里蓝红两队的 BOSS 血条会全部不显示。它的离线测试注入了 isBoss/getName，没走读文件这条路；实机测试时也没有召唤 BOSS，所以都没暴露。修复：
+  - 表头接受 5 列和 7 列。
+  - 血条上的名字用 name 列（游戏语言），空的退回 zh_name。
+  - 队伍名按 name_lang 选：zh 仍是"蓝队/红队"，ja/fr/de/es/en 与助手的队伍名一致，其它语言用英文。
+  - codex 导出写入成功后，通过 onWritten 回调让血条重读文件。安装包附带的初始 codex.tsv 来自作者游戏的 Runtime（build.py `--seed` 的默认路径），现在是 7 列、zh-Hans；新玩家第一次进地图导出后，血条当场换成游戏语言，不用等下次启动。
+  - arena_boss_hud.lua 也有同样的严格表头，但 main 已不引用它（只有它自己的测试），没有改。
+- 测试：test_arena_hud 新增新旧两种表头、英文名和队伍名、韩语等没有队伍名的语言退回英文、空名退回中文、导出后重读；test_codex_catalog_export 新增写入成功后回调一次、失败不回调。Lua 54 项、后端 65 项全部通过。血条修复没有实机验证。

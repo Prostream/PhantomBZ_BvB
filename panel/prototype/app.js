@@ -36,9 +36,34 @@
     const clean = tail.replace(/[“”"「」『』（）()\s—\-，,]/g, "");
     return (clean || name).charAt(0);
   }
-  const UNITS = PG_UNITS.map(u => ({ ...u, initial: initialOf(u.name), search: u.name.toLowerCase() }));
+  const UNITS = PG_UNITS.map(u => ({ ...u, zhName: u.name, zhMap: u.map, zhChName: u.chName, initial: initialOf(u.name), search: u.name.toLowerCase() }));
   const byId = new Map(UNITS.map(u => [u.id, u]));
-  const CHAPTERS = [...new Map(UNITS.map(u => [u.ch, { ch: u.ch, name: u.chName, map: u.map }])).values()].sort((a, b) => a.ch - b.ch);
+  const buildChapters = () => [...new Map(UNITS.map(u => [u.ch, { ch: u.ch, name: u.chName, map: u.map }])).values()].sort((a, b) => a.ch - b.ch);
+  let CHAPTERS = buildChapters();
+  // Names from the player's own game, in its language (codex_catalog_export.lua via /api/unit-names), over the
+  // Chinese ones units.js ships; the Chinese name stays searchable. The game gives a few different units one name
+  // (Zuo Shang in the prologue and at the end), so those also show their map, as team lists show only the name.
+  let namesKey = "";
+  function applyNames(data) {
+    const key = data ? JSON.stringify(data) : "";
+    if (key === namesKey) return;
+    namesKey = key;
+    const uses = new Map();
+    for (const u of UNITS) {
+      const n = data?.units?.[u.id];
+      u.name = n?.name || u.zhName;
+      u.map = n?.map || u.zhMap;
+      u.chName = n?.chapter || u.zhChName;
+      u.initial = initialOf(u.name);
+      uses.set(u.name, (uses.get(u.name) || 0) + 1);
+    }
+    for (const u of UNITS) {
+      const place = u.map || u.chName;
+      if (uses.get(u.name) > 1 && place) u.name = /[　-鿿＀-￯]/.test(u.name) ? `${u.name}（${place}）` : `${u.name} (${place})`;
+      u.search = (u.name === u.zhName ? u.name : `${u.name} ${u.zhName}`).toLowerCase();
+    }
+    CHAPTERS = buildChapters();
+  }
 
   // ---------- State ----------
   const detected = I18N.detect();
@@ -2107,6 +2132,7 @@
       case "state": {
         // RealRuntime names the parts whose data changed, so polling never re-renders what the player is using.
         const p = event.parts;
+        if (p.has("names")) applyNames(S.unitNames);
         if (p.has("topbar")) renderTopbar();
         if (ui.page === "arena") {
           if (p.has("sel")) { renderBanner(); renderSelection(); }

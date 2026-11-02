@@ -650,6 +650,26 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(unit["name_source"].startswith("working_translation"))
         self.assertIn("非官方", unit["name_source_label"])
 
+    def test_names_in_the_game_language_are_served_by_unit_id_and_older_exports_give_none(self):
+        alias=UNIT.replace('Vessel_Child','Vessel_Alias')
+        with (self.bridge.runtime/'catalog.tsv').open('a',encoding='utf-8') as f:
+            f.write('\t'.join((alias,'Alias','怪物',alias,'0','1',NPC_REASON))+'\n')
+        rows=('\t'.join((UNIT,'主图鉴名','0','Puppet','native_codex:FCodexEnemyRow;EnemyClass'))+'\n'+
+            '\t'.join((alias,'主图鉴名','0','Puppet','native_codex:FCodexEnemyRow;AliasEnemyClasses;canonical='+UNIT))+'\n')
+        self.write('codex.tsv','\t'.join(backend.CODEX_FIELDS)+'\n'+rows)
+        self.assertEqual(self.bridge.unit_names(),{'lang':'','units':{},'count':0},'a v0.37.4 export has no names in the game language')
+        named=('\t'.join((UNIT,'主图鉴名','0','Puppet','native_codex:FCodexEnemyRow;EnemyClass','Vessel Child','en'))+'\n'+
+            '\t'.join((alias,'主图鉴名','0','Puppet','native_codex:FCodexEnemyRow;AliasEnemyClasses;canonical='+UNIT,'Vessel Child','en'))+'\n')
+        self.write('codex.tsv','\t'.join(backend.CODEX_FIELDS_NAMED)+'\n'+named)
+        header='\t'.join(backend._taxonomy_module.LOCATION_FIELDS)+'\n'
+        self.write('codex-locations.tsv',header+'\t'.join((UNIT,'Map_A','Weeping Valley','Chapter_X','Upstream','2','3','Actual_Level','4',UNIT,'assigned','native_codex_own_map_v1'))+'\n')
+        self.assertEqual(self.bridge.catalog()['codex_errors'],[],'the seven-column codex is read like the five-column one')
+        self.assertEqual(self.bridge.unit_names(),{'lang':'en','count':2,'units':{
+            'BP_Monster_Vessel_Child':{'name':'Vessel Child','map':'Weeping Valley','chapter':'Upstream'},
+            'BP_Monster_Vessel_Alias':{'name':'Vessel Child','map':'','chapter':''}}})
+        self.write('codex.tsv','\t'.join(backend.CODEX_FIELDS_NAMED)+'\n'+named.replace('\ten\n','\ten;rm -rf\n',1))
+        self.assertEqual(self.bridge.unit_names()['count'],1,'a row with a malformed language is dropped')
+
     def test_native_map_chapter_chain_and_official_alias_are_exact_and_do_not_unlock(self):
         alias=UNIT.replace('Vessel_Child','Vessel_Alias')
         with (self.bridge.runtime/'catalog.tsv').open('a',encoding='utf-8') as f:
@@ -1071,6 +1091,8 @@ class HTTPTests(unittest.TestCase):
             "BP_Monster_AHua_GuiTouDao": "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png",
             "BP_Monster_AHua_Story": "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png",
             "BP_Monster_MaleThug_Sword": "/codex-icons/T_BP_Monster_MaleThug_Sword_w.png"}})
+        status, _, raw = self.request("GET", "/api/unit-names")
+        self.assertEqual((status, json.loads(raw)["count"]), (200, 0), "names route answers before the game has run")
         status, headers, raw = self.request("GET", "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png")
         self.assertEqual((status, headers["Content-Type"], raw), (200, "image/png", png))
         self.assertEqual(headers["Cache-Control"], "max-age=86400")

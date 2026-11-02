@@ -2,6 +2,8 @@
 -- ProjectPBZ.hpp:374-400 FCodexEnemyRow；8677-8703 PBZCodexSubsystem。
 -- GetAllEnemyCodexEntries的返回类型在dump中缺失：运行时仅接纳有已核实字段的数组行。
 -- UE4SS dff435dd LuaTSoftObjectPtr.cpp/GetObjectID 与 LuaFSoftObjectPath.cpp/GetAssetPathName。
+-- name 列是游戏当前语言的名称（EnemyName，FFlowLocText，按地图名同样的方式解析），name_lang 是游戏语言
+-- （KismetInternationalizationLibrary.GetCurrentLanguage）；助手按它显示单位名。zh_name 仍是 Enemy_CH_Hans_Name。
 local Exporter = {}
 local ENEMY_TYPES = { [0] = "None", [1] = "Animal", [2] = "GuaiMian", [3] = "DragonModified", [4] = "HumanMaster", [5] = "Puppet" }
 local MAX_ENTRIES, MAX_ALIASES = 4096, 64
@@ -47,6 +49,15 @@ end
 
 local function clean(value) return (tostring(value or ""):gsub("[\t\r\n]", " ")) end
 
+-- FText/FString/Lua string -> string, nil if unreadable.
+local function loc_text(value)
+    value = unwrap(value)
+    if type(value) == "string" then return value end
+    if value == nil then return nil end
+    local ok, result = pcall(function() return value:ToString() end)
+    if ok and type(result) == "string" then return result end
+end
+
 local function exact_class_path(value)
     if type(value) ~= "string" or #value > 1024 or value:find("[%s:]") then return nil end
     if not value:match("^/[^.]+%.[^./]+$") then return nil end
@@ -91,6 +102,27 @@ function Exporter.new(options)
         log("UNKNOWN: " .. message)
         return { ok = false, count = 0, message = "UNKNOWN: " .. message, stats = stats or {} }
     end
+    -- The codex row's EnemyName in the game's current language, resolved like the map names
+    -- (WorldMapCatalog:localize: its cached text, else the game's Conv_LocTextToString); "" if unreadable.
+    local function localized_name(row)
+        local value = field(row, "EnemyName")
+        if value == nil then return "" end
+        if options.maps and options.maps.localize then
+            local ok, name = pcall(options.maps.localize, options.maps, value)
+            if ok and type(name) == "string" and name ~= "" then return name end
+        end
+        return loc_text(field(value, "ValueCache")) or ""
+    end
+    local function game_language()
+        if options.language then
+            local ok, value = pcall(options.language)
+            return ok and type(value) == "string" and value or ""
+        end
+        local ok, lib = pcall(StaticFindObject, "/Script/Engine.Default__KismetInternationalizationLibrary")
+        if not ok or not valid(lib) then return "" end
+        local okLanguage, value = pcall(function() return lib:GetCurrentLanguage() end)
+        return okLanguage and loc_text(value) or ""
+    end
 
     function instance:export()
         if type(IsInGameThread) ~= "function" then return failure("缺少游戏线程检查API") end
@@ -124,7 +156,8 @@ function Exporter.new(options)
         log("读回 return_type=" .. kind(entries) .. " count=" .. tostring(rawCount or "UNKNOWN") .. " truncated=" .. tostring(truncated))
         if not list then return failure("返回schema未识别；未猜FCodexEntry/RowClass") end
         local stats = { raw_count = rawCount, decoded_rows = 0, unknown_rows = 0, unknown_soft_paths = 0,
-            unknown_names = 0, aliases = 0, conflicts = 0, truncated = truncated, coverage = "UNKNOWN" }
+            unknown_names = 0, aliases = 0, conflicts = 0, truncated = truncated, coverage = "UNKNOWN", localized_names = 0 }
+        local language = game_language():gsub("[^%w%-]", ""):sub(1, 16)
         local rows, conflicts = {}, {}
         local kismet, triedKismet = nil, false
 
@@ -169,10 +202,10 @@ function Exporter.new(options)
             return nil
         end
 
-        local function add(classPath, name, boss, enemyType, source, priority, location)
+        local function add(classPath, name, boss, enemyType, source, priority, location, display)
             if not classPath or conflicts[classPath] then return end
             local row = { class_path = classPath, zh_name = name, is_boss = boss, enemy_type = enemyType,
-                source = source, priority = priority, location=location }
+                source = source, priority = priority, location=location, name = display }
             local old = rows[classPath]
             if old and old.priority > priority then return end
             if old and old.priority == priority and (old.zh_name ~= name or old.is_boss ~= boss or old.enemy_type ~= enemyType) then
@@ -194,6 +227,8 @@ function Exporter.new(options)
                 stats.decoded_rows = stats.decoded_rows + 1
                 local name = text_value(rawName) or ""
                 if name == "" then stats.unknown_names = stats.unknown_names + 1 end
+                local display = localized_name(row)
+                if display ~= "" then stats.localized_names = stats.localized_names + 1 else display = name end
                 local boss = type(bossValue) == "boolean" and (bossValue and "1" or "0") or "UNKNOWN"
                 local enemyType = ENEMY_TYPES[field(row, "EnemyType")] or "UNKNOWN"
                 local mainPath = soft_path(enemy)
@@ -215,7 +250,7 @@ function Exporter.new(options)
                 if replaced then source = source .. ";replacement=" .. replaced end
                 local useReplacement = field(row, "bUseReplacementTargetEntry")
                 if type(useReplacement) == "boolean" then source = source .. ";use_replacement_entry=" .. tostring(useReplacement) end
-                add(mainPath, name, boss, enemyType, source .. ";EnemyClass", 2, location)
+                add(mainPath, name, boss, enemyType, source .. ";EnemyClass", 2, location, display)
                 local aliases, _, aliasTruncated = array_items(field(row, "AliasEnemyClasses"), MAX_ALIASES)
                 if aliasTruncated then stats.truncated = true end
                 if aliases then
@@ -223,7 +258,7 @@ function Exporter.new(options)
                         local aliasPath = soft_path(alias)
                         if aliasPath then
                             stats.aliases = stats.aliases + 1
-                            add(aliasPath, name, boss, enemyType, source .. ";AliasEnemyClasses;canonical=" .. (mainPath or "UNKNOWN"), 1, location)
+                            add(aliasPath, name, boss, enemyType, source .. ";AliasEnemyClasses;canonical=" .. (mainPath or "UNKNOWN"), 1, location, display)
                         end
                     end
                 end
@@ -233,10 +268,10 @@ function Exporter.new(options)
         for _, row in pairs(rows) do sorted[#sorted + 1] = row end
         table.sort(sorted, function(a, b) return a.class_path < b.class_path end)
         if #sorted == 0 then return failure("没有解析出任何精确class_path；未覆盖已有codex.tsv", stats) end
-        local lines = { "class_path\tzh_name\tis_boss\tenemy_type\tsource\n" }
+        local lines = { "class_path\tzh_name\tis_boss\tenemy_type\tsource\tname\tname_lang\n" }
         for _, row in ipairs(sorted) do
             lines[#lines + 1] = table.concat({ clean(row.class_path), clean(row.zh_name), clean(row.is_boss),
-                clean(row.enemy_type), clean(row.source) }, "\t") .. "\n"
+                clean(row.enemy_type), clean(row.source), clean(row.name), clean(language) }, "\t") .. "\n"
         end
         local content = table.concat(lines)
         local okOpen, file = pcall(io.open, path, "w")
@@ -272,9 +307,12 @@ function Exporter.new(options)
             stats.locations_published=published
             log('图鉴归属导出='..tostring(published)..'；有OwnMapID='..mapped..'/'..#sorted..'；不等于全部出现地图')
         end
-        local message = string.format("原生图鉴导出%d条精确类路径；未知行=%d，软引用未解=%d，冲突=%d，truncated=%s；全量覆盖UNKNOWN",
-            #sorted, stats.unknown_rows, stats.unknown_soft_paths, stats.conflicts, tostring(stats.truncated))
+        local message = string.format("原生图鉴导出%d条精确类路径；未知行=%d，软引用未解=%d，冲突=%d，truncated=%s；游戏语言=%s，本地化名称=%d/%d；全量覆盖UNKNOWN",
+            #sorted, stats.unknown_rows, stats.unknown_soft_paths, stats.conflicts, tostring(stats.truncated),
+            language ~= "" and language or "UNKNOWN", stats.localized_names, stats.decoded_rows)
         log(message)
+        -- Readers that cache the file (the boss bars) read it again, so names follow a new export the same session.
+        if options.onWritten then pcall(options.onWritten) end
         return { ok = true, count = #sorted, message = message, stats = stats }
     end
 

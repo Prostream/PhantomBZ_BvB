@@ -66,14 +66,15 @@ first.ReplacedByEnemyClass, first.bUseReplacementTargetEntry = soft(replacement)
 entries = { param(first) }
 local result = make():export()
 assert(result.ok and result.count == 2 and calls == 1)
-assert(files[path]:match("^class_path\tzh_name\tis_boss\tenemy_type\tsource\n"))
+assert(files[path]:match("^class_path\tzh_name\tis_boss\tenemy_type\tsource\tname\tname_lang\n"))
 assert(files[path]:find(main .. "\t原生敌人名称\t1\tHumanMaster\t", 1, true))
 assert(files[path]:find(alias .. "\t原生敌人名称\t1\tHumanMaster\t", 1, true))
+assert(files[path]:find("\t原生敌人名称\t\n", 1, true), "without a localized name the Chinese one is used, language unknown")
 assert(not files[path]:find("\n" .. replacement .. "\t", 1, true), "replacement must not inherit another row's identity")
 assert(files[path]:find("replacement=" .. replacement, 1, true))
 for line in files[path]:gmatch("([^\n]+)\n") do
     local _,tabs=line:gsub("\t","")
-    assert(tabs==4,"codex.tsv must have exactly five columns; helper multi-return must not add a count")
+    assert(tabs==6,"codex.tsv must have exactly seven columns; helper multi-return must not add a count")
 end
 
 reset()
@@ -168,7 +169,30 @@ end
 assert(files[locationsPath]:find(main..'\tMap_A\t实际地图\tChapter_X\t实际章节\t3\t4\tActualLevel\t8\t'..main..'\tassigned\tnative_codex_own_map_v1',1,true))
 assert(files[locationsPath]:find(alias..'\tMap_A\t实际地图',1,true),'official aliases inherit the row affiliation')
 
+-- The name in the game's language: EnemyName resolved by the map catalog, else its cached text; the language tags every row.
+reset()
+subsystems = { subsystem(10, worlds[1]) }
+local named = row(main, "原生敌人名称", true, 4, { param(soft(alias)) })
+named.EnemyName = { type = function() return "UScriptStruct" end, ValueCache = text("Cached Enemy", "FText") }
+entries = { param(named) }
+local localizeCalls, rereads = 0, 0
+result = Exporter.new({ path = path, getWorld = function() return worlds[1] end, language = function() return "en" end,
+    onWritten = function() assert(files[path]:find("\tNative Enemy\ten\n", 1, true)); rereads = rereads + 1 end,
+    maps = { localize = function(_, value) localizeCalls = localizeCalls + 1; assert(value == named.EnemyName); return "Native Enemy" end } }):export()
+assert(result.ok and result.stats.localized_names == 1 and localizeCalls == 1)
+assert(rereads == 1, "readers that cache codex.tsv are told once the new file is written")
+assert(files[path]:find(main .. "\t原生敌人名称\t1\tHumanMaster\t", 1, true))
+assert(files[path]:find("\tNative Enemy\ten\n", 1, true) and select(2, files[path]:gsub("\tNative Enemy\ten\n", "")) == 2, "aliases share the name")
+reset()
+subsystems = { subsystem(10, worlds[1]) }
+entries = { param(named) }
+result = Exporter.new({ path = path, getWorld = function() return worlds[1] end, language = function() return "zh-Hans; bad" end,
+    maps = { localize = function() return "" end } }):export()
+assert(result.ok and files[path]:find("\tCached Enemy\tzh-Hansbad\n", 1, true), "cached text when the game cannot resolve it; language sanitized")
+
 reset(); gameThread = false
-assert(not make():export().ok and calls == 0)
+assert(not Exporter.new({ path = path, getWorld = function() return worlds[1] end,
+    onWritten = function() rereads = rereads + 1 end }):export().ok and calls == 0)
+assert(rereads == 1, "no reread without a new file")
 io.open = realOpen
-print("codex_catalog_export: PASS (world ownership, native row schema, exact soft paths, aliases, unknown schema, no load/reveal, IO failure)")
+print("codex_catalog_export: PASS (world ownership, native row schema, exact soft paths, aliases, unknown schema, no load/reveal, IO failure, names in the game's language)")
