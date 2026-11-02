@@ -54,7 +54,10 @@ local CompanionBars=require('companion_bars')
 local AreaLevels=require('area_levels')
 local HomeLevels=require('home_levels')
 
-local MOD = "[PhantomGladiator]"
+local BVBEngine=require('bvb_engine')
+local BVBTeamHUD=require('bvb_team_hud')
+local bvb,bvbHUD
+local MOD = "[PhantomBZ_BvB]"
 local runLogPath=Config.RuntimePath..'/run-'..os.date('%Y%m%d-%H%M%S')..'.log'
 local runLogBytes,runLogWarning=0,false
 local function log(msg)
@@ -75,7 +78,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.37.6-native-levels"
+local BUILD = "PhantomBZ_BvB-0.1.0-dev"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -1258,6 +1261,9 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
     combatReady=function(actor) return safeValid(actor) and spawnRoutes[actor]~='actor' and GetAIComp(actor)~=nil end,
     getPlayer=GetPlayerPawn,getWorld=UEHelpers.GetWorld,getLocation=GetLocation,
     getForward=function(actor) checked(actor); return actor:GetActorForwardVector() end,
+    beforeSpawn=function(path,team)if bvb then return bvb:beforeSpawn(path,team)end;return false,'摄影棚尚未就绪' end,
+    beforeStart=function()return bvb:beforeStart()end,
+    afterStart=function(ok)if not ok then bvb.state='error';bvb.message='开战指令未全部确认，请重置' end end,
     spawnClass=SpawnViaAILib,
     finishSpawn=FinishSpawnViaAILib,
     activate=function(actor,unitPath,team)
@@ -1319,6 +1325,9 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
             local inspected,inspectError=pcall(function() return spawnInspector:inspect(actor,UEHelpers.GetWorld()) end)
             if not inspected then log('[SpawnInspect] 只读检查失败: '..tostring(inspectError)) end
         end
+        if activationRequested and ai and type(hp)=='number' and hp>0 and bvb then
+            if not bvb:spawned(actor,unitPath,team) then return false,'介绍定身或出生数据未确认' end
+        end
         return activationRequested==true and ai~=nil and type(hp)=="number" and hp>0,"仅确认初始化调用、AI组件和正HP；行为待验收"
     end,
     setRelation=SetFactionRelation,forceAttack=ForceAttack,
@@ -1351,6 +1360,7 @@ arena=ArenaController.new({catalog=npcCatalog,log=log,valid=engineValid,name=obj
         probeSampleGen=probeSampleGen+1
         probe:stop("停止参赛者")
         if bossHUD then bossHUD:clear(true) end
+        if bvbHUD then bvbHUD:clear() end
         local grabRestored=not arenaGrabs or arenaGrabs:restore()
         local battleRestored=battle:reset("停止参赛者")
         return grabRestored and battleRestored
@@ -1479,9 +1489,14 @@ immortalTeams=ImmortalTeams.new({log=log,path=Config.RuntimePath,members=ArenaMe
 -- The fight time at the top centre of the game screen, when switched on in the app (battle_clock_hud.lua).
 clockHUD=BattleClockHUD.new({log=log,path=Config.RuntimePath,getController=GetRealPlayerController,getWorld=UEHelpers.GetWorld,
     getPlayer=GetPlayerPawn,ready=function()return runtimeSession:status().game_ready==true end,
-    clock=function()local s=ArenaStatus();return s.battle_clock,s.battle_seconds end})
+    clock=function()if bvb then local s=bvb:status();return s.bvb_state=='running' and 'running' or (s.bvb_state=='ended' and 'ended' or ''),s.bvb_seconds end;return '',0 end})
 -- 不死不休: while a fight runs, blue and red do not leave combat after an action and may hate each
 -- other through the game's own hatred checks (combat_lock.lua).
+bvb=BVBEngine.new({path=Config.RuntimePath,log=log,arena=arena,stats=statMatch,levels=homeLevels,
+    difficulty=spawnDifficulty,immortal=immortalTeams,spectator=spectator,cycle=GameCycle,
+    hp=GetHP,maxHP=GetMaxHP,player=GetPlayerPawn,world=UEHelpers.GetWorld,now=function()return GameSeconds() or 0 end,
+    canSpawn=function(path)local ok=SpawnPolicy.check(path);return ok==true end})
+bvbHUD=BVBTeamHUD.new({getController=GetRealPlayerController,getWorld=UEHelpers.GetWorld,log=log})
 combatLock=CombatLock.new({log=log,members=ArenaMembers,aiOf=GetAIComp,hatredOf=GetHatredComp,
     -- Called inside the game's transition; the send-back runs on the next game-thread tick instead.
     onDropped=function(key)ExecuteInGameThread(function()arena:reengage(key)end)end,
@@ -1515,10 +1530,11 @@ local function supportSteps(self)
     step('grabs',function()arenaGrabs:sync(Config.EnableNPCGrabs and tickMembers or {},tickStatus.battle_active)end)
     step('combatLock',function()combatLock:tick()end)
     step('reinforce',function()arena:tickReinforcements()end)
+    step('bvb',function()bvb:tick()end)
     step('bossHUD',function()
         local state=tickStatus.state
-        if state=='cleanup_pending' or state=='restore_pending' or state=='spawn_uncertain' then bossHUD:clear()
-        else bossHUD:sync(tickMembers) end
+        if state=='cleanup_pending' or state=='restore_pending' or state=='spawn_uncertain' then bvbHUD:clear()
+        else bvbHUD:sync(bvb) end
     end)
     step('clockHUD',function()clockHUD:tick()end)
     if companionBars then step('companionBars',function()companionBars:sync(tickMembers)end) end
@@ -1570,7 +1586,7 @@ RegisterKeyBind(Key.F9,{ModifierKey.SHIFT},function()
     end)
 end)
 end
-panelRuntime=PanelRuntime.new({arena=arena,exporter=exporter,path=Config.RuntimePath,
+panelRuntime=PanelRuntime.new({bvb=bvb,arena=arena,exporter=exporter,path=Config.RuntimePath,
     build=BUILD,log=log,autoScan=true,fullInventory=true,spectator=spectator,statMatch=statMatch,spawnDifficulty=spawnDifficulty,aiDifficulty=aiDifficulty,companions=companions,funFeatures=funFeatures,immortal=immortalTeams,clockHUD=clockHUD,session=runtimeSession,codex=codexExporter,spawnPolicy=SpawnPolicy,support=arenaSupport,unitKeys=unitKeys,
     router=keyRouter,camera={status=function()return {active=freeCamera:isActive(),pending=freeCamera:hasPending()}end,
         toggle=ToggleFreeCam,exit=ForceExitFreeCam},

@@ -58,6 +58,20 @@ class BridgeTests(unittest.TestCase):
             "validation_status": "verified_spawn_observation", "evidence": [{"source": "isolated protocol-test fixture only"}]}
         self.policy.write_text(json.dumps(policy, ensure_ascii=False), encoding="utf-8")
 
+    def test_bvb_commands_use_ready_gate_and_ack(self):
+        for action in ('bvb_save', 'bvb_reset', 'bvb_place', 'bvb_preset'):
+            self.game(ready=False)
+            command = self.bridge.enqueue({'action': action})
+            self.bridge.tick()
+            self.assertEqual(self.bridge._command(command['id'])['status'], 'queued')
+            self.game(ready=True)
+            self.bridge.tick()
+            wire = (self.bridge.runtime / 'inbox.tsv').read_text(encoding='utf-8')
+            self.assertEqual(wire.split('\t')[1], action)
+            self.write('ack.tsv', f"{command['id']}\tok\tfixture BVB completion\t0\n")
+            self.bridge.tick()
+            self.assertEqual(self.bridge._command(command['id'])['status'], 'succeeded')
+
     def test_serial_delivery_requires_matching_ack_and_does_not_claim_game_online(self):
         first = self.spawn(count=2)
         second = self.bridge.enqueue({"action": "start"})

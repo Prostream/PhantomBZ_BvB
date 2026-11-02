@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PhantomBZ_BvB · 势力战摄影棚</title><link rel="stylesheet" href="bvb.css"></head>
+<body><main>
+<header><div><small>PHANTOM BLADE ZERO / BOSS vs BOSS</small><h1>势力战摄影棚 <span>PhantomBZ_BvB</span></h1></div><div id="connection">正在连接…</div></header>
+<section class="scores" aria-label="比赛状态">
+<article class="blue"><h2>蓝队 <small>组织鬼差</small></h2><div id="blue-value">—</div><progress id="blue-bar" max="1" value="0"></progress><p id="blue-detail">等待参赛者</p></article>
+<div class="versus"><b>VS</b><strong id="timer">00:00</strong><span id="phase">未连接</span></div>
+<article class="red"><h2>红队 <small>掌门与剑偶</small></h2><div id="red-value">—</div><progress id="red-bar" max="1" value="0"></progress><p id="red-detail">等待参赛者</p></article>
+</section>
+<section class="card"><h2>比赛控制</h2><p>一周目 · 逆天者 · 原生等级与属性 · 介绍时 Boss 定身，世界照常运行</p>
+<div class="actions"><button data-action="bvb_preset">载入首场 4 对 4</button><button data-action="bvb_save">保存阵容与站位</button><button class="primary" data-action="start">开战</button><button data-action="bvb_reset">重置比赛</button><button data-action="bvb_place">在当前位置布置</button><button class="danger" data-action="stop">清场</button></div>
+<p class="hint">重置会按保存的阵容重新生成，等待你开战。换地图后选“在当前位置布置”。总血量不包含召唤小怪。</p>
+<div id="message" role="status">等待游戏读档与 Mod 心跳。</div></section>
+<section class="card"><h2>拍摄视角</h2><div class="actions"><button data-action="toggle_camera">进入 / 退出自由镜头</button><button data-action="exit_camera">恢复正常镜头</button><button data-action="toggle_spectator">切换主角无仇恨</button><a href="bvb.html?overlay=1" target="_blank" rel="noopener">打开透明血条画面 ↗</a></div><p class="hint">自由镜头：WASD 移动，空格 / E 上升，Ctrl / Q 下降，Shift 加速，鼠标转向。进入观战时主角隐身并受保护。</p></section>
+<section class="card"><h2>调整阵容</h2><p>在介绍阶段添加单位，完成后保存。比赛开始后修改阵容需先清场或重置。</p><form id="spawn-form"><input id="search" placeholder="搜索 Boss 名称" aria-label="搜索单位"><select id="unit" aria-label="单位"><option value="">等待游戏图鉴</option></select><select id="team" aria-label="队伍"><option value="blue">蓝队</option><option value="red">红队</option></select><input id="count" type="number" min="1" max="16" value="1" aria-label="数量"><button id="spawn-button" type="submit">召唤并定身</button></form><div class="actions"><button data-action="refresh_catalog">刷新游戏图鉴</button><a href="index.html" target="_blank" rel="noopener">上游高级面板 ↗</a></div></section>
+<section class="card"><h2>操作回执</h2><ol id="history"><li>提交操作后，以游戏回执为准。</li></ol></section>
+<footer>开发预览 0.1.0 · 新功能待实机验收 · 基于 <a href="https://github.com/LingYi-Liang/PhantomGladiator" target="_blank" rel="noopener">泠依_01 / PhantomGladiator</a> v0.37.6 · <a href="https://github.com/Prostream/PhantomBZ_BvB" target="_blank" rel="noopener">项目仓库</a></footer>
+</main><script src="bvb.js"></script></body></html>

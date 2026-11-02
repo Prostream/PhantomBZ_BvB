@@ -1,9 +1,65 @@
 # 开发与验收
 
-当前：建立 v0.37.6 派生基线，功能开发中，未部署或实机验收。
+当前版本：0.1.0-dev，基线 PhantomGladiator v0.37.6。源代码与离线测试已完成；本项目新增功能尚未实机验收。
 
-新功能使用 bvb_ 前缀；保留上游结构与原生战斗代码。上游历史验证仅供研究。
+## 已实现
 
-安装记录发现 F:/SteamLibrary/steamapps/common/PBZ/platform/steam，正式部署前核对。安装脚本提供备份、独立目录、Runtime 配置、上游冲突检测。
+- 首次开战建立完整双向同队友好、异队敌对关系，任一关系读回失败不发攻击指令。
+- 一周目/逆天者校验，原生等级与数值；禁止通过高级面板启用统一、自定义、不倒下等违背比赛规则的设置。
+- 介绍定身：仅写登记参赛 Actor 的 CustomTimeDilation，写前保存原值和对象身份，读回确认。不是全局暂停，也不提供中途战斗冻结。
+- 首场 4 对 4 精确角色预设；保存阵容和位置。重置先验证，再清理并确认恢复，重新生成到保存坐标。跨地图/距原地过远必须明确在当前位置布置，相对坐标随玩家朝向旋转。
+- 两队总血条：死亡参赛者仍保留在初始总上限中；未知状态不记死亡；召唤物不独立续赛。
+- 独立网页控制页与透明 OBS 血条页面，共用原有带会话、ACK、CSRF 校验的本机文件桥。
+- 独立安装器、备份、复制哈希验证，保留现有 UE4SS 与其他 Mod。
 
-实现后补充测试及启动方式。实机结果须注明版本、阵容、地图及日志读回。
+## 安装与使用
+
+需要已有 PBZ 适配的 UE4SS、Python 3.10+。本机现有适配已核对，未被安装器覆盖。
+
+```powershell
+.\Install-BvB.ps1 -GameDir 'F:\SteamLibrary\steamapps\common\PBZ'
+.\Start-BvB.ps1
+```
+
+控制台：http://127.0.0.1:8766/bvb.html
+透明叠加：http://127.0.0.1:8766/bvb.html?overlay=1
+
+用户启动游戏，读取一周目存档，选择逆天者，到空旷地形。等图鉴导出/目录完成后先用两名角色测试介绍定身和开战，再用“载入首场 4 对 4”。首次进入若目录尚未出现，使用“刷新游戏图鉴”。
+
+重置后等待介绍，不能自动开战。移动到新地图后先清场，再使用“在当前位置布置”。不修改任何存档或原生地图刷怪。
+
+安装在 platform/steam/ue4ss/Mods/PhantomBZ_BvB；恢复备份在 platform/steam/PhantomBZ_BvB-backups。退出游戏后将 mods.txt 中 PhantomBZ_BvB 改为 0 可停用。不要和上游 PhantomGladiator 同时加载。热重载前先退出自由镜头、关闭无仇恨、清场并等回执；推荐首次测试正常重启游戏。
+
+## 离线验证
+
+- panel/test_backend.py：68 项通过（包括四个 BVB 指令的就绪门控、投递与 ACK）。沙箱拒绝 Windows 临时文件原子替换，已在沙箱外重跑通过。
+- tools/test_arena_controller.lua：生成、所有权、清理、失败恢复及完整阵营矩阵门控通过。
+- tools/test_bvb_director.lua：重置事务、跨地图旋转、部分失败、总血量分母、未知状态、4 对 4 预设通过。
+- tools/test_bvb_hold.lua：写前记录、热重载恢复、地址复用隔离、恢复失败保留通过。
+- tools/test_bvb_engine.lua：难度、周目、等级、数值和不倒下门控通过。
+- tools/test_bvb_team_hud.lua：两队汇总、代表对象替换、未知标记、清理通过。
+- panel runtime 25 项、文件桥 24 项通过；真实 main 入口在 NPC/Actor 两种隔离环境加载通过。
+- 上游原生血条控件、出生等级和老家等级测试通过；前端脚本语法检查与浏览器离线页面检查通过。
+- 安装脚本在模拟安装目录验证保留其他 Mod 和独立 Runtime；实际安装所有脚本有哈希记录。
+
+Lua 测试使用隔离安装的 lupa.lua54（不要用不支持位运算语法的 LuaJIT）：
+
+```powershell
+python -m pip install --target .dev-python lupa
+python -X utf8 tools/run_lua.py tools/test_arena_controller.lua
+# 需要目录参数的测试，每次提供独立的新临时目录，不能使用真实游戏 Runtime。
+python -X utf8 tools/run_lua.py tools/test_bvb_director.lua <独立测试目录>
+python -X utf8 -I panel/test_backend.py
+python tools/package_bvb.py
+```
+
+## 实机待验收与边界
+
+1. CustomTimeDilation=0 是否完全阻止这八名 Boss 的移动/攻击，以及恢复后投技是否正常。游戏的控制器/技能计时可能独立于 Actor，不能由离线读回模型保证行为。
+2. 同队关系已显式设置，但绕过阵营过滤的范围技能、反弹、光环仍须逐招测试；当前不声称所有伤害来源都无友伤。
+3. 多阶段仍走游戏原生逻辑，没有脚本生成或补血实现转阶段。换实体阶段的参赛身份继承和胜负时序尚未通用验证；这类组合的结果只能当预览，不能用于正式战力结论。原生召唤物归队沿用上游带归属证据的检测。
+4. 总血条基于召唤时上限；阶段更换最大生命值或新 Actor 的完整累计显示仍待具体 Boss 适配。
+5. 第一次生成/加载资源可能卡顿，平坦空地先做单对测试；任何跨地图寻路、落水、剧情脚本依赖均需实测。
+6. 比赛结束后停止自动重新迎敌并定住幸存者；特殊阶段未验收前注意结束判定。因对象销毁而未读到死亡的，显示未知，不强判胜负。
+
+2026-11-02：开发预览已安装到用户确认的 F:/SteamLibrary/steamapps/common/PBZ。控制面板已启动；未启动游戏、未发送召唤/开战指令、未切换存档，尚无本项目实机结果。

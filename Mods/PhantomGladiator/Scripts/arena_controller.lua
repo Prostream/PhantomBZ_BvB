@@ -367,13 +367,20 @@ function Arena.new(options)
                 Y = origin.Y + y * distance + x * lateral, Z = origin.Z + 50 } }
     end
 
-    function instance:spawn(path, requestedTeam, requestedCount)
+    function instance:spawn(path, requestedTeam, requestedCount, exactTransform)
         return run(function()
             prune()
             local block=spawn_block()
             if block then return response(false,block,{uncertain=true,spawned_count='unknown'}) end
             if state=="cleanup_pending" or state=="restore_pending" then
                 return response(false,"上次清理或恢复未完成，已阻止继续生成；请先完成清理",{spawned_count=0})
+            end
+            if exactTransform and (requestedCount~=1 or not vector(exactTransform.Translation)) then
+                return response(false,'保存站位无效或不是单只生成',{spawned_count=0})
+            end
+            if options.beforeSpawn then
+                local called,allowed,why=invoke('beforeSpawn',path,requestedTeam or team)
+                if not called or not allowed then return response(false,tostring(why or allowed),{spawned_count=0}) end
             end
             local okChoose, whyChoose = choose(path, requestedTeam, requestedCount)
             if not okChoose then return response(false, whyChoose, { spawned_count = 0 }) end
@@ -433,7 +440,7 @@ function Arena.new(options)
                     failures = failures + 1; log("召唤中止：玩家/World/Class已失效"); break
                 end
                 local slot = next_slot(team)
-                local transform = slot and spawn_transform(location, forward, team, slot)
+                local transform = exactTransform or (slot and spawn_transform(location, forward, team, slot))
                 if not transform then failures = failures + 1; log("召唤中止：朝向或站位无效"); break end
                 log(string.format("召唤阶段=生成 %d/%d team=%s slot=%d position=%.1f,%.1f,%.1f",
                     index, count, team, slot, transform.Translation.X, transform.Translation.Y, transform.Translation.Z))
@@ -537,13 +544,18 @@ function Arena.new(options)
             local failures, requests = 0, 0
             -- Player neutrality belongs exclusively to the F8 spectator switch.
             -- Starting a duel must not silently grant a separate no-aggro mode.
-            for _, a in ipairs(blue) do
-                for _, b in ipairs(red) do
-                    if live(a) == true and live(b) == true then
-                        local ok, readback = invoke("setRelation", a, b, 2)
-                        if not ok or readback ~= true then failures = failures + 1 end
-                    end
-                end
+            local all={}
+            for _,a in ipairs(blue)do all[#all+1]={actor=a,team='blue'} end
+            for _,a in ipairs(red)do all[#all+1]={actor=a,team='red'} end
+            for i=1,#all do for j=i+1,#all do
+                local a,b=all[i],all[j]
+                local ok,readback=invoke('setRelation',a.actor,b.actor,a.team==b.team and 0 or 2)
+                if not ok or readback~=true then failures=failures+1 end
+            end end
+            if failures>0 then return response(false,'完整阵营关系未全部读回；未开战') end
+            if options.beforeStart then
+                local called,allowed,why=invoke('beforeStart')
+                if not called or not allowed then return response(false,tostring(why or allowed)) end
             end
             local function request_attack(attackers, opponents)
                 for i, attacker in ipairs(attackers) do
@@ -570,9 +582,15 @@ function Arena.new(options)
             end
             state = "battle_requested"
             battleActive=true
+            if options.afterStart then invoke('afterStart',failures==0) end
             return response(failures == 0, string.format("已请求%d名参赛者攻击；失败/未验证=%d；实际伤害仍待读回", requests, failures),
                 { attack_requests = requests, failure_count = failures })
         end)
+    end
+
+    function instance:finishRound()
+        battleActive=false
+        state='round_ended'
     end
 
     function instance:stop()

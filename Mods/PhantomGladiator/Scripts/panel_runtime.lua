@@ -87,7 +87,7 @@ function Runtime.new(options)
         end,
         stop=function()
             if options.support then options.support:discover() end
-            return options.arena:stop()
+            return options.bvb and options.bvb:clear() or options.arena:stop()
         end,
         clear_neutral=function()
             if options.support then options.support:discover() end
@@ -135,6 +135,24 @@ function Runtime.new(options)
             return options.unitKeys:configure(command.unit_id,key,mask)
         end,
     }
+    if options.bvb then
+        local function reject()return {ok=false,message='势力战使用原生数值、原生等级、逆天者，比赛双方不启用不倒下',spawned_count=0}end
+        self.handlers.toggle_stat_match=reject
+        local statMode=self.handlers.set_stat_mode
+        self.handlers.set_stat_mode=function(c)if c.key_spawn~='GAME' then return reject()end;return statMode(c)end
+        local difficulty=self.handlers.set_spawn_difficulty
+        self.handlers.set_spawn_difficulty=function(c)if c.key_spawn~='HARD' then return reject()end;return difficulty(c)end
+        local level=self.handlers.set_spawn_level
+        self.handlers.set_spawn_level=function(c)if c.key_spawn~='HOME' and not (c.key_spawn=='UNIT' and (c.key_start or '')=='')then return reject()end;return level(c)end
+        local immortal=self.handlers.set_team_immortal
+        self.handlers.set_team_immortal=function(c)if c.key_start~='OFF' then return reject()end;return immortal(c)end
+        local spectatorToggle=self.handlers.toggle_spectator
+        self.handlers.toggle_spectator=function(c)if options.bvb.state=='running' then return {ok=false,message='比赛中保持主角无仇恨'}end;return spectatorToggle(c)end
+        self.handlers.bvb_save=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:save()end
+        self.handlers.bvb_reset=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:restore(false)end
+        self.handlers.bvb_place=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:restore(true)end
+        self.handlers.bvb_preset=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:preset()end
+    end
     self.bridge=Bridge.new({path=options.path,log=self.log,handlers=self.handlers,
         session=function() return options.session and options.session:status() or {} end,status=function()
         local arena=options.arena:status()
@@ -276,6 +294,7 @@ function Runtime.new(options)
         local functions=self.functionKeys:status()
         out.function_keys_schema=2;out.function_keys_epoch=functions.epoch;out.function_keys_revision=functions.revision
         for _,action in ipairs(ACTIONS) do out['key_'..action]=self.functionKeys:token(action)end
+        if options.bvb then for k,v in pairs(options.bvb:status())do out[k]=v end end
         return out
     end})
     return self

@@ -19,3 +19,11 @@
 源码沿用 Mods/PhantomGladiator，安装为独立 PhantomBZ_BvB 目录与 Runtime，不同时加载两者。不使用上游自动更新器，以免覆盖本项目改动。
 
 许可：[MIT](LICENSE)。
+
+## 开始测试
+
+已有 PBZ 适配的 UE4SS 和 Python 3.10+ 时，运行 Install-BvB.ps1 指定游戏目录，然后运行 Start-BvB.ps1，打开 http://127.0.0.1:8766/bvb.html。
+
+首场预设：火流星、斩骑、勾魂、断肠 vs 毕远残躯、碧海残躯、乌冷霜、玉璧。使用一周目逆天者存档，先各召唤一名验收定身和开战，再测试完整预设。
+
+离线检查已通过；特殊友伤、定身效果及多阶段身份/胜负仍待实机验收，详见开发文档。开发包可用 `python tools/package_bvb.py` 生成，不包含加载器和游戏资源。

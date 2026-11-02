@@ -30,7 +30,7 @@ _taxonomy_module = importlib.util.module_from_spec(_taxonomy_spec)
 _taxonomy_spec.loader.exec_module(_taxonomy_module)
 
 DEFAULT_RUNTIME = Path(r"D:\steam\steamapps\common\PBZ\platform\steam\ue4ss\Mods\PhantomGladiator\Runtime")
-ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature", "set_team_immortal", "set_clock_hud", "set_stat_mode", "set_spawn_level"}
+ACTIONS = {"bvb_save", "bvb_reset", "bvb_place", "bvb_preset", "spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature", "set_team_immortal", "set_clock_hud", "set_stat_mode", "set_spawn_level"}
 # Teams a unit can be summoned to; companion units follow the player (companion.lua).
 TEAMS = ("blue", "red", "neutral", "companion")
 # FOLLOW keeps the game difficulty; the others are the game's own four levels (spawn_difficulty.lua).
@@ -151,7 +151,7 @@ CODEX_ENEMY_TYPES = {"None": "unknown", "Animal": "1", "GuaiMian": "2", "DragonM
 COMMAND_FIELDS = ("id", "action", "unit_id", "team", "count", "key_spawn", "key_start", "key_stop", "key_refresh_catalog", "schema_version")
 MAX_UNIT_ID_BYTES = 512
 MAX_INBOX_BYTES = 2048
-READY_ACTIONS = {"spawn", "start", "toggle_spectator"}
+READY_ACTIONS = {"bvb_save", "bvb_reset", "bvb_place", "bvb_preset", "bvb_save", "bvb_reset", "bvb_place", "bvb_preset", "spawn", "start", "toggle_spectator"}
 # Content types for the app's own files. Not mimetypes.guess_type: on Windows it reads the registry, where
 # other software often registers .js as text/plain, and under nosniff the browser then refuses every
 # script and the window stays empty (reported by players on v0.35.1).

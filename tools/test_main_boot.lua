@@ -79,6 +79,13 @@ table.remove(queue,1)()
 inGame=false
 assert(#loads==0,"startup without a player must not load assets")
 player.alive=true
+-- BVB must reject unknown difficulty/cycle before loading any game asset.
+inGame=true
+local bvbAllowed=arenaOptions.beforeSpawn(known,'blue')
+assert(bvbAllowed==false and #loads==0,'BVB rules fail closed when difficulty is unknown')
+inGame=false
+-- Continue the upstream native-spawn fixture in isolation. Real BVB rules/hold are covered separately.
+arenaOptions.beforeSpawn=function()return true end
 keys['120:0'](); inGame=true; table.remove(queue,1)(); inGame=false
 assert(#loads==1 and loads[1]==known,"ready world with zero NPC instances must resolve only the approved path")
 inGame=true
@@ -88,7 +95,7 @@ assert(type(cameraResult)=='table' and cameraResult.ok==false and #queue==before
     'camera ACK must reflect the synchronous attempt, not a second queued callback')
 inGame=false
 local output=table.concat(logs,"\n")
-assert(output:find(arg[3] or 'v0.37.6-native-levels',1,true),"new build must load")
+assert(output:find(arg[3] or 'PhantomBZ_BvB-0.1.0-dev',1,true),"new build must load")
 if actorMode then
     assert(#genericCalls==2 and genericCalls[2]=='finish','generic Actor must use separate deferred/finalize calls')
     assert(output:find('通用Actor初始化完成',1,true),'generic Actor must not run PBZ ActivateAI')

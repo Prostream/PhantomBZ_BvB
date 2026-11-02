@@ -40,3 +40,10 @@ tools/decrypt_asset_directory.py
 tools/test_decrypt_directory.py
 tools/publish_disk_unit_index.py
 docs/DISK_DIRECTORY.md
+
+# Local BVB testing and installation outputs
+.dev-python/
+.test-runtime/
+build/
+installation.json
+backups/

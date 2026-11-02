@@ -166,14 +166,14 @@ for _, event in ipairs(f.trace) do
             relationCount = relationCount + 1
             assert(event[3] ~= f.player, 'starting a battle must not silently grant no-aggro while F8 is off')
             assert(owned[event[2]] and (event[3] == f.player or owned[event[3]]))
-            if event[4] == 2 then assert(teams[event[2]] ~= teams[event[3]]) end
+            if event[4] == 2 then assert(teams[event[2]] ~= teams[event[3]]) else assert(event[4]==0 and teams[event[2]]==teams[event[3]]) end
         elseif event[1] == "attack" then
             attackCount = attackCount + 1
             assert(owned[event[2]] and owned[event[3]] and teams[event[2]] ~= teams[event[3]])
         elseif event[1] == "observe" then observeCount = observeCount + 1 end
     end
 end
-assert(relationCount == 4 and attackCount == 4 and observeCount == 1)
+assert(relationCount == 6 and attackCount == 4 and observeCount == 1)
 local cleanup = f.arena:stop()
 assert(cleanup.ok and cleanup.remaining_count == 0 and f.arena:status().total == 0)
 local restoreIndex, destroyIndex
@@ -544,3 +544,9 @@ local noClock=fixture()
 assert(noClock.arena:spawn(nil,'blue',1).ok and noClock.arena:spawn(nil,'red',1).ok and noClock.arena:start().ok)
 assert(noClock.arena:status().battle_clock=='','without a game clock nothing is timed')
 print("arena_controller: PASS (spawn policy, loading gate, pending-cleanup gate, combat preflight, warning ownership, spacing, teams, caps, partial failures, cleanup retries, deferred destruction, unknown readbacks)")
+
+local gated=fixture({setRelation=function()return false end})
+assert(gated.arena:spawn(nil,'blue',1).ok and gated.arena:spawn(nil,'red',1).ok)
+assert(not gated.arena:start().ok)
+for _,event in ipairs(gated.trace)do assert(type(event)~='table' or event[1]~='attack','unverified factions must not attack')end
+print('bvb faction gate: PASS')
