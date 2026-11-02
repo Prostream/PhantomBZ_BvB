@@ -31,7 +31,11 @@ const RealRuntime = (() => {
     // mode: game | match | custom (stat_match_mode); custom values: the core four here, all of them from /api/stat-settings.
     statMatch: { enabled: false, mode: "game", modeSupported: false, baseline: null, matched: 0, failures: 0, reset: false, customCount: 0, customized: 0, rejected: [], rejectedCount: 0, values: {} },
     // spawn_difficulty_*: the level new units take (FOLLOW = the game's), the game's own level, counts.
-    difficulty: { level: "FOLLOW", game: "", supported: false, failures: 0, skipped: 0, aiFailed: 0 },
+    // spawn_level: the level a summon gets (the highest map enemy near the player at the last look), and that enemy.
+    difficulty: { level: "FOLLOW", game: "", supported: false, failures: 0, skipped: 0, aiFailed: 0, summonLevel: null, summonLevelUnit: "" },
+    // spawn_level_mode / spawn_level_custom (home_levels.lua): where a summon's level comes from, HOME | HERE | CUSTOM;
+    // homes: each unit's places in the game with the default and the player's pick (backend.py /api/home-levels).
+    level: { supported: false, mode: "HOME", custom: null, homes: {} },
     // fun_*: the player-only switches saved by fun_features.lua and what each one reads back.
     fun: { supported: false, shachi: false, deflect: false, dodge: false, shachiState: "off", guardState: "off", deflects: 0, dodges: 0 },
     // immortal_*: the 不倒下 switch of each team (immortal_teams.lua), units locked, locks that did not take.
@@ -54,7 +58,7 @@ const RealRuntime = (() => {
   };
   const jobs = [], jobById = new Map(), waiters = new Map();
   let csrf = "", owned = 0, launching = 0, failedPolls = 0;
-  let teamRev = null, session = "", catalogKey = "", lastSig = {}, iconsAt = 0;
+  let teamRev = null, session = "", catalogKey = "", lastSig = {}, iconsAt = 0, homesAt = 0;
   let toGame = new Map(), toShort = new Map();
 
   // ---------- Native host ----------
@@ -132,6 +136,18 @@ const RealRuntime = (() => {
     if (JSON.stringify(names) === JSON.stringify(s.unitNames)) return;
     s.unitNames = names;
     emit({ type: "state", parts: new Set(["names", "sel", "grid", "match", "keys", "solo", "companion"]) });
+  }
+
+  // Each unit's level choices: the mod rewrites them when a map loads and after every change, so they are asked for
+  // every 30 s while the game runs and again right after the player changes a level.
+  async function loadHomeLevels() {
+    homesAt = Date.now();
+    const r = await fetch("/api/home-levels", { cache: "no-store" });
+    if (!r.ok) return;
+    const homes = (await r.json()).units || {};
+    if (JSON.stringify(homes) === JSON.stringify(s.level.homes)) return;
+    s.level.homes = homes;
+    emit({ type: "state", parts: new Set(["sel"]) });
   }
 
   // ---------- Status ----------
@@ -215,6 +231,12 @@ const RealRuntime = (() => {
       d.skipped = num("spawn_difficulty_skipped");
       // ai_difficulty.lua reads its override back on every unit; a failure means stats changed but the AI did not.
       d.aiFailed = num("spawn_difficulty_ai_failed");
+      d.summonLevel = v.spawn_level ? num("spawn_level") : null;
+      d.summonLevelUnit = v.spawn_level_unit || "";
+      const L = s.level;
+      L.supported = ["HOME", "HERE", "CUSTOM"].includes(v.spawn_level_mode);
+      if (L.supported) L.mode = v.spawn_level_mode;
+      L.custom = v.spawn_level_custom ? num("spawn_level_custom") : null;
       const f = s.fun;
       f.supported = yes("fun_supported");
       f.shachi = yes("fun_shachi");
@@ -255,6 +277,7 @@ const RealRuntime = (() => {
     const key = [g.game_session || "", data.catalog?.total || 0, v.unit_keys_revision || "", v.unit_keys_epoch || ""].join("|");
     if (key !== catalogKey) { catalogKey = key; loadCatalog().catch(() => { catalogKey = ""; }); }
     if (Date.now() - iconsAt > (Object.keys(s.icons).length ? 60000 : 15000)) { loadIcons().catch(() => {}); loadNames().catch(() => {}); }
+    if (online && s.level.supported && Date.now() - homesAt > 30000) loadHomeLevels().catch(() => {});
 
     // Events, in the same shapes MockRuntime sends.
     if (s.game !== was.game) emit({ type: "game" });
@@ -275,11 +298,11 @@ const RealRuntime = (() => {
     // Re-render only the parts whose data moved, so a 500 ms poll never resets what the player is doing.
     const sig = {
       topbar: [s.game, jobs.filter(j => j.status === "failed" || j.status === "uncertain").length],
-      sel: [s.game, s.cleanup, s.team, JSON.stringify(s.synced), s.spectator, s.statMatch.mode, s.statMatch.customCount, s.statMatch.baseline?.id, s.keys.spawn?.code, s.keys.spawn?.mods],
+      sel: [s.game, s.cleanup, s.team, JSON.stringify(s.synced), s.spectator, s.statMatch.mode, s.statMatch.customCount, s.statMatch.baseline?.id, s.keys.spawn?.code, s.keys.spawn?.mods, s.level.supported, s.level.mode, s.level.custom],
       solo: [s.game, s.neutral, s.down.neutral, s.spectator, s.spectatorPhase, s.freeCam],
       companion: [s.game, s.companion, s.down.companion, s.companionFailures, s.immortal.supported, s.immortal.companion],
       match: [s.game, JSON.stringify({ ...s.statMatch, values: undefined })],
-      diff: [s.game, JSON.stringify(s.difficulty)],
+      diff: [s.game, JSON.stringify(s.difficulty), s.level.supported, s.level.mode, s.level.custom],
       fun: [s.game, JSON.stringify(s.fun)],
       battle: [s.game, s.cleanup, s.blue, s.red, s.neutral, s.down.blue, s.down.neutral, s.unreadable, s.fight, owned, JSON.stringify([s.keys.start, s.keys.stop]),
         s.immortal.supported, s.immortal.blue, s.immortal.red, s.immortal.failures, s.clock.state],
@@ -324,6 +347,11 @@ const RealRuntime = (() => {
       if (payload.code && payload.team) Object.assign(body, { team: payload.team, count: payload.count });
     }
     else if (action === "set_spawn_difficulty") body = { action, difficulty: payload.difficulty };
+    else if (action === "set_spawn_level") {
+      body = { action, level_mode: payload.mode };
+      if (payload.level != null) body.level = payload.level;
+      if (payload.mode === "UNIT") body.unit_id = payload.unit;
+    }
     else if (action === "set_fun_feature") body = { action, feature: payload.feature, enabled: payload.enabled };
     else if (action === "set_team_immortal") body = { action, team: payload.team, enabled: payload.enabled };
     else if (action === "set_clock_hud") body = { action, enabled: payload.enabled };
@@ -351,6 +379,11 @@ const RealRuntime = (() => {
     if (action === "dismiss_companions") done.cleared = Number((done.message || "").match(/已确认=(\d+)/)?.[1] ?? Math.max(0, companionsHeld - s.companion - s.down.companion));
     // The mod saved and read the choice back; show it before the next poll does.
     if (action === "set_spawn_difficulty" && done.status === "succeeded") s.difficulty.level = payload.difficulty;
+    if (action === "set_spawn_level" && done.status === "succeeded") {
+      if (payload.mode !== "UNIT") s.level.mode = payload.mode;
+      if (payload.mode === "CUSTOM") s.level.custom = payload.level;
+      await loadHomeLevels().catch(() => {});
+    }
     if (action === "set_fun_feature" && done.status === "succeeded") s.fun[payload.feature.toLowerCase()] = payload.enabled;
     if (action === "set_team_immortal" && done.status === "succeeded") s.immortal[payload.team] = payload.enabled;
     if (action === "set_clock_hud" && done.status === "succeeded") s.clockHud.on = payload.enabled;

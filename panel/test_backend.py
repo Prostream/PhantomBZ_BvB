@@ -189,6 +189,53 @@ class BridgeTests(unittest.TestCase):
             with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
                 self.bridge.enqueue(bad)
 
+    def test_spawn_level_travels_in_the_spawn_and_start_key_columns(self):
+        cases = (({"level_mode": "HOME"}, "", "HOME", ""), ({"level_mode": "HERE"}, "", "HERE", ""),
+                 ({"level_mode": "CUSTOM", "level": 12}, "", "CUSTOM", "12"),
+                 ({"level_mode": "HOME", "level": 9}, "", "HOME", ""),
+                 ({"level_mode": "UNIT", "unit_id": "BP_Monster_Thug", "level": 4}, "BP_Monster_Thug", "UNIT", "4"),
+                 ({"level_mode": "UNIT", "unit_id": "BP_Monster_Thug"}, "BP_Monster_Thug", "UNIT", ""))
+        for request, unit, mode, level in cases:
+            with self.subTest(request=request):
+                command = self.bridge.enqueue({"action": "set_spawn_level", **request})
+                columns = self.bridge._wire({"id": command["id"], "payload": json.dumps(command["payload"])}).rstrip("\n").split("\t")
+                self.assertEqual(columns[1:7], ["set_spawn_level", unit, "blue", "1", mode, level])
+                self.assertEqual(len(columns), 10)
+        for bad in ({"action": "set_spawn_level"}, {"action": "set_spawn_level", "level_mode": "home"},
+                    {"action": "set_spawn_level", "level_mode": "CUSTOM"},
+                    {"action": "set_spawn_level", "level_mode": "CUSTOM", "level": 61},
+                    {"action": "set_spawn_level", "level_mode": "CUSTOM", "level": "12"},
+                    {"action": "set_spawn_level", "level_mode": "CUSTOM", "level": True},
+                    {"action": "set_spawn_level", "level_mode": "UNIT", "level": 3},
+                    {"action": "set_spawn_level", "level_mode": "UNIT", "unit_id": UNIT, "level": 3},
+                    {"action": "set_spawn_level", "level_mode": "HOME", "unit_id": "BP_Monster_Thug"},
+                    {"action": "set_spawn_level", "level_mode": "HOME", "team": "red"}):
+            with self.subTest(request=bad), self.assertRaises(backend.ValidationError):
+                self.bridge.enqueue(bad)
+
+    def test_home_levels_lists_each_units_places_with_default_pick_and_count(self):
+        self.assertEqual(self.bridge.home_levels(), {"units": {}, "count": 0}, "nothing until the mod has written them")
+        self.write("home-levels.tsv", "unit\tlevel\tsource\tmap\tpart\tdefault\tpicked\n"
+                   "BP_Monster_Thug\t6\tarea\t血色森林\tC\t1\t0\n")
+        self.assertEqual(self.bridge.home_levels()["count"], 0, "the earlier test file without counts is not read")
+        self.write("home-levels.tsv", "unit\tlevel\tsource\tmap\tpart\tdefault\tpicked\tcount\n"
+                   "BP_Monster_Wanderer\t3\tnative\t悲泣溪谷\tC\t1\t0\t3\n"
+                   "BP_Monster_Wanderer\t19\tnative\t梅谷湖\tB\t0\t1\t24\n"
+                   "BP_Monster_Thug\t6\tarea\t血色森林\tC\t1\t0\t0\n"
+                   "BP_Monster_Thug\t70\tarea\t血色森林\tC\t0\t0\t0\n"
+                   "BP_Monster_Thug\t5\tstory\t血色森林\t\t0\t0\t0\n"
+                   "BP_Monster_Thug\t5\tarea\t血色森林\tB\t0\t0\tmany\n"
+                   "../evil\t5\tarea\tX\t\t0\t0\t0\n"
+                   "BP_Monster_Intro\t30\tpicked\t\t\t0\t1\t0\n")
+        self.assertEqual(self.bridge.home_levels(), {"count": 3, "units": {
+            "BP_Monster_Wanderer": {"default": 0, "picked": 1, "options": [
+                {"level": 3, "source": "native", "map": "悲泣溪谷", "part": "C", "count": 3},
+                {"level": 19, "source": "native", "map": "梅谷湖", "part": "B", "count": 24}]},
+            "BP_Monster_Thug": {"default": 0, "picked": None, "options": [
+                {"level": 6, "source": "area", "map": "血色森林", "part": "C", "count": 0}]},
+            "BP_Monster_Intro": {"default": None, "picked": 0, "options": [
+                {"level": 30, "source": "picked", "map": "", "part": "", "count": 0}]}}})
+
     def test_fun_feature_travels_in_the_spawn_and_start_key_columns(self):
         for feature in backend.FUN_FEATURES:
             for enabled, token in ((True, "ON"), (False, "OFF")):
@@ -1091,6 +1138,8 @@ class HTTPTests(unittest.TestCase):
             "BP_Monster_AHua_GuiTouDao": "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png",
             "BP_Monster_AHua_Story": "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png",
             "BP_Monster_MaleThug_Sword": "/codex-icons/T_BP_Monster_MaleThug_Sword_w.png"}})
+        status, _, raw = self.request("GET", "/api/home-levels")
+        self.assertEqual((status, json.loads(raw)), (200, {"units": {}, "count": 0}), "levels route answers before the game has run")
         status, _, raw = self.request("GET", "/api/unit-names")
         self.assertEqual((status, json.loads(raw)["count"]), (200, 0), "names route answers before the game has run")
         status, headers, raw = self.request("GET", "/codex-icons/T_BP_Monster_AHua_GuiTouDao_w.png")

@@ -30,11 +30,20 @@ _taxonomy_module = importlib.util.module_from_spec(_taxonomy_spec)
 _taxonomy_spec.loader.exec_module(_taxonomy_module)
 
 DEFAULT_RUNTIME = Path(r"D:\steam\steamapps\common\PBZ\platform\steam\ue4ss\Mods\PhantomGladiator\Runtime")
-ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature", "set_team_immortal", "set_clock_hud", "set_stat_mode"}
+ACTIONS = {"spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature", "set_team_immortal", "set_clock_hud", "set_stat_mode", "set_spawn_level"}
 # Teams a unit can be summoned to; companion units follow the player (companion.lua).
 TEAMS = ("blue", "red", "neutral", "companion")
 # FOLLOW keeps the game difficulty; the others are the game's own four levels (spawn_difficulty.lua).
 SPAWN_DIFFICULTIES = ("FOLLOW", "EASY", "NORMAL", "HARD", "NIGHTMARE")
+# Where a summon's level comes from (home_levels.lua): its home (default), the map enemies near the player, or one
+# level for all; UNIT picks one unit's level. Levels are whole numbers up to SPAWN_LEVEL_MAX.
+SPAWN_LEVEL_MODES = ("HOME", "HERE", "CUSTOM", "UNIT")
+SPAWN_LEVEL_MAX = 60
+# native: where the game itself puts the unit (native_levels.lua); area/extra/prologue: the areas of the codex home
+# map, for units no spawner places; picked: a level the player picked that is none of those.
+HOME_LEVEL_SOURCES = {"native", "area", "extra", "prologue", "picked"}
+HOME_LEVEL_HEADER = "unit\tlevel\tsource\tmap\tpart\tdefault\tpicked\tcount"
+UNIT_SHORT_ID = re.compile(r"[A-Za-z0-9_]{1,128}")
 # Player-only fun features (fun_features.lua): infinite Shachi, auto perfect deflect, auto red-light dodge.
 FUN_FEATURES = ("SHACHI", "DEFLECT", "DODGE")
 # Teams whose units can be kept from going down (immortal_teams.lua); no-team units are the player's to beat.
@@ -323,7 +332,7 @@ class Bridge:
 
     def _path(self, name):
         # All caller-supplied unit IDs stay inside TSV fields, never file paths.
-        if name not in {"codex-icons.tsv", "stat-custom-request.tsv", "stat-match-settings.tsv", "catalog.tsv", "catalog.tsv.partial", "codex.tsv", "codex-locations.tsv", "status.tsv", "inbox.tsv", "inbox.session.tsv", "ack.tsv", "inventory-report.json", "unit-evidence.json", "native-table-catalog.tsv", "decrypted-directory.tsv", "decrypted-directory-report.json", "unit-keybinds.tsv", "unit-keybinds-state.tsv", "function-keybinds.tsv", "function-keybinds.tsv.bak", "function-keybinds-state.tsv", "keybinds.tsv"}:
+        if name not in {"codex-icons.tsv", "home-levels.tsv", "stat-custom-request.tsv", "stat-match-settings.tsv", "catalog.tsv", "catalog.tsv.partial", "codex.tsv", "codex-locations.tsv", "status.tsv", "inbox.tsv", "inbox.session.tsv", "ack.tsv", "inventory-report.json", "unit-evidence.json", "native-table-catalog.tsv", "decrypted-directory.tsv", "decrypted-directory-report.json", "unit-keybinds.tsv", "unit-keybinds-state.tsv", "function-keybinds.tsv", "function-keybinds.tsv.bak", "function-keybinds-state.tsv", "keybinds.tsv"}:
             raise ValidationError("unknown runtime file")
         path = self.runtime / name
         if path.resolve().parent != self.runtime:
@@ -805,6 +814,24 @@ class Bridge:
                 if revision is not None and not (isinstance(revision, str) and re.fullmatch(r'R[0-9A-F]{12}', revision)):
                     raise ValidationError('revision must be R and 12 hex digits')
                 payload['revision'] = revision or 'R' + secrets.token_hex(6).upper()
+        elif action == 'set_spawn_level':
+            # The stored payload is checked again before delivery, so it uses the request's own fields.
+            allowed |= {'level_mode', 'level', 'unit_id'}
+            mode, level = request.get('level_mode'), request.get('level')
+            if mode not in SPAWN_LEVEL_MODES:
+                raise ValidationError('level_mode must be one of ' + ', '.join(SPAWN_LEVEL_MODES))
+            if level is not None and (type(level) is not int or not 0 <= level <= SPAWN_LEVEL_MAX):
+                raise ValidationError('level must be a whole number from 0 to %d' % SPAWN_LEVEL_MAX)
+            if mode == 'CUSTOM' and level is None:
+                raise ValidationError('CUSTOM needs a level')
+            payload.update(level_mode=mode, level=level if mode in ('CUSTOM', 'UNIT') else None)
+            if mode == 'UNIT':
+                unit = request.get('unit_id')
+                if not (isinstance(unit, str) and UNIT_SHORT_ID.fullmatch(unit)):
+                    raise ValidationError('unit_id must be a unit id such as BP_Monster_Name')
+                payload['unit_id'] = unit
+            elif 'unit_id' in request:
+                raise ValidationError('unit_id goes only with UNIT')
         elif action == 'set_clock_hud':
             allowed.add('enabled')
             enabled = request.get('enabled')
@@ -880,6 +907,8 @@ class Bridge:
             bindings={'spawn':payload['feature'],'start':'ON' if payload['enabled'] else 'OFF'}
         elif payload['action']=='set_stat_mode':
             bindings={'spawn':STAT_MODES[payload['mode']],'start':payload.get('revision','')}
+        elif payload['action']=='set_spawn_level':
+            bindings={'spawn':payload['level_mode'],'start':'' if payload.get('level') is None else str(payload['level'])}
         elif payload['action'] in ('set_team_immortal','set_clock_hud'):
             bindings={'start':'ON' if payload['enabled'] else 'OFF'}
         fields = [str(row["id"]), payload["action"], payload.get("unit_id", ""),
@@ -1086,6 +1115,32 @@ class Bridge:
             units[unit] = {"name": name, "map": place.get("map_name") or "", "chapter": place.get("chapter_name") or ""}
         return {"lang": lang, "units": units, "count": len(units)}
 
+    def home_levels(self):
+        """Each unit's summon level choices (home_levels.lua, Runtime/home-levels.tsv): every place the game itself
+        puts it with how many spawners put it there (native), else the areas of its codex home map, and a level the
+        player picked, with the default and the pick marked. Empty until a mod that writes them (v0.37.6+) has run."""
+        text = bounded_read(self._path("home-levels.tsv"), 2 * 1024 * 1024)
+        units = {}
+        lines = (text or "").replace("\r\n", "\n").split("\n")
+        if not text or lines[0] != HOME_LEVEL_HEADER:
+            return {"units": units, "count": 0}
+        for line in lines[1:]:
+            cols = line.split("\t")
+            if len(cols) != 8 or not UNIT_SHORT_ID.fullmatch(cols[0]) or cols[2] not in HOME_LEVEL_SOURCES:
+                continue
+            unit, level, source, map_name, part, default, picked, count = cols
+            if (not level.isdigit() or int(level) > SPAWN_LEVEL_MAX or len(map_name) > 64 or len(part) > 4
+                    or not count.isdigit() or len(count) > 6):
+                continue
+            entry = units.setdefault(unit, {"options": [], "default": None, "picked": None})
+            entry["options"].append({"level": int(level), "source": source, "map": map_name, "part": part,
+                                     "count": int(count)})
+            if default == "1":
+                entry["default"] = len(entry["options"]) - 1
+            if picked == "1":
+                entry["picked"] = len(entry["options"]) - 1
+        return {"units": units, "count": len(units)}
+
     def stat_settings(self):
         """The spawn stat mode and custom values the mod saved (stat_match.lua, Runtime/stat-match-settings.tsv)."""
         # Lua writes this file in text mode, so on Windows its lines end in CRLF.
@@ -1200,6 +1255,8 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.server.bridge.codex_icons()
             elif path == "/api/unit-names":
                 result = self.server.bridge.unit_names()
+            elif path == "/api/home-levels":
+                result = self.server.bridge.home_levels()
             elif path.startswith("/codex-icons/"):
                 # A codex bust the mod saved on this PC; never shipped with the app.
                 name = path[len("/codex-icons/"):]

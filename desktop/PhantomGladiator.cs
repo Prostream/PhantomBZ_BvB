@@ -30,10 +30,13 @@ namespace PhantomGladiator
         [STAThread]
         static void Main(string[] args)
         {
-            if (args.Length >= 4 && args[0] == "--apply-update")
+            // Started by an update or a restart: wait for the old process, or the single-instance check below
+            // would find it still running and close this one.
+            int oldPid;
+            if (args.Length >= 2 && args[0] == "--wait-for" && int.TryParse(args[1], out oldPid))
             {
-                Updater.Apply(args[1], args[2], int.Parse(args[3]));
-                return;
+                try { using (var old = Process.GetProcessById(oldPid)) old.WaitForExit(30000); }
+                catch (ArgumentException) { }
             }
             bool created;
             using (var mutex = new Mutex(true, "PhantomGladiator.App.v1", out created))
@@ -43,6 +46,7 @@ namespace PhantomGladiator
                     Native.FocusWindow("PhantomGladiator.MainForm");
                     return;
                 }
+                UpdateClient.CleanUp();
                 ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                 Application.EnableVisualStyles();
                 Application.SetCompatibleTextRenderingDefault(false);
@@ -588,8 +592,9 @@ namespace PhantomGladiator
             }
         }
 
-        // Unpacks next to the app's data, then hands over to a copy of this exe that swaps the files
-        // once this process has exited.
+        // Unpacks next to the app's data and swaps the app's files in place (AppSwap, desktop/AppUpdate.cs), then
+        // starts the new exe, which waits for this process to exit. The caller has stopped the backend first: its
+        // Python keeps files in app\ open.
         public void Install()
         {
             if (downloaded == null) throw new HostError("verify", "");
@@ -598,36 +603,31 @@ namespace PhantomGladiator
             ZipFile.ExtractToDirectory(downloaded, staging);
             var root = Directory.GetFiles(staging, "PhantomGladiator.exe", SearchOption.AllDirectories).Select(Path.GetDirectoryName).FirstOrDefault();
             if (root == null || !Directory.Exists(Path.Combine(root, "app"))) throw new HostError("verify", "更新包内容不完整。");
-            var updater = Paths.In("updates", "updater.exe");
-            File.Copy(Application.ExecutablePath, updater, true);
-            foreach (var dll in Directory.GetFiles(Paths.AppDir, "*.dll")) File.Copy(dll, Paths.In("updates", Path.GetFileName(dll)), true);
-            Process.Start(new ProcessStartInfo(updater, "--apply-update \"" + root + "\" \"" + Paths.AppDir + "\" " + Process.GetCurrentProcess().Id) { UseShellExecute = false });
-        }
-    }
-
-    static class Updater
-    {
-        public static void Apply(string from, string to, int pid)
-        {
-            try { Process.GetProcessById(pid).WaitForExit(30000); } catch (ArgumentException) { }
-            Thread.Sleep(500);
+            try { AppSwap.Apply(root, Paths.AppDir); }
+            catch (IOException e) { throw new HostError("install", "更新没有完成，原来的文件已恢复：" + e.Message + "\n\n可以到 GitHub 下载完整包手动替换。"); }
             try
             {
-                var app = Path.Combine(to, "app");
-                var old = Path.Combine(to, "app.old");
-                if (Directory.Exists(old)) Directory.Delete(old, true);
-                if (Directory.Exists(app)) Directory.Move(app, old);
-                foreach (var dir in Directory.GetDirectories(from, "*", SearchOption.AllDirectories))
-                    Directory.CreateDirectory(Path.Combine(to, dir.Substring(from.Length + 1)));
-                foreach (var file in Directory.GetFiles(from, "*", SearchOption.AllDirectories))
-                    File.Copy(file, Path.Combine(to, file.Substring(from.Length + 1)), true);
-                try { Directory.Delete(old, true); } catch (Exception) { }
-                Process.Start(Path.Combine(to, "PhantomGladiator.exe"));
+                Process.Start(new ProcessStartInfo(Path.Combine(Paths.AppDir, "PhantomGladiator.exe"), "--wait-for " + Process.GetCurrentProcess().Id)
+                    { UseShellExecute = false, WorkingDirectory = Paths.AppDir });
             }
-            catch (Exception e)
+            catch (Exception e) { throw new HostError("install", "新版本已装好，但没能自动打开，请关掉助手后再打开一次：" + e.Message); }
+        }
+
+        // At start: what the last update set aside, and the updater.exe copy (with the DLLs it needed) that versions
+        // before 0.37.6 ran from AppData. Anything still in use is left for the next start.
+        public static void CleanUp()
+        {
+            try { AppSwap.Cleanup(Paths.AppDir); } catch (Exception) { }
+            try
             {
-                MessageBox.Show("更新没有完成：" + e.Message + "\n\n可以到 GitHub 下载完整包手动替换。", "斗蛐蛐", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                var updates = Paths.In("updates");
+                if (!Directory.Exists(updates)) return;
+                foreach (var file in Directory.GetFiles(updates, "*.exe").Concat(Directory.GetFiles(updates, "*.dll")))
+                    try { File.Delete(file); } catch (Exception) { }
+                var staging = Path.Combine(updates, "staging");
+                if (Directory.Exists(staging)) try { Directory.Delete(staging, true); } catch (Exception) { }
             }
+            catch (Exception) { }
         }
     }
 
@@ -853,11 +853,21 @@ namespace PhantomGladiator
                     return null;
                 case "installUpdate":
                     if (gameRunning) throw new HostError("gameRunning", "请先关闭游戏再更新。");
-                    await Task.Run(() => updates.Install());
+                    // The backend's Python keeps files in app\ open while it runs; it comes back if the update fails.
+                    var runtime = backend.Runtime;
+                    backend.Stop();
+                    Exception failed = null;
+                    try { await Task.Run(() => updates.Install()); }
+                    catch (Exception e) { failed = e; }
+                    if (failed != null)
+                    {
+                        if (!string.IsNullOrEmpty(runtime)) await Task.Run(() => backend.Start(runtime));
+                        throw failed;
+                    }
                     BeginInvoke((Action)Close);
                     return null;
                 case "restart":
-                    Process.Start(Application.ExecutablePath);
+                    Process.Start(new ProcessStartInfo(Application.ExecutablePath, "--wait-for " + Process.GetCurrentProcess().Id) { UseShellExecute = false });
                     BeginInvoke((Action)Close);
                     return null;
                 default:

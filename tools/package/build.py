@@ -24,9 +24,13 @@ DEPS = {
                "https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip"),
     "webview2": ("microsoft.web.webview2.1.0.4191.47.nupkg", "f492bbf547d0da329553b6727435b677579b1e9f91cc9e4a1ad029366d5f23d0",
                  "https://api.nuget.org/v3-flatcontainer/microsoft.web.webview2/1.0.4191.47/microsoft.web.webview2.1.0.4191.47.nupkg"),
-    "ue4ss": ("UE4SS_v3.0.1-1185-gdff435dd.zip", "67b81fca6a3eb6e24fe5117d2e390fdc19d49af46dad9500d08106bf9a190d31",
-              "https://github.com/UE4SS-RE/RE-UE4SS/releases (experimental build 3.0.1-1185)"),
+    # UE4SS experimental build 3.0.1-1185 (dff435dd), the one GameConfig is verified with. UE4SS replaced that
+    # experimental release with later builds (1195 by 2026-11-02), so the files are taken unchanged from this
+    # app's v0.37.5 package, which unpacked the original zip (SHA-256 67b81fca…0d31) into app/payload/ue4ss.
+    "ue4ss": ("PhantomGladiator-0.37.5-win64.zip", "a4c5a511444830c1ae5fb0bf5631e730433ef29ab8ba0647e1c4e3214dddae3e",
+              "https://github.com/LingYi-Liang/PhantomGladiator/releases/download/v0.37.5/PhantomGladiator-0.37.5-win64.zip"),
 }
+UE4SS_IN_PACKAGE = "PhantomGladiator-0.37.5/app/payload/ue4ss/"
 VERIFIED_GAME_BUILD = "26266538"
 REPO = "LingYi-Liang/PhantomGladiator"
 # latest.json is read from the repository through jsDelivr first (reachable from mainland China).
@@ -61,12 +65,17 @@ def dependency(deps: Path, key: str) -> Path:
     return path
 
 
-def extract(archive: Path, target: Path, members=None) -> None:
+def extract(archive: Path, target: Path, members=None, strip="") -> None:
+    """Unpacks the archive (only the entries under `members`, if given) into target, dropping the `strip` prefix."""
     with zipfile.ZipFile(archive) as z:
         for info in z.infolist():
             name = info.filename
             if members and not any(name.startswith(m) for m in members):
                 continue
+            if strip:
+                if not name.startswith(strip) or name == strip:
+                    continue
+                name = name[len(strip):]
             out = (target / name).resolve()
             if not out.is_relative_to(target.resolve()):
                 sys.exit(f"{archive.name}: unsafe path {name}")
@@ -191,7 +200,7 @@ def main() -> None:
     # Third-party pieces, each checked against its pinned hash.
     extract(dependency(args.deps, "python"), app / "python")
     extract(dependency(args.deps, "webview2"), build / "webview2", ["lib/net462/", "runtimes/win-x64/native/", "LICENSE"])
-    extract(dependency(args.deps, "ue4ss"), app / "payload" / "ue4ss")
+    extract(dependency(args.deps, "ue4ss"), app / "payload" / "ue4ss", strip=UE4SS_IN_PACKAGE)
 
     # Game-specific UE4SS files (signatures and memory layout) and the mod itself.
     shutil.copytree(ROOT / "GameConfig", app / "payload" / "gameconfig")
@@ -237,7 +246,7 @@ def main() -> None:
     refs = [f"/r:{r}" for r in FRAMEWORK_REFS] + [f"/r:{out / 'Microsoft.Web.WebView2.Core.dll'}", f"/r:{out / 'Microsoft.Web.WebView2.WinForms.dll'}"]
     subprocess.run([str(CSC), "/nologo", "/target:winexe", "/platform:x64", "/optimize+", "/utf8output", "/codepage:65001",
                     f"/out:{out / 'PhantomGladiator.exe'}", f"/win32icon:{icon}", f"/win32manifest:{build / 'app.manifest'}", *refs,
-                    str(ROOT / "desktop/PhantomGladiator.cs")], check=True)
+                    str(ROOT / "desktop/PhantomGladiator.cs"), str(ROOT / "desktop/AppUpdate.cs")], check=True)
     (out / "PhantomGladiator.exe.config").write_text(EXE_CONFIG, encoding="utf-8")
     (out / "licenses").mkdir()
     for lic in wv.glob("LICENSE*"):

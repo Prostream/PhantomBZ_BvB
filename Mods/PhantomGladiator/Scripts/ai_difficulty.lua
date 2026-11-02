@@ -20,6 +20,9 @@ local DEFAULT='/Script/ProjectPBZ.Default__PBZBlueprintFunctionLibrary'
 -- GetDiffcultMode was only ever asked with the World as context (v0.32.1–v0.35 logs), never by a unit.
 local FUNCTIONS={'GetDifficulty'}
 local UNHOOK_SECONDS=10
+-- The blueprint checks are looked up every 15 s for a minute after a leveled unit is summoned, then no more
+-- until the next one: a lookup that misses costs 50–60 ms (v0.37.6 log), a stutter every 15 s otherwise.
+local CHECK_EVERY,CHECK_WINDOW=15,60
 local VALUES={Handicapped=0,Easy=1,Normal=2,Hard=3,Nightmare=4} -- EDifficultMode
 -- Blueprint checks: the hook's single callback runs after the function; `subject` picks the argument
 -- that names the AI being checked.
@@ -58,7 +61,7 @@ function AI.new(options)
         calls={},answers={}}
     local hooks,cache,logged,lines,counts,checked,installed,samples={},{},{},0,{},{},{},{}
     local index={}
-    local summarizedAt,summarizedCount,emptySince,checksAt
+    local summarizedAt,summarizedCount,emptySince,checksAt,checksUntil
     local function say(m)log('[AIDifficulty] '..m)end
     -- The message is built only the first time a signature is seen.
     local function note(signature,message)
@@ -161,6 +164,7 @@ function AI.new(options)
         end
         self.state='running'
         self.message='已挂钩，等待读回'
+        checksUntil=clock()+CHECK_WINDOW
     end
     local function uninstall(reason)
         local kept={}
@@ -182,6 +186,7 @@ function AI.new(options)
         if key then index[key]=level;cache={} end
         emptySince=nil
         if self.state=='idle' then install() end
+        checksUntil=clock()+CHECK_WINDOW
     end
 
     -- Lua calls go through the same hooks. Asking for a unit's difficulty proves the GetDifficulty
@@ -257,8 +262,9 @@ function AI.new(options)
         if self.state~='running' then return end
         -- The blueprint checks load with the first AI that uses them.
         -- Looking up a function whose class is not loaded is slow in UE4SS (60–70 ms a tick in v0.35.5
-        -- with only 魔渊 out, whose AI does not use these checks), so try at most every 15 s.
-        if not checksAt or clock()-checksAt>=15 then
+        -- with only 魔渊 out, whose AI does not use these checks), so try every 15 s, and only in the minute
+        -- after a leveled unit was summoned.
+        if checksUntil and clock()<=checksUntil and (not checksAt or clock()-checksAt>=CHECK_EVERY) then
             checksAt=clock()
             for _,spec in ipairs(CHECKS)do
                 if not installed[spec.name] and register(spec.path,spec.name,checkCallback(spec)) then installed[spec.name]=true end

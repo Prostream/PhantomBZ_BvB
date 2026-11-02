@@ -610,6 +610,7 @@
           <div class="count-presets">${[1, 5, 10, 50].map(n => `<button class="preset" type="button" data-action="count-preset" data-n="${n}" aria-pressed="${ui.count === n}">${n}</button>`).join("")}</div>
         </div>
       </div>
+      ${levelField(u)}
       <div class="summon-wrap">
         <button class="btn btn-lg btn-block ${btnTone}" type="button" data-action="summon" ${blocker || busy ? "disabled" : ""} aria-keyshortcuts="Control+Enter">
           ${busy ? '<span class="spinner"></span>' : icon("user-plus")}<span>${esc(label)}</span>${busy ? "" : keyCap(S.keys.spawn)}
@@ -724,7 +725,78 @@
     el.innerHTML = `<div class="dock-title"><span id="diff-title">${esc(t("diff.title"))}</span></div>
       <select class="select diff-select" id="diff-select" aria-labelledby="diff-title" aria-describedby="diff-desc" ${usable ? "" : "disabled"}>${DIFFICULTIES.map(v => `<option value="${v}"${v === level ? " selected" : ""}>${esc(label(v))}</option>`).join("")}</select>
       <p class="diff-desc" id="diff-desc">${esc(desc)}</p>
-      ${notes.join("")}`;
+      ${notes.join("")}
+      ${levelBlock()}`;
+  }
+  // Summon level (set_spawn_level, home_levels.lua): each unit's own level in the game (HOME, the default), the level
+  // of the map enemies near the player (HERE), or one level for every summon (CUSTOM).
+  const LEVEL_MODES = ["HOME", "HERE", "CUSTOM"];
+  function levelBlock() {
+    const L = S.level, online = RT.online(), busy = ui.busy.has("set_spawn_level");
+    const mode = ui.levelDraft || L.mode, usable = online && L.supported && !busy;
+    const desc = !online ? t("diff.desc.offline") : !L.supported ? t("level.desc.old")
+      : mode === "CUSTOM" && L.mode !== "CUSTOM" ? t("level.desc.customDraft") : t("level.desc." + mode, { n: L.custom });
+    const last = online && S.difficulty.summonLevel != null ? `<p class="diff-desc diff-level">${esc(t("diff.level", { n: S.difficulty.summonLevel }))}</p>` : "";
+    const custom = mode === "CUSTOM" ? `<div class="level-custom">
+        <input class="stat-input" id="level-custom" type="text" inputmode="numeric" value="${esc(ui.levelCustom ?? L.custom ?? "")}" placeholder="1–${LEVEL_MAX}" aria-label="${esc(t("level.custom"))}" ${usable ? "" : "disabled"}>
+        <button class="btn btn-secondary btn-sm" type="button" data-action="level-apply" ${usable ? "" : "disabled"}>${esc(t("level.apply"))}</button>
+      </div>` : "";
+    return `<div class="dock-title level-title"><span id="level-title">${esc(t("level.title"))}</span></div>
+      <select class="select diff-select" id="level-mode" aria-labelledby="level-title" aria-describedby="level-desc" ${usable ? "" : "disabled"}>${LEVEL_MODES.map(v => `<option value="${v}"${v === mode ? " selected" : ""}>${esc(t("level.mode." + v))}</option>`).join("")}</select>
+      ${custom}
+      <p class="diff-desc" id="level-desc">${esc(desc)}</p>
+      ${last}
+      ${ui.levelError ? `<div class="inline-error">${icon("alert")}<span>${esc(ui.levelError)}</span></div>` : ""}`;
+  }
+  const LEVEL_MAX = 60;
+  function setLevelMode(mode) {
+    if (!LEVEL_MODES.includes(mode)) return;
+    ui.levelError = "";
+    // A custom level needs a number first; the choice waits in the box until the player applies one.
+    if (mode === "CUSTOM" && S.level.custom == null) { ui.levelDraft = "CUSTOM"; renderDifficulty(); $("#level-custom")?.focus(); return; }
+    ui.levelDraft = null;
+    if (mode === S.level.mode) { renderDifficulty(); return; }
+    sendLevel(mode, mode === "CUSTOM" ? S.level.custom : null);
+  }
+  function applyCustomLevel(text) {
+    const n = Number(String(text ?? "").trim());
+    if (!Number.isInteger(n) || n < 1 || n > LEVEL_MAX) { ui.levelError = t("level.bad", { max: LEVEL_MAX }); renderDifficulty(); return; }
+    ui.levelError = "";
+    ui.levelCustom = null;
+    sendLevel("CUSTOM", n);
+  }
+  async function sendLevel(mode, level) {
+    const job = await run("set_spawn_level", { payload: { mode, level },
+      ok: () => ({ title: t("toast.level.set", { name: mode === "CUSTOM" ? t("level.customN", { n: level }) : t("level.mode." + mode) }), body: t("toast.level.body") }) });
+    if (job?.status === "succeeded") ui.levelDraft = null;
+    renderDifficulty();
+    renderSelection();
+  }
+  // One place's label: the map and its part, the level, and how many of the game's spawners put the unit there.
+  const levelPlace = o => [o.map, o.part].filter(Boolean).join(" ") || t("level.somewhere");
+  const levelLabel = o => t("level.option", { place: levelPlace(o), n: o.level }) + (o.count > 1 ? " · " + t("level.spawners", { n: o.count }) : "");
+  // The selected unit's level in HOME mode: the default place, or one the player picks from where the game puts it.
+  function levelField(u) {
+    const L = S.level;
+    if (!RT.online() || !L.supported) return "";
+    if (L.mode !== "HOME") return `<div class="level-line">${icon("info", "icon-sm")}<span>${esc(L.mode === "CUSTOM" ? t("level.now.CUSTOM", { n: L.custom }) : t("level.now.HERE"))}</span></div>`;
+    const h = L.homes[u.id];
+    if (!h || !h.options.length) return `<div class="level-line">${icon("info", "icon-sm")}<span>${esc(t("level.none"))}</span></div>`;
+    const def = h.default != null ? h.options[h.default] : null, picked = h.picked ?? -1, busy = ui.busy.has("set_spawn_level");
+    const options = [`<option value=""${picked < 0 ? " selected" : ""}>${esc(def ? t("level.default", { label: levelLabel(def) }) : t("level.defaultNone"))}</option>`,
+      ...h.options.map((o, i) => `<option value="${o.level}"${i === picked ? " selected" : ""}>${esc(o.source === "picked" ? t("level.pickedOnly", { n: o.level }) : levelLabel(o))}</option>`)];
+    return `<div class="field">
+        <div class="field-label"><span id="home-level-label">${esc(t("level.home"))}</span><small>${esc(t("level.homeHelp"))}</small></div>
+        <select class="select" id="home-level" data-id="${esc(u.id)}" aria-labelledby="home-level-label" ${busy ? "disabled" : ""}>${options.join("")}</select>
+      </div>`;
+  }
+  async function setHomeLevel(id, value) {
+    const u = byId.get(id), level = value === "" ? null : Number(value);
+    const h = S.level.homes[id], picked = h && h.picked != null ? h.options[h.picked].level : null;
+    if (!u || level === picked) return;
+    await run("set_spawn_level", { payload: { mode: "UNIT", unit: id, level },
+      ok: () => ({ title: t("toast.level.unit", { name: u.name, label: level == null ? t("level.backToDefault") : t("level.levelN", { n: level }) }), body: t("toast.level.body") }) });
+    renderSelection();
   }
   function setDifficulty(level) {
     if (!DIFFICULTIES.includes(level) || level === S.difficulty.level) return;
@@ -1551,6 +1623,12 @@
         : p.team === "companion" ? t("action.spawnCompanion", { name: u?.name, n: p.count }) : t("action.spawn", { name: u?.name, n: p.count, team: teamName(p.team) });
       case "configure_unit_key": return t("action.configure_unit_key", { name: u?.name });
       case "set_spawn_difficulty": return t("action.set_spawn_difficulty", { name: diffName(p.difficulty) });
+      case "set_spawn_level": {
+        // The app's own payload says mode/unit; a job read back from backend.py says level_mode/unit_id.
+        const mode = p.mode || p.level_mode, unit = byId.get(p.unit || p.unit_id);
+        return mode === "UNIT" ? t("action.set_spawn_level.unit", { name: unit?.name || p.unit || p.unit_id, label: p.level == null ? t("level.backToDefault") : t("level.levelN", { n: p.level }) })
+          : t("action.set_spawn_level", { name: mode === "CUSTOM" ? t("level.customN", { n: p.level }) : t("level.mode." + mode) });
+      }
       case "set_fun_feature": return t("action.set_fun_feature", { name: t("fun." + p.feature + ".name"), state: t(p.enabled ? "fun.on" : "fun.off") });
       case "set_team_immortal": return t("action.set_team_immortal", { team: teamName(p.team), state: t(p.enabled ? "fun.on" : "fun.off") });
       case "set_clock_hud": return t("action.set_clock_hud", { state: t(p.enabled ? "fun.on" : "fun.off") });
@@ -1824,6 +1902,7 @@
     "count-dec": () => setCount(ui.count - 1),
     "count-inc": () => setCount(ui.count + 1),
     "count-preset": el => setCount(Number(el.dataset.n)),
+    "level-apply": () => applyCustomLevel($("#level-custom")?.value),
     summon: () => summon(),
     start: () => run("start", { ok: () => t("toast.fight.start") }),
     stop: () => confirmStop(),
@@ -2016,6 +2095,9 @@
     if (e.target.id === "chapter") { ui.chapter = e.target.value; renderToolbar(); renderGrid({ animate: true }); $("#catalog-col").scrollTop = 0; }
     if (e.target.id === "count-input") setCount(Number(e.target.value));
     if (e.target.id === "diff-select") setDifficulty(e.target.value);
+    if (e.target.id === "level-mode") setLevelMode(e.target.value);
+    if (e.target.id === "level-custom") ui.levelCustom = e.target.value;
+    if (e.target.id === "home-level") setHomeLevel(e.target.dataset.id, e.target.value);
     if (e.target.id === "onb-lang") { setLanguage(e.target.value); }
   });
   const isTyping = el => el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);

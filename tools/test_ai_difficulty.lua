@@ -91,4 +91,16 @@ assert(unregistered==0,'hooks stay for a while in case another unit comes')
 now=27;ai:tick()
 assert(unregistered==3 and next(hooks)==nil and ai:status().state=='idle','ten seconds without leveled units: every hook is removed')
 assert(all():find('摘除挂钩 reason=召唤单位已全部离场 摘除=3 失败=0',1,true))
-print('ai_difficulty: PASS (no hook without a leveled unit, hooked before spawn finishes, address index for unit/controller/node, readbacks, map and world untouched, removed when units leave)')
+
+-- Checks that never load (an AI that does not use them) are looked up every 15 s for a minute after a summon,
+-- then not again until the next summon: each miss costs 50–60 ms in game.
+loaded[CONDITION]=nil;loaded[DECORATOR]=nil
+local lookups,find=0,StaticFindObject
+StaticFindObject=function(path)if path==CONDITION or path==DECORATOR then lookups=lookups+1 end;return find(path)end
+now=100;ai:ensure(pawn,'Nightmare');levels[pawn:GetAddress()]='Nightmare'
+for t=100,250,5 do now=t;ai:tick()end
+assert(lookups==2*5,'looked up at 0, 15, 30, 45 and 60 s after the summon, then no more: '..lookups)
+now=300;ai:ensure(pawn,'Nightmare')
+for t=300,320,5 do now=t;ai:tick()end
+assert(lookups==2*7,'a new summon looks again: '..lookups)
+print('ai_difficulty: PASS (no hook without a leveled unit, hooked before spawn finishes, address index for unit/controller/node, readbacks, map and world untouched, removed when units leave, check lookups only after a summon)')

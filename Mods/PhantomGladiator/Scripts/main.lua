@@ -50,6 +50,9 @@ local CodexIcons=require('codex_icons')
 local ImmortalTeams=require('immortal_teams')
 local BattleClockHUD=require('battle_clock_hud')
 local CombatLock=require('combat_lock')
+local CompanionBars=require('companion_bars')
+local AreaLevels=require('area_levels')
+local HomeLevels=require('home_levels')
 
 local MOD = "[PhantomGladiator]"
 local runLogPath=Config.RuntimePath..'/run-'..os.date('%Y%m%d-%H%M%S')..'.log'
@@ -72,7 +75,7 @@ local function log(msg)
     if ok and saved then runLogBytes=runLogBytes+#durable
     elseif not runLogWarning then runLogWarning=true;print(MOD..' 独立运行日志写入未确认；UE4SS日志仍保留\n') end
 end
-local BUILD = "v0.37.5-names"
+local BUILD = "v0.37.6-native-levels"
 SpawnPolicy.loadTrials(Config.RuntimePath..'/spawn-trials.tsv',log)
 SpawnPolicy.enableAllCatalog()
 log('[SpawnPolicy] 用户开启全部目录尝试召唤；总量不设上限；运行时检查Actor继承和对象有效性')
@@ -1384,14 +1387,16 @@ arenaActivity=ArenaActivity.new({log=log,isNPC=function(actor)return spawnRoutes
             ..' world_time='..tostring(UEObserve.field(settings,'TimeDilation'))
             ..' cinematic_time='..tostring(UEObserve.field(settings,'CinematicTimeDilation'))
     end})
-bossHUD=BossHUD.new({getController=GetRealPlayerController,getWorld=UEHelpers.GetWorld,hp=GetHP,
-    maxHP=function(actor)
-        if not engineValid(actor) then return nil end
-        local attributes=actor.AttributeSetBase
-        if not engineValid(attributes) then return nil end
-        return attributes.Health_Max.CurrentValue
-    end,
+local function GetMaxHP(actor)
+    if not engineValid(actor) then return nil end
+    local attributes=actor.AttributeSetBase
+    if not engineValid(attributes) then return nil end
+    return attributes.Health_Max.CurrentValue
+end
+bossHUD=BossHUD.new({getController=GetRealPlayerController,getWorld=UEHelpers.GetWorld,hp=GetHP,maxHP=GetMaxHP,
     codexPath=Config.RuntimePath..'/codex.tsv',log=log})
+-- Companions show the game's own health bar above their heads, as enemies do (companion_bars.lua).
+local companionBars=Config.ShowCompanionHealthBars and CompanionBars.new({log=log,hp=GetHP,maxHP=GetMaxHP}) or nil
 local arenaSupport={}
 -- One copy of the arena's members and status per support tick: a dozen modules ask for them, and each
 -- call re-checks every unit with the engine (50 units made the support tick take 20-50 ms in v0.37.2).
@@ -1404,7 +1409,35 @@ spawnDifficulty=SpawnDifficulty.new({path=Config.RuntimePath,log=log,getWorld=UE
     ready=function()return runtimeSession:status().game_ready==true end})
 statProbe=Config.EnableStatFormulaProbe and StatFormulaProbe.new({log=log}) or nil
 fieldProbe=Config.EnableStatFieldProbe and StatFieldProbe.new({log=log}) or nil
-spawnLevel=SpawnLevel.new({log=log,path=Config.RuntimePath,getPlayer=GetPlayerPawn,getLocation=GetLocation,collect=CollectNPCs,
+-- The game cycle (new game plus count): the game adds 25 levels per cycle to its own enemies (BP_RenewalNPC
+-- "Init Level"). Read with the same library call, at most every 10 s, logged when it changes.
+local cycleAt,cycleValue
+local function GameCycle()
+    if cycleAt and os.clock()-cycleAt<10 then return cycleValue end
+    cycleAt=os.clock()
+    local library=StaticFindObject('/Script/ProjectPBZ.Default__PBZBlueprintFunctionLibrary')
+    local world=UEHelpers.GetWorld()
+    if not safeValid(library) or not safeValid(world) then return cycleValue end
+    local ok,value=pcall(function()return library:GetGameCycle(world)end)
+    local cycle=ok and tonumber(UEObserve.unwrap(value)) or nil
+    if cycle~=cycleValue then log('[HomeLevels] 读游戏周目 调用='..tostring(ok)..' 读回='..tostring(cycle)..(ok and '' or ' 错误='..tostring(value))) end
+    cycleValue=cycle
+    return cycle
+end
+-- Where a summon's level comes from: its home (default), the map enemies near the player, or one level (home_levels.lua).
+-- A home level gets the difficulty the unit is summoned at (the app's, else the game's) and the game cycle.
+local homeLevels=HomeLevels.new({log=log,path=Config.RuntimePath,context=function(actor)
+    local slot=actor and spawnDifficulty and spawnDifficulty:levelOf(actor) or (spawnDifficulty and spawnDifficulty:status().game) or nil
+    return {difficulty=slot~='' and slot or nil,cycle=GameCycle()}
+end})
+spawnLevel=SpawnLevel.new({log=log,path=Config.RuntimePath,getPlayer=GetPlayerPawn,getLocation=GetLocation,collect=CollectNPCs,homeLevels=homeLevels,
+    -- The loaded world's name (PBZ_Xigu_WP): spawner places and the remembered level are per world.
+    getWorldName=function()
+        local world=UEHelpers.GetWorld()
+        if not safeValid(world) then return nil end
+        local ok,name=pcall(function()return world:GetFName():ToString()end)
+        return ok and type(name)=='string' and name or nil
+    end,
     ours=function()
         local keys={}
         for _,entry in ipairs(ArenaMembers())do local key=UEObserve.key(entry.actor);if key then keys[key]=true end end
@@ -1488,6 +1521,7 @@ local function supportSteps(self)
         else bossHUD:sync(tickMembers) end
     end)
     step('clockHUD',function()clockHUD:tick()end)
+    if companionBars then step('companionBars',function()companionBars:sync(tickMembers)end) end
     local total=(os.clock()-started)*1000
     if total>=SLOW_TICK_MS and slowTicks<60 then
         slowTicks=slowTicks+1
@@ -1542,6 +1576,9 @@ panelRuntime=PanelRuntime.new({arena=arena,exporter=exporter,path=Config.Runtime
         toggle=ToggleFreeCam,exit=ForceExitFreeCam},
     spawnCatalog=SpawnCatalog.new({log=log,path=Config.RuntimePath,getWorld=UEHelpers.GetWorld}),
     tableCatalog=TableCatalog.new({log=log,path=Config.RuntimePath,maps=worldMaps}),
+    areaLevels=AreaLevels.new({log=log,path=Config.RuntimePath}),
+    spawnLevel=spawnLevel,
+    homeLevels=homeLevels,
     references=ReferenceAudit.new({log=log,path=Config.RuntimePath})})
 panelRuntime:start()
 

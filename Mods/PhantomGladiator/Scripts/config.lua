@@ -49,6 +49,8 @@ Config.EnableAttackFactionScan = false
 Config.EnableCodexArtProbe = false
 -- 进游戏后在后台把图鉴头像（白色图标，头肩像）存到本机 Runtime/codex-icons/，给助手的单位卡片用；游戏图片不随助手发布。
 Config.EnableCodexIcons = true
+-- 随从头顶显示游戏自带的血条（和小兵一样）；关掉后不再管随从的头顶血条。
+Config.ShowCompanionHealthBars = true
 
 -- 历史碰撞复制实验，默认关；响应差异不证明实际攻击查询通道。
 Config.CopyPlayerHurtChannels = false

@@ -1205,3 +1205,161 @@ B站反馈：怪物当随从时，范围攻击会打到主角；不只 BOSS，�
   - codex 导出写入成功后，通过 onWritten 回调让血条重读文件。安装包附带的初始 codex.tsv 来自作者游戏的 Runtime（build.py `--seed` 的默认路径），现在是 7 列、zh-Hans；新玩家第一次进地图导出后，血条当场换成游戏语言，不用等下次启动。
   - arena_boss_hud.lua 也有同样的严格表头，但 main 已不引用它（只有它自己的测试），没有改。
 - 测试：test_arena_hud 新增新旧两种表头、英文名和队伍名、韩语等没有队伍名的语言退回英文、空名退回中文、导出后重读；test_codex_catalog_export 新增写入成功后回调一次、失败不回调。Lua 54 项、后端 65 项全部通过。血条修复没有实机验证。
+
+## 随从头顶血条（v0.37.6，2026-11-02，已实机）
+
+玩家请求随从也显示血条。用户要求显示在头上，和小兵一样。
+
+头文件里的依据：
+- 地图怪的头顶血条挂在 NPC 基类上：`ABP_RenewalNPC_C.hpbar`（UPBZLazyWidgetComponent，偏移 0x0CC8，是"按需创建控件"的 UWidgetComponent，有 SetWidgetClassLazy / IsWidgetCreated / EnsureWidgetCreated）。NPC 自己有 `EnsureInitHpBar` / `WaitInitHPBar`，以及 `InitHPBarAsyncActions`。
+- 控件是 `UWB_EnemyHPBar_C`：
+  - 字段：SelfActor、WantToShow、HideTimer、HideBarTime、Distance、hpbar（PBZAnimProgressBar）。
+  - 函数：CanDisplayHpBar(out CanDisplay)、CanDisplayInLockRule、CheckNPCBar、IsBossType、UpdateBarVis、ReadyToUpdateVis、HideUI、TimeToHide、Init(Actor)、BindHpListner / BindCombatListener / BindLockListener、ForSeq_ShowEnemyHPBar / ForSeq_HideEnemyHPBar / ForSeq_UpdateHealth(百分比)。
+- 游戏设置 `UPBZSettingsShared.MonsterHealthBarMode`（EPBZMonsterHealthBarMode：HideFullHealth=0、AlwaysShow=1、OnlyLockedTarget=2）决定小兵血条什么时候显示。
+- 推测：随从对玩家友好，游戏的显示判断（CanDisplayHpBar 或战斗、锁定监听）不放行，所以随从头顶没有血条。这一点要靠实机读回确认。
+
+做法（companion_bars.lua，支持循环约每 0.5 秒一次，只管随从本身，不管随从的召唤物，开关 `Config.ShowCompanionHealthBars`）：
+- 控件还没创建时，先调 NPC 自己的 `EnsureInitHpBar`；没建出来再调组件的 `EnsureWidgetCreated`。控件没绑定本单位就调 `Init(随从)`。
+- 显示：组件 SetHiddenInGame(false)、SetVisibility(true)，控件 ForSeq_ShowEnemyHPBar(随从)；之后控件还不可见，就 SetVisibility(HitTestInvisible)。
+- 血量变化时调 ForSeq_UpdateHealth(当前血量 / 血量上限)。随从倒下时把控件设为 Collapsed。
+- 只写随从自己的组件和控件，不改游戏设置，也不改类默认值。
+- 日志 `[CompanionBar]`：
+  - 每只随从第一次处理时，记显示前和显示后的组件可见性、控件类和可见性、WantToShow、是否绑定本单位、CanDisplayHpBar 的结果、血条比例；
+  - 之后游戏每把血条收起一次就记一次（最多 10 行），用来判断游戏会不会一直跟我们抢显示。
+- 离线：test_companion_bars（自建并绑定、显示、血量、被收起后重显、倒下收起、没有初始化函数时的退路、没有组件、蓝方和召唤物不动），Lua 55 项全部通过。BUILD=v0.37.6-companion-bars，脚本已部署，58 个哈希一致。
+
+实机（13:38，测试版 v0.37.6-companion-bars，随从是 BP_Monster_GuiChai_Yellow_MoDao）：
+- 显示前：组件可见=false，组件隐藏=true，控件还没创建。
+- 调 `EnsureInitHpBar` 成功，建出了 WB_EnemyHPBar_C；但它的 SelfActor 没指向这只随从，调 `Init(随从)` 后读回绑定=true。
+- 显示后：组件可见=true，隐藏=false，控件可见性=3，WantToShow=false。游戏自己的 `CanDisplayHpBar` 返回 false，证实游戏本来就不给友方单位显示头顶血条。
+- 血条比例刚设完时读回 0.0。进度条（PBZAnimProgressBar）会慢慢走到目标值，所以设完当时读到的不是目标值。
+- 之后两分多钟没有一次"被游戏收起"的记录：显示一次后，游戏不会再把它藏起来。
+- 用户确认随从头顶的血条显示出来了，这一版没有问题。
+- 耗时：companionBars 第一次 4 ms，之后每次 0–1 ms。
+- 顺带看到（没有改）：带召唤难度的单位在场时，aiDifficulty 每 15 秒有一次 46–61 ms 的耗时。这是每 15 秒尝试给还没加载的蓝图检查节点挂钩，按函数路径查找没加载的类很慢（见 ai_difficulty.lua 的注释和 v0.35.5 记录）。属于已知的取舍，会造成每 15 秒一次的轻微卡顿。
+
+## v0.37.6：区域等级表、助手显示召唤等级、AI 难度检查限时、更新方式（2026-11-02）
+
+为了写玩家看的数值说明（docs/STATS_GUIDE.md），需要各地方的等级，于是读了区域等级表；同版改了更新方式，修了每 15 秒的卡顿。
+
+头文件依据：
+- 区域等级表 `/PBZCombatAsset/Config/AIData/DT_AIAreaLevel`，行结构 `FAIAreaLevelTableStructure{FName Parent, float LevelOffset}`，一个区域的等级 = 上级区域的等级 + 自己的 LevelOffset。
+- 游戏自己的计算函数是 `UAIAreaLevelTableHelper.GetAILevel(UDataTable*, FName RowName)`。
+- 刷怪区域 `APBZ_MobDomain_C` 有 `Level Area Name`、`Level Offset`、`Offset By Difficulty`（TMap<EDifficultMode,double>）、`Level Area Table`、`Get AI Level()`。
+
+做法：
+- area_levels.lua 进地图后只读一次，读表的全部行（GetRowMap），沿 Parent 算等级，再逐行调 GetAILevel 对比；同时读当前已加载的刷怪区域。结果写入 Runtime/area-levels.tsv。不加载资源，也不写游戏对象。
+- spawn_level.lua 的最近一次召唤等级写进 status（spawn_level、spawn_level_unit），助手在"召唤难度"下面显示。
+- ai_difficulty.lua 的检查节点查找只在召唤后 60 秒内进行，每 15 秒一次。
+
+实机（14:22 加载 v0.37.6-levels，测试版助手 0.37.21）：
+- 区域等级：表按路径找到，31 行全部算出，范围 1～25；与游戏 GetAILevel 不一致 0 行。已加载的刷怪区域 17 个：
+  - Offset By Difficulty 五档（0–4）全是 0；
+  - Level Offset 除一个区域名为 LuJiaCun（不在表里）的是 2 以外，都是 0；
+  - 没有区域名（None）的等级是 0。
+- 各地方等级（按区域名对应地图和章节）：
+
+  | 地图 | 等级 |
+  |---|---|
+  | 悲泣溪谷（XiguA–D） | 1–4 |
+  | 血色森林（FujizhilinA–C） | 4–6 |
+  | 陆家村地区（LujiacunA–C） | 7–9 |
+  | 庞镇（PangzhenA–C） | 10–12 |
+  | 后街（HoujieA–C） | 13–15 |
+  | 正道大营（ZhengdaodayingA–B） | 19–20 |
+  | 枷笼山（JialongshanA–B） | 22 |
+  | 梅谷湖（MeiGuHu、MeiguhuB–C） | 18–20 |
+  | 梅谷湖遗迹（Huanshushiyiji） | 23 |
+  | 戏梦山庄（XimengshanzhuangA–C） | 22–24 |
+  | 断魂山（DuanhunshanA–C） | 25 |
+  | XueSeSenLin（未确认在哪） | 24 |
+
+- 更正：v0.36.7 记的"死镇区域，白鹤门弟子 18 级"，其实是梅谷湖一带。白鹤门/水行弟子属于梅谷湖，而 PBZ_Pangzhen_WP 这个关卡同时装着庞镇（10–12）和梅谷湖（18–20）。README 里相应的三处已改。
+- 召唤等级：world ready 时已加载的地图怪 0 只，助手显示的是记录的 20；14:24:54 召唤时，附近 IllnessCrow_Claw 20 级，写入并读回 20。status.tsv 读回 spawn_level=20、spawn_level_unit=BP_Monster_IllnessCrow_Claw。之后改为：没读到地图怪就每 10 秒重读，读到后每 60 秒更新一次；等级变了才写日志。这一改只做了离线测试。
+- 卡顿：召唤后在 14:24:55、14:25:09、14:25:24、14:25:39、14:25:54 各查找一次，每次 53–63 ms，之后到 14:27:26 日志结束都没有再出现。修复生效。
+- 更新方式（desktop/AppUpdate.cs，不再把 exe 复制到 AppData 当 updater.exe 运行；Windows Defender 曾把那个副本报成木马）。本机实测：
+  - tools/test_app_update.py：正在运行的程序和它加载的 DLL 改名换新，新版启动后清掉 .old；中途失败时旧版完整恢复。
+  - tools/test_update_install.py：用真实的 UpdateClient 走完检查、下载、SHA-256 校验、原地安装，新版等旧进程退出后接手，清掉旧的 updater.exe 和解压目录。
+  - 从 v0.37.5 及更早版本升级到 0.37.6 时，跑的仍是旧版自带的更新逻辑。
+- 用户补充：XueSeSenLin 就是血色森林。所以血色森林有两片区域：第 2 章的 FujizhilinA–C（4–6 级），和 24 级的 XueSeSenLin，后者在哪一章去还没确认。
+- BOSS 战的等级（头文件）：地图怪出生时的等级来自刷怪点的 `FAISpawnInfo`，由三部分相加：
+  - `MobDomain`（软指针）→ 区域等级 + 区域 Level Offset + Offset By Difficulty；
+  - `MobGroupName` → 分组脚本 `UGroupScript_LevelOffset_C{Offset, Offset By Difficulty}`；
+  - `ExtraScripts` → `UAIScript_LevelOffset_C{Offset, Offset By Difficulty}`。
+  BOSS 战的场地可以单独加等级。用户说三面（三张脸的诡异魔偶）属于第 1 章（悲泣溪谷 1–4 级），互动后进入另一个场地战斗；那里按剧情血量推算是 15 级。各场 BOSS 战的加成只有在场地加载时才能从刷怪点读到。资源索引里没有统一的 BOSS 等级表；有 `DT_NarrativeLevels`（PBZNarrativeLevels），以及 HeXingBell_*（合星铃铛）等特殊关卡，没有读。
+- 离线读刷怪点（为了拿到每场 BOSS 战的真实等级，不用重打）的条件：
+  - 主资源包 ProjectPBZ-Windows.utoc：版本 8、flags 11，压缩方式只有 Oodle，压缩块 256 KB。Oodle 编进了游戏程序，游戏目录里没有单独的 oo2core 动态库。离线解压只能从第三方获取 oo2core（FModel/CUE4Parse 的做法），涉及授权和安全，需要用户决定。（更正，见下一节：后来改用 PyPI 上开源的 Oodle 解码器 pyooz，不需要 oo2core。）
+  - UE4SS 自带的 Keybinds 模组有 DumpUSMAP（Ctrl+小键盘6），能导出类型映射。本机装了 .NET 8 运行时，没有 SDK。
+  - 网上查到的 BOSS 血量只有零星几条，没有完整数据可以反推。
+
+## v0.37.6（续）：离线读出每个刷怪点的原生等级（2026-11-02）
+
+目的：BOSS 战的等级写在各自场地的刷怪点上，用户不可能为了读等级重打一遍。改为离线读游戏资源包：读出全游戏的刷怪点、刷怪区域、分组和等级脚本，按游戏自己的算法算出每种怪在每个地方的原生等级。
+
+工具（只在本机 `影之刃0-backups/audit-tools`，不提交、不发布；仓库里只放算出来的数字：`native_levels.lua`、`native_places.lua`）：
+- 解密用本机密钥文件；解压用 PyPI 上开源的 Oodle 解码器 pyooz（不需要 oo2core）。
+- 类型表：UE4SS 的 DumpUSMAP（Ctrl+小键盘6）在 15:20:14 开始导出，1 秒后写了崩溃转储（crash_2026_11_02_15_20_14），游戏没退出，但没有生成 .usmap。改用 CXXHeaderDump（10-29 游戏更新后导出，和资源包同一版本）当类型表：每个类和结构体的属性按声明顺序列出，带偏移和大小。头文件把位域布尔写成 uint8（序列化都是 1 字节），静态数组看大小，枚举宽度看直接用到它的属性。
+- 为读 Init Level 等几个函数，写了一个蓝图字节码反编译器。
+
+格式发现（都用游戏自己的数据核对过）：
+- 主容器 utoc 版本 8，压缩块 256 KB，每个块都从块边界开始。容器头版本 5：每个包的存储条目 16 字节，前 8 字节是导入包列表的数组视图。
+- zen 包头 60 字节，比 5.3 多了 CellImportMapOffset、CellExportMapOffset。导出数据位置 = HeaderSize + CookedSerialOffset。名字表的 UTF-16 名字前面没有对齐填充（各名字长度相加正好等于 NumStringBytes）。
+- 无版本属性（unversioned）的顺序是**子类在前、父类在后**，每个类内部按声明顺序。验证：刷怪点 Actor 的前 9 个值正是 BP 自己的组件引用。
+- 数组、集合、映射里的枚举写成枚举项的 FName（`EDifficultMode::Hard`）；结构体成员里的枚举是底层整数。
+- 映射和集合先写相对原型删掉的键，再写条目；对象的值是和原型（BP 默认对象）的差，要合并原型才是完整值。
+- `FInstancedPropertyBag`：u32 是否有值；描述数组（对象、GUID、名字、值类型、容器类型、u32 标志）；i32 字节数 + 数据。
+- 软引用 = 包名 FName + 资源名 FName + 子路径字符串。
+- Actor 在属性之后还有 4 字节 GUID 标志和 Actor 自己的一段数据（标签字符串、两个 GUID），不影响属性。
+- 校验：离线解出的 `DT_AIAreaLevel` 31 行和游戏里读回的完全一致，并正好读到导出末尾。
+
+读到的数据（0 个解码错误）：
+- 104 个引用了刷怪点、刷怪区域或等级脚本的包：各大地图的主包（常驻部分）、31 个分区单元，以及 Battle_Env 的龙珠关卡。
+- 刷怪点 2055 个（PSOCombat 着色器预热图里的 228 个排除），刷怪区域 831 个（PBZ_MobDomain_C 430、BP_MobDomain_C 401），分组 966 个，脚本 1723 个。
+- 刷怪点都是 `BP_AISpawner_C`：`Class`（怪的类）、`SpawnInfo.MobDomain`、`SpawnInfo.MobGroupName`、`SpawnInfo.ExtraScripts`、`RandomSpawnClasses`；位置取根组件的 RelativeLocation（全部没有挂在别的东西上）。
+- 刷怪区域的 `MobDomainConfig.MobGroups`：名字 → `UMobGroup` 子对象，带 `Members`（软引用到刷怪点）和 `Scripts`（分组脚本）。2049 个刷怪点出现在某个分组的 Members 里，14 个同时在几个分组里（取最后一个）。
+- 等级脚本：`GroupScript_Level_C`（AreaName + Offset）35 个；`AIScript_LevelOffset_C` 1 个（−1）；`GroupScript_LevelOffset_C` 关卡里没用到。
+- 所有 `Offset By Difficulty`（区域和脚本）都是 0。区域的 Level Offset：+1（11 个）、+2（6）、+3（2）、+5（6）、+19（1 个：悲泣溪谷 XiguD + 19 = 23，活人偶清道夫）。
+- 血色森林的 XueSeSenLin（24 级）：“玉琮”那几战是 24 + 1 = 25 级，那里的铁鬼、玉妖也是 25 级。
+
+游戏的算法（反编译 BP_RenewalNPC 的 `Init Level`，PBZ_MobDomain 的 `Get AI Level`、`Get Table Level`，PDA_GlobalConfig_Combined 的 `GetGlobalMobLevelOffset`）：
+
+```
+Base Level = 0；Level = 0
+有分组时：
+  分组的 MobDomain 是 PBZ_MobDomain_C → Base Level = Get AI Level()
+      = 区域行的等级（表里没有这一行、或区域名为 None：0）+ Level Offset + Offset By Difficulty[难度]
+  分组的每个脚本：
+      GroupScript_Level       → Base Level = GetLevel()（区域等级 + Offset）+ Offset By Difficulty[难度]，后面的覆盖前面的
+      GroupScript_LevelOffset → Level += Offset + Offset By Difficulty[难度]
+有刷怪点时：ExtraScripts 里每个 AIScript_LevelOffset → Level += Offset + Offset By Difficulty[难度]
+Level = max(Level + 全局怪物等级偏移[难度] + Base Level, 1)
+       + 周目 × 25（有 CharacterState.NotUpgradeLevel 标签时不加）
+```
+
+- 全局怪物等级偏移：GlobalConfig_Combat_Handicapped（助手里叫“辅助”）是 −1，其余四档没设（0）。
+- `Get Table Level` 沿 Parent 递归时用的仍是成员变量 Level Area Name（蓝图的小毛病）；表里没有 Parent，不影响结果。
+- NotUpgradeLevel 标签：全部非美术包里只有 BP_RenewalNPC 引用它，没找到授予它的资源。
+- 没有分组的怪（序章的几个刷怪点）是 1 级。
+- `UMobGroupScript_LevelBase::GetLevel` 是原生函数，按“区域等级 + Offset”处理；三面的血量验证支持这一点。
+
+和游戏里读回过的等级核对（之前的运行日志）：白鹤门弟子 19 / 18（梅谷湖 B / 梅谷湖）、病鸦 20（正道大营 B）、弓手和白枪兵 18（梅谷湖）、三面 15（XiguA + 14，剧情血量 88,830），全部对上。
+
+做成的功能：
+- `native_levels.lua`：242 种单位、645 个“等级 + 地方”，每条是 {难度和周目之前的等级, 区域, 地图, 刷怪点数}。
+- `native_places.lua`：10 张图 1821 个刷怪点的位置（米）和等级，给“当前地点等级”在附近没有地图怪时用。
+- home_levels.lua：老家等级默认取图鉴地图上刷怪点最多的那处（一样多取高的），可以按单位换；召唤时按这只怪的召唤难度加全局偏移、按周目加 25 级（GetGameCycle）。
+- spawn_level.lua：地图怪只算 Spawner 或 MobGroup 有效的单位；附近没有地图怪时按所在位置的刷怪点（200 米内最高，否则最近）；记下的等级带图名，只在同一张图沿用。
+- 助手：召唤等级选项（老家 / 当前地点 / 自定义）和选中单位的“老家等级”下拉，六种语言。
+
+实机（16:25 加载 v0.37.6-native-levels，测试版助手 0.37.22；游戏难度入阵者，召唤难度逆天者，周目读回 0）：
+- 三面老家等级：在正道大营、悲泣溪谷各召唤一只，都写入并读回 15，Health_Max 88,830、Attack 165.2、Shachi_Max 8,897.28。
+- 自定义 60 级：读回 60，Health_Max 271,080、Attack 354.3。
+- 当前地点，问题 1：悲泣溪谷附近没有地图怪，沿用了在正道大营记下的 22 级（华山双剑），135,180 血。改为：记下的等级带图名，只在同一张图沿用；先按 native_places 取所在位置的刷怪点。
+- 当前地点，问题 2（16:39 Restart All Mods 之后）：重启后 Mod 不认识之前召唤的三只三面（15、22、60），把它们当成地图怪，取了 60；还把这三个等级记成了“见过的等级”。改为：只有刷怪点刷出的单位才算地图怪；去掉“见过的等级”（本机那份 unit-levels.tsv 和被写坏的 spawn-level.tsv 已删）。
+- 复测（16:44 重启后）：日志“不是刷怪点刷出的=3只”“按玩家附近的游戏刷怪点 4.00 级（178 米外，PBZ_Xigu_WP）”，写入并读回 4，Health_Max 23,225.4、Attack 105.0。
+- 在助手里给魔渊选 26 级、再改回默认，两次设置都保存并读回。
+
+没做或没验证：
+- 不是刷怪点刷出来的单位（BOSS 召唤物、过场刷出的怪、合星铃铛 HeXingBell_* 关卡里的怪）没有原生等级，用图鉴地图最深那片区域的等级。
+- 周目大于 0 和“辅助”难度下的加减只做了离线测试。
+- 金面具黑衣人（龙珠关卡）作为关卡实例放在好几张图里，地点显示的是分组指定的区域（庞镇 A、梅谷湖、戏梦山庄 C），不一定是实际所在的图。

@@ -71,6 +71,11 @@ function Runtime.new(options)
             if not options.immortal then return {ok=false,message='不倒下模块未加载',spawned_count=0} end
             return options.immortal:set(command.team,command.key_start)
         end,
+        -- HOME, HERE or CUSTOM in key_spawn with a level in key_start; UNIT with the unit in unit_id picks its level ('' = default).
+        set_spawn_level=function(command)
+            if not options.homeLevels then return {ok=false,message='召唤等级模块未加载',spawned_count=0} end
+            return options.homeLevels:configure(command.unit_id,command.key_spawn,command.key_start)
+        end,
         -- ON or OFF in key_start (battle_clock_hud.lua).
         set_clock_hud=function(command)
             if not options.clockHUD then return {ok=false,message='画面计时模块未加载',spawned_count=0} end
@@ -102,6 +107,8 @@ function Runtime.new(options)
             if options.references then options.references:silence('重新核对目录');self.referencesStarted=false end
             if options.spawnCatalog and not readyError() then options.spawnCatalog:export() end
             if options.tableCatalog and not readyError() then options.tableCatalog:export() end
+            if options.areaLevels and not readyError() then options.areaLevels:export() end
+            if options.homeLevels and not readyError() then options.homeLevels:refresh() end
             if options.codex and not readyError() then
                 local codex=options.codex:export()
                 self.log("原生图鉴读取="..tostring(codex.ok).."；"..tostring(codex.message))
@@ -179,6 +186,13 @@ function Runtime.new(options)
         out.clock_hud_state=clockHUD.state or 'off'
         out.clock_hud_failures=clockHUD.failures or 0
         out.clock_hud_message=clockHUD.message or ''
+        -- The level a summon gets: the highest map enemy near the player at the last look (spawn_level.lua).
+        local level=options.spawnLevel and options.spawnLevel:status() or {}
+        out.spawn_level=level.last_level and string.format('%.0f',level.last_level) or ''
+        out.spawn_level_unit=level.last_unit or ''
+        local home=options.homeLevels and options.homeLevels:status() or {}
+        out.spawn_level_mode=home.mode or ''
+        out.spawn_level_custom=home.custom or ''
         local support=options.support and options.support:status() or {}
         out.boss_hud_registered=support.registered or 0
         out.boss_hud_visible=support.visible or 0
@@ -312,6 +326,21 @@ function Runtime:start()
         if not self.tableCatalogChecked and self.options.tableCatalog and self.options.session
             and self.options.session:status().game_ready==true then
             self.tableCatalogChecked=true;self.options.tableCatalog:export()
+        end
+        if not self.areaLevelsChecked and self.options.areaLevels and self.options.session
+            and self.options.session:status().game_ready==true then
+            self.areaLevelsChecked=true;self.options.areaLevels:export()
+            -- The codex and area exports above are what each unit's home level is worked out from.
+            if self.options.homeLevels then self.options.homeLevels:refresh() end
+        end
+        -- The level a summon would get, for the app: map enemies stream in after the world is ready, so it is looked
+        -- up every 10 s until some are found, then every 60 s to follow the player into another area.
+        if self.options.spawnLevel and self.options.session and self.options.session:status().game_ready==true then
+            local now=os.clock()
+            if not self.spawnLevelAt or now-self.spawnLevelAt>=(self.spawnLevelFound and 60 or 10) then
+                self.spawnLevelAt=now
+                self.spawnLevelFound=self.options.spawnLevel:refresh() or self.spawnLevelFound
+            end
         end
         if not self.initialScanChecked and (not self.options.fullInventory or (self.options.session and self.options.session:status().game_ready==true)) then
             self.initialScanChecked=true

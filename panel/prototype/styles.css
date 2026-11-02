@@ -829,6 +829,14 @@ mark { background: rgba(244, 196, 80, .38); color: inherit; border-radius: 3px; 
 .match-stats dd { margin: 1px 0 0; font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
 .diff-select { width: 100%; }
 .diff-desc { margin: 8px 2px 0; font-size: 12px; line-height: 1.5; color: var(--text-3); text-wrap: pretty; }
+/* Summon level: under the difficulty in the same card; the custom level box sits under the mode. */
+.level-title { margin-top: 18px; }
+.level-custom { display: flex; gap: 6px; margin-top: 8px; }
+.level-custom .stat-input { flex: 1; }
+#dock-diff .inline-error { margin-top: 8px; }
+.level-line { display: flex; align-items: flex-start; gap: 6px; margin: 0 0 14px; font-size: 12px; line-height: 1.45; color: var(--text-3); }
+.level-line .icon { margin-top: 1px; flex: none; }
+#home-level { width: 100%; }
 #dock-diff .match-note, #dock-diff .match-warn { margin-top: 10px; }
 .match-foot, .match-note, .match-warn { display: flex; align-items: flex-start; gap: 6px; font-size: 12px; line-height: 1.45; color: var(--text-2); }
 .match-foot .icon, .match-note .icon, .match-warn .icon { margin-top: 1px; }

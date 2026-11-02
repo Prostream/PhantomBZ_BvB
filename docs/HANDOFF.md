@@ -127,6 +127,7 @@
 | 头文件 | `D:\steam\steamapps\common\PBZ\platform\steam\ue4ss\CXXHeaderDump\`；查类和签名先搜这里，禁止提交这些导出 |
 | 相对诊断文件 | 游戏工作目录 `ProjectPBZ\Binaries\Win64\` 下的 `brain_dump.txt`、`collision_matrix.txt` |
 | 纯 Lua 测试解释器 | `D:\texlive\2026\bin\windows\texlua.exe`，本轮已实际运行 |
+| 离线读资源包（只在本机） | `D:\Claude CODE\影之刃0-backups\audit-tools`：解密解压（`pbz_io.py`）、zen 包（`zen.py`）、头文件类型表（`schema.py`）、属性解码（`props.py`）、蓝图字节码（`kismet.py`）。`extract_levels.py` 读全部刷怪点，`write_native_levels.py` 生成 `Scripts/native_levels.lua` 和 `native_places.lua`。游戏更新后要重新生成；工具、密钥、解出的文件都不提交，见 REVERSE_ENGINEERING v0.37.6（续） |
 
 ## 4. 开发、部署与测试循环
 

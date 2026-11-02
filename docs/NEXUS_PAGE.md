@@ -27,8 +27,9 @@ This is a UE4SS Lua mod with a desktop app (PhantomGladiator.exe) that installs 
 [*][b]Spawn any of 177 enemies and bosses[/b] from the in-game codex (75 bosses and their forms), grouped by chapter and map, searchable, with their codex portraits. The portraits are saved on your PC from your own copy of the game the first time you enter a map.
 [*][b]Teams[/b]: Blue, Red, No team (fight a boss yourself) and Companion. 1–100 units per spawn, no total limit, rematch with the last lineup.
 [*][b]Unit stats[/b]: keep the game's values, copy the first unit's, or set your own for any of the game's 223 attributes (HP, Sha-Chi, attack, shield, damage and resistance multipliers, status buildup, execution thresholds, movement speed and more). The level-1 base values the game uses for damage are changed too, so the numbers really take effect.
-[*][b]Spawn difficulty[/b] (Wayfarer to Sixty-Six Days, for stats and AI) and [b]spawn level[/b] (the level of the map enemies around you). Your save's difficulty stays as it is.
-[*][b]Companions[/b]: any unit can follow you and fight for you. They teleport back from 100 m, can grab map enemies, and their own summons and a rider's mount join your side too.
+[*][b]Spawn difficulty[/b] (Wayfarer to Sixty-Six Days, for stats and AI). Your save's difficulty stays as it is.
+[*][b]Spawn level[/b]: by default each unit's own level in the game, read from every enemy spawner in the game files, so a boss has the level of its story fight. Pick another place the unit appears, use the level of where you are, or set one level (1–60).
+[*][b]Companions[/b]: any unit can follow you and fight for you, with a health bar over its head. They teleport back from 100 m, can grab map enemies, and their own summons and a rider's mount join your side too.
 [*][b]Fight options[/b]: an undying switch per team, a fight timer (can also show at the top of the game screen), and units that stay in the fight instead of walking back.
 [*][b]Free camera[/b] with no aggro: your character is hidden and cannot be hurt while you watch.
 [*][b]Extras for your own character[/b]: infinite Sha-Chi, auto perfect deflect and auto-dodge (experimental).
@@ -97,7 +98,7 @@ Unofficial fan project, not affiliated with S-GAME.
 
 ## 文件（Files）
 
-- **文件名**：Spawn Enemies and Bosses to Fight Each Other 0.37.5
+- **文件名**：Spawn Enemies and Bosses to Fight Each Other（显示名最多 50 个字符，版本号放在下面的版本栏）
 - **版本**：0.37.5
 - **分类**：Main Files
 - **文件**：`dist/PhantomGladiator-0.37.5-win64.zip`（19.8 MB，需手动拖进上传框）
@@ -109,4 +110,15 @@ Desktop app and mod. Extract and run PhantomGladiator.exe. SHA-256: a4c5a5114448
 
 ## 图片
 
-`docs/images/` 里的界面截图：arena.png（主界面）、arena-dark.png（深色）、stat-match.png（数值设定）、hotkeys.png（快捷键）、solo.png（暂不配队）、welcome.png（新手引导）。
+`docs/images/` 里的界面截图：arena.png（主界面）、arena-dark.png（深色）、stat-match.png（数值设定）、hotkeys.png（快捷键）、solo.png（暂不配队）、welcome.png（新手引导）。每张配了一句英文说明，第一张注明截图是中文界面、助手有六种语言。
+
+## 发布记录和注意事项
+
+- 2026-11-02 发布，页面 https://www.nexusmods.com/phantombladezero/mods/363 ，文件 0.37.5。
+- 文件选项：关掉"Allow mod manager download"（Vortex 装不了），设为主文件（primary）。更新日志从文件那一行的菜单 → Add changelog 添加。
+- 页面开久了，保存会返回 403。原因是 Cloudflare 验证过期：在新标签页重新打开编辑页，人机验证要用户自己点。
+- 自动安全检查会隔离安装包，隔离期间别人下载不了。触发原因是包里有可执行文件，且压缩包里套着压缩包：
+  - PhantomGladiator.exe、Python 的 python.exe、UE4SS 的 dwmapi.dll 和 UE4SS.dll；
+  - Python 标准库 python311.zip。
+- 0.37.5 的 VirusTotal 结果是 1/66，只有 Bkav Pro 报 W32.Malware.E14680DF。解除隔离要用户用注册 Nexus 的邮箱写信给 support@nexusmods.com，附上源码链接和构建步骤（tools/package/build.py，依赖都按 SHA-256 固定）。之后每次上传新版本，可能都要再审一次。
+- 打赏（Mod rewards / 捐赠点数）要作者自己在 mod 页面点 Opt-in，同意计划条款。

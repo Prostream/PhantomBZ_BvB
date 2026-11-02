@@ -32,6 +32,10 @@ const MockRuntime = (() => {
   const DIFF_KEY = "pg-proto.difficulty";
   let savedDiff = "FOLLOW";
   try { savedDiff = localStorage.getItem(DIFF_KEY) || "FOLLOW"; } catch { /* storage may be unavailable */ }
+  // The summon level choice mirrors Runtime/spawn-level-settings.tsv: the mode, the custom level, each unit's pick.
+  const LEVEL_KEY = "pg-proto.level";
+  let savedLevel = {};
+  try { savedLevel = JSON.parse(localStorage.getItem(LEVEL_KEY) || "{}") || {}; } catch { /* storage may be unavailable */ }
   // Fun features mirror fun_features.lua: player-only switches saved like Runtime/fun-features.tsv.
   const FUN_KEY = "pg-proto.fun";
   let savedFun = {};
@@ -64,7 +68,9 @@ const MockRuntime = (() => {
     unitNames: null,            // and no game names: units.js's Chinese names
     statMatch: { enabled: savedMatch, mode: savedMatch ? "match" : "game", modeSupported: true, baseline: null, matched: 0, failures: 0, reset: false, customCount: 0, customized: 0, rejected: [], rejectedCount: 0, values: {} },
     // level: FOLLOW | EASY | NORMAL | HARD | NIGHTMARE for new units; game: the game's own level
-    difficulty: { level: savedDiff, game: "Easy", supported: true, failures: 0, skipped: 0, aiFailed: 0 },
+    difficulty: { level: savedDiff, game: "Easy", supported: true, failures: 0, skipped: 0, aiFailed: 0, summonLevel: 18, summonLevelUnit: "BP_Monster_BaiheDisciple_Knife" },
+    // Where a summon's level comes from (HOME | HERE | CUSTOM) and each unit's places in the game, as the mod writes them.
+    level: { supported: true, mode: savedLevel.mode || "HOME", custom: savedLevel.custom ?? null, homes: mockHomes(savedLevel.picks || {}) },
     // shachiState: off | locked | failed; guardState: off | waiting | ready | failed; deflects/dodges pressed so far
     fun: { supported: true, shachi: !!savedFun.shachi, deflect: !!savedFun.deflect, dodge: !!savedFun.dodge,
       shachiState: savedFun.shachi ? "locked" : "off", guardState: savedFun.deflect || savedFun.dodge ? "waiting" : "off", deflects: 0, dodges: 0 },
@@ -94,6 +100,27 @@ const MockRuntime = (() => {
   const fail = code => Object.assign(new Error(code), { code });
   // Every unit the app still holds, alive or fallen; cleanup and the equal-stats reset go by this.
   const owned = () => s.blue + s.red + s.neutral + s.down.blue + s.down.red + s.down.neutral;   // companions are not the arena's
+
+  // A few units' places in the game (native_levels.lua), with the default the mod would pick and the player's own pick.
+  function mockHomes(picks) {
+    const homes = {
+      BP_Monster_YuCong_FirstTime: { default: 0, options: [{ level: 15, source: "native", map: "悲泣溪谷", part: "A", count: 1 }] },
+      BP_Monster_AHua_GuiTouDao: { default: 0, options: [{ level: 3, source: "native", map: "悲泣溪谷", part: "C", count: 1 }] },
+      BP_Monster_MaleThug_Sword_Blue: { default: 1, options: [{ level: 2, source: "native", map: "悲泣溪谷", part: "B", count: 4 }, { level: 3, source: "native", map: "悲泣溪谷", part: "C", count: 9 }, { level: 10, source: "native", map: "庞镇地区", part: "A", count: 2 }] },
+      BP_Monster_BaiheDisciple_Knife: { default: 0, options: [{ level: 4, source: "native", map: "血色森林", part: "A", count: 4 }, { level: 7, source: "native", map: "陆家村地区", part: "A", count: 9 }, { level: 13, source: "native", map: "庞镇地区", part: "A", count: 4 }, { level: 18, source: "native", map: "梅谷湖", part: "", count: 2 }, { level: 19, source: "native", map: "梅谷湖", part: "B", count: 24 }] },
+    };
+    for (const [id, h] of Object.entries(homes)) {
+      const level = picks[id], i = h.options.findIndex(o => o.level === level);
+      if (level != null && i < 0) h.options.push({ level, source: "picked", map: "", part: "", count: 0 });
+      h.picked = level == null ? null : i < 0 ? h.options.length - 1 : i;
+    }
+    return homes;
+  }
+  function saveLevel() {
+    const picks = {};
+    for (const [id, h] of Object.entries(s.level.homes)) if (h.picked != null) picks[id] = h.options[h.picked].level;
+    try { localStorage.setItem(LEVEL_KEY, JSON.stringify({ mode: s.level.mode, custom: s.level.custom, picks })); } catch { /* ignore */ }
+  }
 
   async function command(action, payload = {}) {
     if (!online()) throw fail("offline");
@@ -204,6 +231,18 @@ const MockRuntime = (() => {
       case "set_spawn_difficulty":
         s.difficulty.level = p.difficulty;
         try { localStorage.setItem(DIFF_KEY, p.difficulty); } catch { /* ignore */ }
+        return;
+      case "set_spawn_level":
+        if (p.mode === "UNIT") {
+          const picks = {};
+          for (const [id, h] of Object.entries(s.level.homes)) if (h.picked != null) picks[id] = h.options[h.picked].level;
+          if (p.level == null) delete picks[p.unit]; else picks[p.unit] = p.level;
+          s.level.homes = mockHomes(picks);
+        } else {
+          s.level.mode = p.mode;
+          if (p.mode === "CUSTOM") s.level.custom = p.level;
+        }
+        saveLevel();
         return;
       case "toggle_stat_match":
         // Either direction re-picks the baseline; units already on the field keep their numbers.
