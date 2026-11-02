@@ -67,3 +67,23 @@ assert(not d:beforeSpawn('/Game/B.B_C','blue') and s.spawns==0)
 d,s=fixture();assert(d:preset().ok and #s.members==8 and d.saved)
 assert(not d:preset().ok and #s.members==8,'preset cannot duplicate a live roster')
 print('bvb_director: PASS (reset transaction, cross-map placement, totals, unknowns, rules, hold, 4v4 preset)')
+
+local function request(text)
+    local f=assert(io.open(root..'/bvb-request.tsv','wb'));f:write(text);f:close()
+end
+local draft='BVBDraft1\t42\nblue\t/Game/A.A_C\nred\t/Game/B.B_C\nblue\t/Game/C.C_C\n'
+d,s=fixture();s.add('blue');s.add('red');assert(d:save().ok)
+request(draft)
+assert(not d:applyRequest('41').ok and s.clears==0,'stale draft must not clear')
+s.badPath=true;assert(not d:applyRequest('42').ok and s.clears==0,'validate every class before clear');s.badPath=false
+assert(d:applyRequest('42').ok and s.clears==1 and #s.members==3)
+assert(d.state=='intro' and d.saved and #d.saved.rows==3)
+assert(d.saved.rows[1].path=='/Game/A.A_C' and d.saved.rows[3].team=='blue')
+assert(s.members[1].actor.held and s.members[3].actor.p.x>s.members[1].actor.p.x)
+assert(d:beforeStart());assert(not d:applyRequest('42').ok and s.clears==1,'live battle cannot be replaced')
+d,s=fixture();request('BVBDraft1\t42\nblue\t/Game/A.A_C\n')
+assert(not d:applyRequest('42').ok and s.clears==0,'one-sided draft cannot clear')
+request(draft);s.clearFail=true;assert(not d:applyRequest('42').ok and s.spawns==0)
+d,s=fixture();request(draft);s.spawnFail=2
+assert(not d:applyRequest('42').ok and d.state=='error' and #s.members==1 and not d.saved,'partial apply is not saved or started')
+print('bvb_editor: PASS (revision, preflight, both teams, no live replacement, cleanup failure, partial spawn, held/saved lineup)')

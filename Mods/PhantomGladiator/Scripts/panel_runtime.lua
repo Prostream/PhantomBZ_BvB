@@ -152,6 +152,7 @@ function Runtime.new(options)
         self.handlers.bvb_reset=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:restore(false)end
         self.handlers.bvb_place=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:restore(true)end
         self.handlers.bvb_preset=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:preset()end
+        self.handlers.bvb_apply=function(c)local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:applyRequest(c.key_spawn)end
     end
     self.bridge=Bridge.new({path=options.path,log=self.log,handlers=self.handlers,
         session=function() return options.session and options.session:status() or {} end,status=function()

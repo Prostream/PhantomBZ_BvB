@@ -1,0 +1,22 @@
+const assert=require('assert').strict;
+// Do not inherit a parent workspace's package.json module type.
+const source=require('fs').readFileSync(require('path').join(__dirname,'../panel/static/bvb-roster.js'),'utf8');
+const testModule={exports:{}};
+require('vm').runInThisContext('(function(module){'+source+'\n})')(testModule);
+const model=testModule.exports;
+const a='/Game/A.A_C',b='/Game/B.B_C',c='/Game/C.C_C';
+const original=[{team:'blue',unit_id:a},{team:'red',unit_id:b},{team:'blue',unit_id:c}];
+let rows=model.edit(original,'up',2);
+assert.deepEqual(rows.map(r=>r.unit_id),[c,b,a]);
+assert.equal(original[0].unit_id,a,'draft edits cannot mutate the submitted snapshot');
+rows=model.edit(rows,'swap',0);assert.equal(rows[0].team,'red');
+rows=model.edit(rows,'replace',0,a);assert.equal(rows[0].unit_id,a);
+rows=model.edit(rows,'duplicate',0);assert.equal(rows.length,4);
+rows=model.edit(rows,'remove',1);assert.equal(rows.length,3);
+assert.throws(()=>model.validate([{team:'neutral',unit_id:a}]));
+assert.throws(()=>model.validate([{team:'blue',unit_id:'../../bad'}]));
+assert.throws(()=>model.edit(original,'replace',0,''));
+assert.throws(()=>model.edit(Array.from({length:100},()=>original[0]),'duplicate',0));
+assert.throws(()=>model.fromPreset([]));
+assert.deepEqual(model.validate(JSON.parse(JSON.stringify(original))),original);
+console.log('bvb_roster: PASS (edit, order, teams, replacement, persistence shape, bounds, snapshot isolation)');

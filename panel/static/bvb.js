@@ -7,7 +7,7 @@ const names={intro:'介绍 / 定身',running:'交战中',ended:'比赛结束',er
 const winners={blue:'蓝队胜',red:'红队胜',draw:'同时全灭'};
 const number=n=>Number(n||0).toLocaleString('zh-CN',{maximumFractionDigits:0});
 function message(text,error=false){$('message').textContent=text;$('message').classList.toggle('error',error);}
-function controls(){document.querySelectorAll('button').forEach(b=>b.disabled=!online||busy);}
+function controls(){document.querySelectorAll('[data-action],#spawn-button').forEach(b=>b.disabled=!online||busy);window.bvbEditor?.status(online,busy,status?.game?.values||{});}
 function render(s){
   status=s;token=s.csrf_token||token;online=Boolean(s.game&&s.game.online&&s.game.values&&s.game.values.game_ready==='true'&&String(s.game.values.build||'').startsWith('PhantomBZ_BvB'));
   const v=s.game?.values||{};
@@ -32,6 +32,8 @@ function filter(){const query=$('search').value.trim().toLowerCase(),selected=$(
   const list=units.filter(u=>!u.excluded&&`${u.display_name||u.name||''} ${u.id}`.toLowerCase().includes(query));
   $('unit').replaceChildren(...list.map(u=>{const opt=document.createElement('option');opt.value=u.id;opt.textContent=u.display_name||u.name||u.id;return opt;}));
   if(list.some(u=>u.id===selected))$('unit').value=selected;
+  if(!list.length){const opt=document.createElement('option');opt.value='';opt.textContent=units.length?'没有匹配的单位':'等待游戏图鉴';$('unit').append(opt);}
+  window.bvbEditor?.selection();
 }
 async function send(action,extra={}){
   if(busy||!online)return;busy=true;controls();message('正在提交，等待游戏回执…');
@@ -40,10 +42,11 @@ async function send(action,extra={}){
 }
 document.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>send(b.dataset.action)));
 $('search').addEventListener('input',filter);
-$('spawn-form').addEventListener('submit',e=>{e.preventDefault();const id=$('unit').value;if(id)send('spawn',{unit_id:id,team:$('team').value,count:Number($('count').value)});});
+$('spawn-button').addEventListener('click',()=>{const id=$('unit').value;if(id)send('spawn',{unit_id:id,team:$('team').value,count:Number($('count').value)});});
+window.bvbEditor?.connect(send);
 async function poll(){
   try{const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('状态读取失败');render(await r.json());
-    if(!overlay&&Date.now()-catalogTime>10000){catalogTime=Date.now();const c=await fetch('/api/catalog',{cache:'no-store'});if(c.ok){units=(await c.json()).units||[];filter();}}
+    if(!overlay&&Date.now()-catalogTime>10000){catalogTime=Date.now();const c=await fetch('/api/catalog',{cache:'no-store'});if(c.ok){const catalog=await c.json();units=catalog.units||[];filter();window.bvbEditor?.catalog(units,catalog);}}
   }catch(e){online=false;controls();$('connection').textContent='面板连接中断';$('phase').textContent='连接中断';for(const t of ['blue','red']){$(t+'-value').textContent='读数待确认';$(t+'-bar').value=0;}message('连接中断；未确认操作不会自动重发。'+e.message,true);}
   setTimeout(poll,500);
 }

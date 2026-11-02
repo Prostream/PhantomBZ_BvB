@@ -7,7 +7,7 @@ local MAX_INBOX, MAX_JOURNAL, MAX_MESSAGE = 2048, 2097152, 512
 -- and each Lua state dropped a random few (the battle clock, fun_supported, current_count...).
 local MAX_STATUS = 256
 local MAX_COUNT = 100   -- units per summon, as arena_controller.lua MAX_BATCH
-local ACTIONS = { bvb_save=true,bvb_reset=true,bvb_place=true,bvb_preset=true,spawn = true, start = true, stop = true, refresh_catalog = true,
+local ACTIONS = { bvb_apply=true,bvb_save=true,bvb_reset=true,bvb_place=true,bvb_preset=true,spawn = true, start = true, stop = true, refresh_catalog = true,
     configure_keys = true,configure_unit_key=true, select_unit = true, toggle_spectator = true,clear_neutral=true,toggle_stat_match=true,
     toggle_camera=true,exit_camera=true,cycle_team=true,set_spawn_difficulty=true,dismiss_companions=true,set_fun_feature=true,set_team_immortal=true,set_clock_hud=true,set_stat_mode=true,set_spawn_level=true }
 local ACK_STATUS = { ok = true, error = true, uncertain = true }

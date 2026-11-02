@@ -30,7 +30,7 @@ _taxonomy_module = importlib.util.module_from_spec(_taxonomy_spec)
 _taxonomy_spec.loader.exec_module(_taxonomy_module)
 
 DEFAULT_RUNTIME = Path(r"D:\steam\steamapps\common\PBZ\platform\steam\ue4ss\Mods\PhantomGladiator\Runtime")
-ACTIONS = {"bvb_save", "bvb_reset", "bvb_place", "bvb_preset", "spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature", "set_team_immortal", "set_clock_hud", "set_stat_mode", "set_spawn_level"}
+ACTIONS = {"bvb_apply", "bvb_save", "bvb_reset", "bvb_place", "bvb_preset", "spawn", "select_unit", "start", "stop", "clear_neutral", "refresh_catalog", "configure_keys", "configure_unit_key", "toggle_spectator", "toggle_stat_match", "toggle_camera", "exit_camera", "cycle_team", "set_spawn_difficulty", "dismiss_companions", "set_fun_feature", "set_team_immortal", "set_clock_hud", "set_stat_mode", "set_spawn_level"}
 # Teams a unit can be summoned to; companion units follow the player (companion.lua).
 TEAMS = ("blue", "red", "neutral", "companion")
 # FOLLOW keeps the game difficulty; the others are the game's own four levels (spawn_difficulty.lua).
@@ -151,7 +151,7 @@ CODEX_ENEMY_TYPES = {"None": "unknown", "Animal": "1", "GuaiMian": "2", "DragonM
 COMMAND_FIELDS = ("id", "action", "unit_id", "team", "count", "key_spawn", "key_start", "key_stop", "key_refresh_catalog", "schema_version")
 MAX_UNIT_ID_BYTES = 512
 MAX_INBOX_BYTES = 2048
-READY_ACTIONS = {"bvb_save", "bvb_reset", "bvb_place", "bvb_preset", "bvb_save", "bvb_reset", "bvb_place", "bvb_preset", "spawn", "start", "toggle_spectator"}
+READY_ACTIONS = {"bvb_apply", "bvb_save", "bvb_reset", "bvb_place", "bvb_preset", "spawn", "start", "toggle_spectator"}
 # Content types for the app's own files. Not mimetypes.guess_type: on Windows it reads the registry, where
 # other software often registers .js as text/plain, and under nosniff the browser then refuses every
 # script and the window stays empty (reported by players on v0.35.1).
@@ -332,7 +332,7 @@ class Bridge:
 
     def _path(self, name):
         # All caller-supplied unit IDs stay inside TSV fields, never file paths.
-        if name not in {"codex-icons.tsv", "home-levels.tsv", "stat-custom-request.tsv", "stat-match-settings.tsv", "catalog.tsv", "catalog.tsv.partial", "codex.tsv", "codex-locations.tsv", "status.tsv", "inbox.tsv", "inbox.session.tsv", "ack.tsv", "inventory-report.json", "unit-evidence.json", "native-table-catalog.tsv", "decrypted-directory.tsv", "decrypted-directory-report.json", "unit-keybinds.tsv", "unit-keybinds-state.tsv", "function-keybinds.tsv", "function-keybinds.tsv.bak", "function-keybinds-state.tsv", "keybinds.tsv"}:
+        if name not in {"bvb-request.tsv", "bvb-lineup.tsv", "codex-icons.tsv", "home-levels.tsv", "stat-custom-request.tsv", "stat-match-settings.tsv", "catalog.tsv", "catalog.tsv.partial", "codex.tsv", "codex-locations.tsv", "status.tsv", "inbox.tsv", "inbox.session.tsv", "ack.tsv", "inventory-report.json", "unit-evidence.json", "native-table-catalog.tsv", "decrypted-directory.tsv", "decrypted-directory-report.json", "unit-keybinds.tsv", "unit-keybinds-state.tsv", "function-keybinds.tsv", "function-keybinds.tsv.bak", "function-keybinds-state.tsv", "keybinds.tsv"}:
             raise ValidationError("unknown runtime file")
         path = self.runtime / name
         if path.resolve().parent != self.runtime:
@@ -548,8 +548,21 @@ class Bridge:
         if text is None and use_partial:  # Lua may have published it with an atomic rename.
             text = bounded_read(final_path, 32 * 1024 * 1024)
             use_partial = False
+        catalog_source = "registry"
         if text is None:
-            return {"available": False, "partial": False, "units": [], "errors": [], "total": 0, "excluded_non_units": 0, "codex_errors": []}
+            # Fresh independent installs have codex.tsv but no prebuilt registry catalog.
+            # Use exact exported paths; never infer native inheritance or spawn evidence.
+            codex_rows, codex_errors = self._codex_evidence()
+            if not codex_rows:
+                return {"available": False, "partial": False, "units": [], "errors": [], "total": 0, "excluded_non_units": 0, "codex_errors": codex_errors}
+            buffer = io.StringIO()
+            writer = csv.writer(buffer, delimiter="\t", lineterminator="\n")
+            writer.writerow(CATALOG_FIELDS)
+            for path, entry in codex_rows.items():
+                writer.writerow((path, entry.get("zh_name") or entry.get("name") or path,
+                                 "图鉴", path, "unknown", "unknown", "game_codex_export;inheritance_unverified"))
+            text = buffer.getvalue()
+            catalog_source = "game_codex"
         rows = tsv_rows(text)
         header = next(rows, [])
         if tuple(header) != CATALOG_FIELDS:
@@ -678,7 +691,7 @@ class Bridge:
             name_counts[u.get('display_name')] = name_counts.get(u.get('display_name'), 0) + 1
         for u in items:
             u['same_name_count'] = name_counts.get(u.get('display_name'), 0)
-        return {"available": True, "partial": use_partial, "units": items, "errors": errors,
+        return {"available": True, "partial": use_partial, "source": catalog_source, "units": items, "errors": errors,
                 "total": len(items), "excluded_non_units": excluded_non_units, "codex_errors": codex_errors,
                 'location_errors': location_errors, 'primary_count': len(primary),
                 'inventory_audit':audit,'inventory_errors':audit_errors,
@@ -717,6 +730,23 @@ class Bridge:
         except (OSError, UnicodeError, ValueError, KeyError) as error:
             return {"online": False, "ready": False, "game_session": None, "state": "invalid_status", "message": str(error), "age_seconds": None}
 
+    def bvb_lineup(self):
+        """Read the game's last successfully saved formation; never rewrite it from the web."""
+        text = bounded_read(self._path("bvb-lineup.tsv"), 1024 * 1024)
+        if not text:
+            return {"available": False, "rows": []}
+        rows = list(tsv_rows(text))
+        if not rows or len(rows[0]) != 6 or rows[0][0] != "BVBLineup1":
+            raise ValidationError("保存阵容格式无效")
+        roster = []
+        for row in rows[1:]:
+            if len(row) != 6 or row[0] not in {"blue", "red"} or not re.fullmatch(r'/[A-Za-z0-9_/]+\.[A-Za-z0-9_]+_C', row[1]):
+                raise ValidationError("保存阵容条目无效")
+            roster.append({"team": row[0], "unit_id": row[1]})
+        if not 1 <= len(roster) <= 100:
+            raise ValidationError("保存阵容数量无效")
+        return {"available": True, "rows": roster}
+
     def _validate(self, request):
         if not isinstance(request, dict):
             raise ValidationError("command must be an object")
@@ -725,7 +755,32 @@ class Bridge:
             raise ValidationError("unsupported action")
         allowed = {"action"}
         payload = {"action": action}
-        if action in {"spawn", "select_unit"}:
+        if action == "bvb_apply":
+            allowed.add("rows")
+            rows = request.get("rows")
+            if not isinstance(rows, list) or not 2 <= len(rows) <= 100:
+                raise ValidationError("阵容需包含 2 至 100 名参赛者，两队各至少一名")
+            catalog = {unit["id"]: unit for unit in self.catalog()["units"]}
+            roster, counts = [], {}
+            for row in rows:
+                if not isinstance(row, dict) or set(row) != {"unit_id", "team"}:
+                    raise ValidationError("阵容条目仅接受 unit_id 和 team")
+                unit_id = clean_field(row.get("unit_id"), "unit_id", 512)
+                unit = catalog.get(unit_id)
+                if not unit or unit.get("spawnable") is False:
+                    raise ValidationError("阵容中含目录缺失或不可召唤单位：" + unit_id)
+                if not re.fullmatch(r'/[A-Za-z0-9_/]+\.[A-Za-z0-9_]+_C', unit_id) or len(unit_id.encode('utf-8')) > 512:
+                    raise ValidationError("阵容单位路径无效")
+                if not isinstance(row["team"], str) or row["team"] not in {"blue", "red"}:
+                    raise ValidationError("阵容队伍仅允许 blue/red")
+                counts[unit_id] = counts.get(unit_id, 0) + 1
+                if counts[unit_id] > unit.get("max_count", MAX_SPAWN_COUNT):
+                    raise ValidationError("阵容超出该单位的数量限制")
+                roster.append({"unit_id": unit_id, "team": row["team"]})
+            if {row["team"] for row in roster} != {"blue", "red"}:
+                raise ValidationError("两队各至少需要一名参赛者")
+            payload["rows"] = roster
+        elif action in {"spawn", "select_unit"}:
             allowed |= {"unit_id", "team", "count"}
             unit_id = clean_field(request.get("unit_id"), "unit_id")
             if len(unit_id.encode("utf-8")) > MAX_UNIT_ID_BYTES:
@@ -901,6 +956,8 @@ class Bridge:
             bindings={'spawn':'VK_'+str(payload['key_code']) if payload['key_code'] else 'UNBOUND',
                       'start':'MOD_'+str(payload['modifiers'])}
             if 'team' in payload:bindings['stop']='FIXED'
+        elif payload['action']=='bvb_apply':
+            bindings={'spawn':str(row['id'])}
         elif payload['action']=='set_spawn_difficulty':
             bindings={'spawn':payload['difficulty']}
         elif payload['action']=='set_fun_feature':
@@ -1007,6 +1064,11 @@ class Bridge:
                     # uncertain command instead of replaying a potentially executed action.
                     with self.db:
                         self.db.execute("UPDATE commands SET state='inflight',sent=? WHERE id=?", (self.clock(), pending["id"]))
+                    if pending["action"] == "bvb_apply":
+                        # Publish only at dispatch, so a queued edit cannot replace the active request.
+                        payload = json.loads(pending["payload"])
+                        rows = "".join(f"{row['team']}\t{row['unit_id']}\n" for row in payload["rows"])
+                        atomic_text(self._path("bvb-request.tsv"), f"BVBDraft1\t{pending['id']}\n{rows}")
                     atomic_text(self._path("inbox.session.tsv"), f"{pending['id']}\t{session}\n")
                     atomic_text(inbox, self._wire(pending))
             except (OSError, UnicodeError, ValueError, sqlite3.Error) as error:
@@ -1247,6 +1309,8 @@ class Handler(BaseHTTPRequestHandler):
                 result.update(csrf_token=self.server.csrf_token, origin=self.server.origin)
             elif path == "/api/catalog":
                 result = self.server.bridge.catalog()
+            elif path == "/api/bvb-lineup":
+                result = self.server.bridge.bvb_lineup()
             elif path == "/api/keybinds":
                 result = self.server.bridge.keybinds()
             elif path == "/api/stat-settings":
@@ -1296,8 +1360,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "application/json":
                 raise ValidationError("Content-Type must be application/json")
             length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 16384:
-                raise ValidationError("request body must be 1..16384 bytes")
+            if not 0 < length <= 65536:
+                raise ValidationError("request body must be 1..65536 bytes")
             self.connection.settimeout(5)
             request = json.loads(self.rfile.read(length).decode("utf-8"))
             if path == "/api/keybinds":

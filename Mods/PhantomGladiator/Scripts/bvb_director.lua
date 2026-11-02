@@ -119,6 +119,43 @@ function Director.new(o)
         self.message='比赛已重置，参赛者定身等待介绍和开战'
         return result(true,self.message)
     end
+    function self:applyRequest(revision)
+        if self.state=='running' then return result(false,'交战中不能应用新阵容，请先清场') end
+        if type(revision)~='string' or not revision:match('^%d+$') then return result(false,'阵容请求编号无效') end
+        local f=io.open(o.path..'/bvb-request.tsv','rb')
+        if not f then return result(false,'阵容请求文件不存在，未清场') end
+        local data=f:read(65537);f:close()
+        if #data>65536 or data:sub(-1)~='\n' then return result(false,'阵容请求不完整，未清场') end
+        local lines={};for line in data:gmatch('([^\n]*)\n')do lines[#lines+1]=line end
+        if lines[1]~='BVBDraft1\t'..revision then return result(false,'阵容请求已变化，未清场') end
+        local rows={};local counts={blue=0,red=0}
+        for i=2,#lines do
+            local team,path=lines[i]:match('^(%a+)\t(/[%w_/]+%.[%w_]+_C)$')
+            if not counts[team] or not path or #path>512 or not o.canSpawn(path) then return result(false,'阵容包含无效或不支持的单位，未清场') end
+            counts[team]=counts[team]+1;rows[#rows+1]={team=team,path=path}
+        end
+        if #rows>100 or counts.blue==0 or counts.red==0 then return result(false,'阵容需两队各至少一人，总数不超过100，未清场') end
+        local ok,why=o.rules();if not ok then return result(false,why) end
+        local anchor,world=o.anchor(),o.world()
+        if not pose(anchor) or not world then return result(false,'当前位置不可读，未清场') end
+        local cleared=self:clear();if not cleared.ok then return cleared end
+        local slots={blue=0,red=0}
+        for _,row in ipairs(rows)do
+            local slot=slots[row.team];slots[row.team]=slot+1
+            local side=row.team=='blue' and -1 or 1
+            -- Up to four abreast, then rows behind; teams face each other.
+            local width=math.min(4,counts[row.team])
+            local x,y=rotate(800+(slot%4-(width-1)/2)*350,side*(650+math.floor(slot/4)*400),anchor.yaw)
+            local spawned=o.spawn(row.path,row.team,{x=anchor.x+x,y=anchor.y+y,z=anchor.z+30,yaw=anchor.yaw-side*90})
+            if not spawned.ok or spawned.spawned_count~=1 then
+                self.state='error';self.message='应用阵容未完成，请清场检查：'..tostring(spawned.message)
+                return result(false,self.message)
+            end
+        end
+        local saved=self:save();if not saved.ok then self.state='error';return saved end
+        self.message='新阵容已布置并保存，定身等待开战（蓝 '..counts.blue..' / 红 '..counts.red..'）'
+        return result(true,self.message)
+    end
     function self:preset()
         if #o.members()>0 then return result(false,'请先清场，再加载首场 4 对 4') end
         local paths={}
@@ -164,7 +201,7 @@ function Director.new(o)
         end
     end
     function self:status()
-        local s={bvb_state=self.state,bvb_message=self.message,bvb_saved=self.saved~=nil,bvb_winner=self.winner or '',
+        local s={bvb_editor_version=1,bvb_state=self.state,bvb_message=self.message,bvb_saved=self.saved~=nil,bvb_winner=self.winner or '',
             bvb_seconds=self.started and math.max(0,(self.ended or o.now())-self.started) or 0,bvb_invalid=self.invalid}
         for _,team in ipairs({'blue','red'})do local t=(self.totals or {})[team] or {hp=0,max=0,alive=0,unknown=0,count=0}
             for k,v in pairs(t)do s['bvb_'..team..'_'..k]=v end

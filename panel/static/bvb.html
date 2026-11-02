@@ -12,7 +12,14 @@
 <p class="hint">重置会按保存的阵容重新生成，等待你开战。换地图后选“在当前位置布置”。总血量不包含召唤小怪。</p>
 <div id="message" role="status">等待游戏读档与 Mod 心跳。</div></section>
 <section class="card"><h2>拍摄视角</h2><div class="actions"><button data-action="toggle_camera">进入 / 退出自由镜头</button><button data-action="exit_camera">恢复正常镜头</button><button data-action="toggle_spectator">切换主角无仇恨</button><a href="bvb.html?overlay=1" target="_blank" rel="noopener">打开透明血条画面 ↗</a></div><p class="hint">自由镜头：WASD 移动，空格 / E 上升，Ctrl / Q 下降，Shift 加速，鼠标转向。进入观战时主角隐身并受保护。</p></section>
-<section class="card"><h2>调整阵容</h2><p>在介绍阶段添加单位，完成后保存。比赛开始后修改阵容需先清场或重置。</p><form id="spawn-form"><input id="search" placeholder="搜索 Boss 名称" aria-label="搜索单位"><select id="unit" aria-label="单位"><option value="">等待游戏图鉴</option></select><select id="team" aria-label="队伍"><option value="blue">蓝队</option><option value="red">红队</option></select><input id="count" type="number" min="1" max="16" value="1" aria-label="数量"><button id="spawn-button" type="submit">召唤并定身</button></form><div class="actions"><button data-action="refresh_catalog">刷新游戏图鉴</button><a href="index.html" target="_blank" rel="noopener">上游高级面板 ↗</a></div></section>
+<section class="card" id="lineup-editor"><h2>调整阵容 <small>草稿</small></h2><p>先编辑两队名单，再应用到游戏。草稿自动保存在本机浏览器，编辑时不会改变场上角色。</p>
+<form id="spawn-form"><input id="search" placeholder="搜索 Boss 名称" aria-label="搜索单位"><select id="unit" aria-label="单位"><option value="">等待游戏图鉴</option></select><select id="team" aria-label="队伍"><option value="blue">蓝队</option><option value="red">红队</option></select><input id="count" type="number" min="1" max="16" value="1" aria-label="数量"><button id="add-lineup" type="submit">加入名单</button><button id="spawn-button" type="button">直接召唤并定身</button></form>
+<p id="catalog-note" class="hint">正在读取可选单位…</p>
+<div class="lineup-grid"><article class="lineup-team blue"><h3>蓝队 <span id="draft-blue-count">0 人</span></h3><ol id="draft-blue"></ol></article><article class="lineup-team red"><h3>红队 <span id="draft-red-count">0 人</span></h3><ol id="draft-red"></ol></article></div>
+<p class="hint">“替换”使用上方选中的角色；↑ ↓ 调整同队顺序，应用时按顺序布阵。</p>
+<div class="actions"><button id="draft-preset">首场 4 对 4 填入草稿</button><button id="draft-import">读取游戏已保存名单</button><button id="draft-swap">交换两队</button><button id="draft-clear">清空草稿</button></div>
+<div class="actions"><button class="primary" id="apply-lineup">应用阵容并重新布置</button><button data-action="refresh_catalog">刷新游戏图鉴</button><a href="index.html" target="_blank" rel="noopener">高级面板 ↗</a></div>
+<p class="hint">应用会清理本 Mod 当前参赛者，在玩家当前位置附近重新布阵、定身并保存，替换上一次保存阵容与站位。交战中不可应用；换地图也可先编辑，再在新地图应用。</p><p id="draft-note" role="status"></p></section>
 <section class="card"><h2>操作回执</h2><ol id="history"><li>提交操作后，以游戏回执为准。</li></ol></section>
 <footer>开发预览 0.1.0 · 新功能待实机验收 · 基于 <a href="https://github.com/LingYi-Liang/PhantomGladiator" target="_blank" rel="noopener">泠依_01 / PhantomGladiator</a> v0.37.6 · <a href="https://github.com/Prostream/PhantomBZ_BvB" target="_blank" rel="noopener">项目仓库</a></footer>
-</main><script src="bvb.js"></script></body></html>
+</main><script src="bvb-roster.js"></script><script src="bvb-editor.js"></script><script src="bvb.js"></script></body></html>

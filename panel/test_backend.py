@@ -58,6 +58,52 @@ class BridgeTests(unittest.TestCase):
             "validation_status": "verified_spawn_observation", "evidence": [{"source": "isolated protocol-test fixture only"}]}
         self.policy.write_text(json.dumps(policy, ensure_ascii=False), encoding="utf-8")
 
+    def test_bvb_drafts_are_published_at_dispatch_not_enqueue(self):
+        rows=[{'team':'blue','unit_id':UNIT},{'team':'red','unit_id':UNIT}]
+        first=self.bridge.enqueue({'action':'bvb_apply','rows':rows})
+        second=self.bridge.enqueue({'action':'bvb_apply','rows':list(reversed(rows))})
+        self.assertFalse((self.bridge.runtime/'bvb-request.tsv').exists())
+        self.game(ready=False);self.bridge.tick()
+        self.assertFalse((self.bridge.runtime/'bvb-request.tsv').exists())
+        self.game();self.bridge.tick()
+        first_text=(self.bridge.runtime/'bvb-request.tsv').read_text()
+        self.assertTrue(first_text.startswith(f"BVBDraft1\t{first['id']}\nblue\t"))
+        self.assertEqual((self.bridge.runtime/'inbox.tsv').read_text().split('\t')[5],str(first['id']))
+        self.bridge.tick();self.assertEqual((self.bridge.runtime/'bvb-request.tsv').read_text(),first_text)
+        self.write('ack.tsv',f"{first['id']}\tok\t应用完成\t0\n");self.bridge.tick()
+        self.assertTrue((self.bridge.runtime/'bvb-request.tsv').read_text().startswith(f"BVBDraft1\t{second['id']}\nred\t"))
+
+    def test_bvb_rejects_incomplete_or_invalid_roster(self):
+        cases=[[],[{'team':'blue','unit_id':UNIT}]*2,
+               [{'team':'red','unit_id':UNIT},{'team':'blue','unit_id':'/Game/Missing.Missing_C'}],
+               [{'team':'neutral','unit_id':UNIT},{'team':'blue','unit_id':UNIT}],
+               [{'team':[],'unit_id':UNIT},{'team':'blue','unit_id':UNIT}]]
+        for rows in cases:
+            with self.assertRaises(backend.ValidationError):self.bridge.enqueue({'action':'bvb_apply','rows':rows})
+        self.assertFalse((self.bridge.runtime/'bvb-request.tsv').exists())
+
+    def test_bvb_saved_lineup_read_only(self):
+        self.assertFalse(self.bridge.bvb_lineup()['available'])
+        data=f'BVBLineup1\tWorld\t0\t0\t0\t0\nblue\t{UNIT}\t1\t2\t3\t90\n'
+        self.write('bvb-lineup.tsv',data)
+        self.assertEqual(self.bridge.bvb_lineup()['rows'],[{'team':'blue','unit_id':UNIT}])
+        self.assertEqual((self.bridge.runtime/'bvb-lineup.tsv').read_text(),data)
+
+    def test_codex_fallback_without_registry_catalog(self):
+        (self.bridge.runtime/'catalog.tsv').unlink()
+        fields=backend.CODEX_FIELDS
+        row={'class_path':UNIT,'zh_name':'测试角色','is_boss':'1','enemy_type':'1',
+             'source':'native_codex:FCodexEnemyRow;use_replacement_entry=false;EnemyClass'}
+        self.write('codex.tsv','\t'.join(fields)+'\n'+'\t'.join(row.get(k,'') for k in fields)+'\n')
+        catalog=self.bridge.catalog()
+        self.assertEqual(catalog['source'],'game_codex')
+        self.assertEqual(catalog['units'][0]['id'],UNIT)
+        self.assertFalse(catalog['units'][0]['spawnable'],'codex alone must not claim inheritance verification')
+        policy=json.loads(self.policy.read_text());policy['allow_all_catalog']=True
+        self.policy.write_text(json.dumps(policy))
+        self.assertTrue(self.bridge.catalog()['units'][0]['spawnable'])
+        self.assertFalse((self.bridge.runtime/'catalog.tsv').exists(),'fallback is read-only')
+
     def test_bvb_commands_use_ready_gate_and_ack(self):
         for action in ('bvb_save', 'bvb_reset', 'bvb_place', 'bvb_preset'):
             self.game(ready=False)
