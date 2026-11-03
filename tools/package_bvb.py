@@ -5,7 +5,7 @@ import zipfile
 root = Path(__file__).resolve().parents[1]
 output = root / 'dist/PhantomBZ_BvB-0.1.0-dev.zip'
 output.parent.mkdir(exist_ok=True)
-files = [root / name for name in ('README.md', 'LICENSE', 'UPSTREAM.md', 'Install-BvB.ps1', 'Start-BvB.ps1')]
+files = [root / name for name in ('README.md', 'README.en.md', 'LICENSE', 'UPSTREAM.md', 'Install-BvB.ps1', 'Start-BvB.ps1')]
 files += list((root / 'Mods/PhantomGladiator/Scripts').glob('*.lua'))
 files += list((root / 'panel').glob('*.py'))
 files += [p for p in (root / 'panel/static').rglob('*') if p.is_file() and p.suffix in {'.js','.html','.css','.json','.svg'}]

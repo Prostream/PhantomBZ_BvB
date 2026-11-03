@@ -1,5 +1,7 @@
 # PhantomBZ_BvB
 
+**简体中文** | [English](README.en.md)
+
 《影之刃零》势力战与 BvB 拍摄工具。独立开发仓库，目前为开发预览，尚未完成本项目的游戏内验收。
 
 基于 **[LingYi-Liang / 泠依_01 的 PhantomGladiator](https://github.com/LingYi-Liang/PhantomGladiator)** 二次开发，感谢上游的原生 NPC 战斗、数值研究、投技适配及自由镜头实现。保留 MIT 许可、版权声明及提交历史。[来源版本](UPSTREAM.md) · [原版说明](docs/UPSTREAM_README.md)
