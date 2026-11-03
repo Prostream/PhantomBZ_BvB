@@ -20,4 +20,22 @@ assert(not d:beforeSpawn('/A.B_C','neutral'),'solo enemies are outside the match
 o.stats.status=function()return {mode='custom'}end;o.stats.setMode=setting('native')
 o.immortal.status=function()return {blue=true,red=true}end;o.immortal.set=function(_,team,value)assert(value=='OFF');called[team]=true;return {ok=true}end
 assert(d:beforeSpawn('/A.B_C','red'));assert(called.native and called.blue and called.red)
-print('bvb_engine: PASS (Hard, NG, original attributes/levels, no undying, arena-only gate)')
+local spectatorState={enabled_requested=true,player_can_be_hatred_readback=false,pending_flags=0,pending_relations=0}
+o.spectator.status=function()return spectatorState end
+o.spectator.setEnabled=function(_,value)
+    spectatorState.enabled_requested=value
+    spectatorState.ok=true
+    return spectatorState
+end
+assert(d:setPlayerAggro(true).ok and d:status().bvb_player_aggro)
+assert(not d:beforeSpawn('/A.B_C','neutral'),'wait for game readback')
+spectatorState.player_can_be_hatred_readback=true
+spectatorState.pending_relations=1
+assert(not d:beforeSpawn('/A.B_C','neutral'),'wait for relation restoration')
+spectatorState.pending_relations=0
+assert(d:beforeSpawn('/A.B_C','neutral') and d:spawned({},'/A.B_C','neutral'))
+assert(#d.roster==0 and not spectatorState.enabled_requested,'opponents stay out of the frozen filming lineup')
+assert(d:beforeSpawn('/A.B_C','blue') and not spectatorState.enabled_requested,'spawning must respect the user choice')
+assert(d:setPlayerAggro(false).ok and spectatorState.enabled_requested and not d:status().bvb_player_aggro)
+assert(not d:beforeSpawn('/A.B_C','neutral'))
+print('bvb_engine: PASS (native rules, player aggro round trip, restoration gates and challenge opponents)')

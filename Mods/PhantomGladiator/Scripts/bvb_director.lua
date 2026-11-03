@@ -48,13 +48,17 @@ function Director.new(o)
         return false
     end
     function self:beforeSpawn(path,team)
-        if team~='blue' and team~='red' then return false,'摄影棚只接受蓝红参赛者' end
+        if team~='blue' and team~='red' and not (team=='neutral' and self.playerAggro) then
+            return false,'召唤主角对手前请先开启主角仇恨'
+        end
         if self.state=='running' or self.state=='ended' or self.state=='error' then return false,'请先重置或清场，再调整阵容' end
-        local ok,why=o.rules();if not ok then return false,why end
+        local ok,why=o.rules(team);if not ok then return false,why end
         if not o.hold:recover() then return false,'定身恢复未确认' end
         return true
     end
     function self:spawned(actor,path,team)
+        -- Player opponents keep native AI and never join the held BvB roster.
+        if team=='neutral' then return self.playerAggro==true end
         local p=o.pose(actor);local maximum=o.maxHP(actor);local hp=o.hp(actor)
         if not pose(p) or not finite(maximum) or maximum<=0 or not finite(hp) then
             self.state='error';self.message='出生位置或生命不可读，请清场';return false
@@ -201,7 +205,7 @@ function Director.new(o)
         end
     end
     function self:status()
-        local s={bvb_editor_version=1,bvb_state=self.state,bvb_message=self.message,bvb_saved=self.saved~=nil,bvb_winner=self.winner or '',
+        local s={bvb_player_aggro=self.playerAggro==true,bvb_editor_version=1,bvb_state=self.state,bvb_message=self.message,bvb_saved=self.saved~=nil,bvb_winner=self.winner or '',
             bvb_seconds=self.started and math.max(0,(self.ended or o.now())-self.started) or 0,bvb_invalid=self.invalid}
         for _,team in ipairs({'blue','red'})do local t=(self.totals or {})[team] or {hp=0,max=0,alive=0,unknown=0,count=0}
             for k,v in pairs(t)do s['bvb_'..team..'_'..k]=v end

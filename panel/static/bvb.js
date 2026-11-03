@@ -7,7 +7,20 @@ const names={intro:'介绍 / 定身',running:'交战中',ended:'比赛结束',er
 const winners={blue:'蓝队胜',red:'红队胜',draw:'同时全灭'};
 const number=n=>Number(n||0).toLocaleString('zh-CN',{maximumFractionDigits:0});
 function message(text,error=false){$('message').textContent=text;$('message').classList.toggle('error',error);}
-function controls(){document.querySelectorAll('[data-action],#spawn-button').forEach(b=>b.disabled=!online||busy);window.bvbEditor?.status(online,busy,status?.game?.values||{});}
+function aggroControls(){
+  const v=status?.game?.values||{};
+  const supported=['true','false'].includes(v.bvb_player_aggro);
+  const requested=v.bvb_player_aggro==='true';
+  const ready=requested&&v.spectator_enabled==='false'&&v.spectator_flag_readback==='true'&&
+    v.spectator_pending_flags==='0'&&v.spectator_pending_relations==='0';
+  const camera=v.arena_free_camera==='true';
+  $('player-aggro').textContent=requested?'恢复拍摄无仇恨':'开启主角仇恨';
+  $('player-aggro').disabled=!online||busy||!supported||(camera&&!requested);
+  $('player-opponent').disabled=!online||busy||camera||!ready||v.bvb_state!=='intro'||!$('unit').value;
+  $('aggro-status').textContent=!online?'等待读档':!supported?'请加载新版 Mod':camera?'自由镜头保护中':requested?
+    (ready?'主角可被锁定':'等候主角仇恨资格和关系恢复'):'拍摄模式';
+}
+function controls(){aggroControls();document.querySelectorAll('[data-action],#spawn-button').forEach(b=>b.disabled=!online||busy);window.bvbEditor?.status(online,busy,status?.game?.values||{});}
 function render(s){
   status=s;token=s.csrf_token||token;online=Boolean(s.game&&s.game.online&&s.game.values&&s.game.values.game_ready==='true'&&String(s.game.values.build||'').startsWith('PhantomBZ_BvB'));
   const v=s.game?.values||{};
@@ -43,6 +56,14 @@ async function send(action,extra={}){
 document.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>send(b.dataset.action)));
 $('search').addEventListener('input',filter);
 $('spawn-button').addEventListener('click',()=>{const id=$('unit').value;if(id)send('spawn',{unit_id:id,team:$('team').value,count:Number($('count').value)});});
+$('player-aggro').addEventListener('click',()=>{
+  const requested=status?.game?.values?.bvb_player_aggro==='true';
+  send(requested?'bvb_aggro_off':'bvb_aggro_on');
+});
+$('player-opponent').addEventListener('click',()=>{
+  if($('unit').value&&$('spawn-form').reportValidity())
+    send('spawn',{unit_id:$('unit').value,team:'neutral',count:Number($('count').value)});
+});
 window.bvbEditor?.connect(send);
 async function poll(){
   try{const r=await fetch('/api/status',{cache:'no-store'});if(!r.ok)throw Error('状态读取失败');render(await r.json());

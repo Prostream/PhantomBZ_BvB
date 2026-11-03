@@ -29,7 +29,8 @@ function Engine.new(o)
             if not valid(a) then return false end
             return pcall(function()a.CustomTimeDilation=n end)
         end})
-    local function rules()
+    local self
+    local function rules(team)
         if o.difficulty:status().game~='Hard' then return false,'请先在游戏中选择逆天者，再召唤；工具不修改存档难度' end
         if o.cycle()~=0 then return false,'需要一周目存档（周目读回须为 0）' end
         local actions={}
@@ -41,7 +42,12 @@ function Engine.new(o)
             if o.immortal:status()[team] then actions[#actions+1]=function()return o.immortal:set(team,'OFF')end end
         end
         for _,action in ipairs(actions)do local r=action();if not r.ok then return false,r.message end end
-        if not o.spectator:status().enabled_requested then
+        local spectator=o.spectator:status()
+        if team=='neutral' and (spectator.enabled_requested or spectator.player_can_be_hatred_readback~=true
+            or spectator.pending_relations~=0 or spectator.pending_flags~=0) then
+            return false,'请退出自由镜头，并等待主角仇恨资格及关系恢复后再召唤'
+        end
+        if not self.playerAggro and not spectator.enabled_requested then
             local r=o.spectator:toggle();if not r.ok then return false,r.message end
         end
         return true
@@ -58,7 +64,7 @@ function Engine.new(o)
         end
         f:close();return found
     end
-    local self=Director.new({path=o.path,hold=hold,rules=rules,pose=pose,valid=valid,hp=o.hp,maxHP=o.maxHP,
+    self=Director.new({path=o.path,hold=hold,rules=rules,pose=pose,valid=valid,hp=o.hp,maxHP=o.maxHP,
         anchor=function()return pose(o.player())end,
         world=function()
             local w=o.world();if not U.valid(w) then return nil end
@@ -72,6 +78,16 @@ function Engine.new(o)
             return o.arena:spawn(path,team,1,{Translation={X=p.x,Y=p.y,Z=p.z},
                 Rotation={X=0,Y=0,Z=math.sin(yaw),W=math.cos(yaw)},Scale3D={X=1,Y=1,Z=1}})
         end})
+    function self:setPlayerAggro(enabled)
+        local result=o.spectator:setEnabled(not enabled)
+        if result.enabled_requested==(not enabled) then
+            self.playerAggro=enabled
+            if enabled then
+                result.message=result.ok and '已请求恢复主角仇恨，资格以面板读回为准' or '正在恢复原有仇恨关系，等待面板读回'
+            end
+        end
+        return result
+    end
     return self
 end
 return Engine

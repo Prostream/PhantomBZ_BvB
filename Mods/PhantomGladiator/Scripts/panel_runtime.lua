@@ -146,8 +146,18 @@ function Runtime.new(options)
         self.handlers.set_spawn_level=function(c)if c.key_spawn~='HOME' and not (c.key_spawn=='UNIT' and (c.key_start or '')=='')then return reject()end;return level(c)end
         local immortal=self.handlers.set_team_immortal
         self.handlers.set_team_immortal=function(c)if c.key_start~='OFF' then return reject()end;return immortal(c)end
-        local spectatorToggle=self.handlers.toggle_spectator
-        self.handlers.toggle_spectator=function(c)if options.bvb.state=='running' then return {ok=false,message='比赛中保持主角无仇恨'}end;return spectatorToggle(c)end
+        local function setPlayerAggro(enabled)
+            local why=readyError()
+            if why then return {ok=false,message=why} end
+            if enabled and options.camera then
+                local camera=options.camera:status()
+                if camera.active or camera.pending then return {ok=false,message='请先恢复正常镜头，等待观战保护解除'} end
+            end
+            return options.bvb:setPlayerAggro(enabled)
+        end
+        self.handlers.bvb_aggro_on=function()return setPlayerAggro(true)end
+        self.handlers.bvb_aggro_off=function()return setPlayerAggro(false)end
+        self.handlers.toggle_spectator=function()return setPlayerAggro(options.spectator:status().enabled_requested)end
         self.handlers.bvb_save=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:save()end
         self.handlers.bvb_reset=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:restore(false)end
         self.handlers.bvb_place=function()local why=readyError();if why then return {ok=false,message=why}end;return options.bvb:restore(true)end

@@ -26,6 +26,8 @@ License: [MIT](LICENSE).
 
 ## Getting started
 
+To fight the four Ghost Officers yourself, load your save, exit the free camera, and click **开启主角仇恨**. Once **主角可被锁定** appears, select Huoliuxing, Zhanqi, Gouhun, and Duanchang in turn and click **召唤为主角对手** for each. Each opponent can act as soon as it spawns. Use **清场** to clear the encounter and **恢复拍摄无仇恨** to return to filming. Spawns and match resets respect your aggro choice for the current mod session.
+
 With a PBZ-compatible UE4SS installation and Python 3.10+ already available, run `Install-BvB.ps1` with your game directory, then run `Start-BvB.ps1`. Open [the local control panel](http://127.0.0.1:8766/bvb.html).
 
 The initial preset is Huoliuxing (火流星), Zhanqi (斩骑), Gouhun (勾魂), and Duanchang (断肠) versus Biyuan's Remains (毕远残躯), Bihai's Remains (碧海残躯), Wu Lengshuang (乌冷霜), and Yubi (玉璧). These names are transliterations or descriptive translations for identification, not a claim about the game's official English localization. Use a first-playthrough save on 逆天者 difficulty (`Hard` internally). Start with one boss on each side to check the introduction hold and combat start before trying the full preset.

@@ -105,7 +105,7 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse((self.bridge.runtime/'catalog.tsv').exists(),'fallback is read-only')
 
     def test_bvb_commands_use_ready_gate_and_ack(self):
-        for action in ('bvb_save', 'bvb_reset', 'bvb_place', 'bvb_preset'):
+        for action in ('bvb_save', 'bvb_reset', 'bvb_place', 'bvb_preset', 'bvb_aggro_on', 'bvb_aggro_off'):
             self.game(ready=False)
             command = self.bridge.enqueue({'action': action})
             self.bridge.tick()
