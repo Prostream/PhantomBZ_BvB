@@ -4,6 +4,8 @@
 
 基于 **[LingYi-Liang / 泠依_01 的 PhantomGladiator](https://github.com/LingYi-Liang/PhantomGladiator)** 二次开发，感谢上游的原生 NPC 战斗、数值研究、投技适配及自由镜头实现。保留 MIT 许可、版权声明及提交历史。[来源版本](UPSTREAM.md) · [原版说明](docs/UPSTREAM_README.md)
 
+项目公开开源，欢迎有需要的朋友直接下载或克隆本仓库，按下方说明安装使用，也可以按 MIT 许可修改；再分发时请保留许可与版权声明。当前提供源码和安装脚本，需要已有 PBZ 适配的 UE4SS 与 Python，并非包含全部依赖的一键安装包。
+
 ## 首版目标
 
 - 蓝红势力战：完整阵营关系，原生 AI、命中、伤害和死亡。

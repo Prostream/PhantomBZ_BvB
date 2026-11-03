@@ -1,6 +1,6 @@
 # 首版需求与比赛规则
 
-2026-11-02：私有独立仓库 Prostream/PhantomBZ_BvB，基于 PhantomGladiator v0.37.6。
+2026-11-02：独立仓库 Prostream/PhantomBZ_BvB，基于 PhantomGladiator v0.37.6。初期私有开发，同日按用户要求公开开源。
 
 ## 已确认
 
